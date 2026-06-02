@@ -1,0 +1,660 @@
+"""rsplot API 完整函数定义
+
+此模块包含 rsplot 库所有函数的 Python 包装，显示完整的参数签名和默认值。
+"""
+
+# 使用别名导入原始模块，避免与包装函数重名
+from . import rsplot as _rsplot
+# 导入原始类
+from .rsplot import Figure, Axes
+
+
+# ==================== 绘图函数 ====================
+
+def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
+    """绘制折线图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        label: 图例标签 (默认: None)
+        color: 颜色 (默认: None, 使用默认色循环)
+        linestyle: 线型 (默认: None, 实线)
+        marker: 标记样式 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.plot(x, y, label, color, linestyle, marker, linewidth)
+
+
+def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
+    """绘制散点图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        s: 点大小 (默认: 20.0)
+        c: 颜色 (默认: None)
+        marker: 标记样式 (默认: 'o')
+        label: 图例标签 (默认: None)
+        alpha: 透明度 (默认: 1.0)
+    """
+    return _rsplot.scatter(x, y, s, c, marker, label, alpha)
+
+
+def bar(x, height, width=0.8, color=None, label=None):
+    """绘制柱状图
+    
+    Args:
+        x: x 轴位置
+        height: 柱高度
+        width: 柱宽度 (默认: 0.8)
+        color: 颜色 (默认: None)
+        label: 图例标签 (默认: None)
+    """
+    return _rsplot.bar(x, height, width, color, label)
+
+
+def barh(y, width, height=0.8, color=None, label=None):
+    """绘制水平柱状图
+    
+    Args:
+        y: y 轴位置
+        width: 柱宽度
+        height: 柱高度 (默认: 0.8)
+        color: 颜色 (默认: None)
+        label: 图例标签 (默认: None)
+    """
+    return _rsplot.barh(y, width, height, color, label)
+
+
+def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None):
+    """绘制直方图
+    
+    Args:
+        x: 数据
+        bins: 区间数 (默认: 10)
+        density: 是否归一化 (默认: False)
+        label: 图例标签 (默认: None)
+        alpha: 透明度 (默认: 0.7)
+        color: 颜色 (默认: None)
+    """
+    return _rsplot.hist(x, bins, density, label, alpha, color)
+
+
+def pie(x, labels=None, colors=None, autopct=False):
+    """绘制饼图
+    
+    Args:
+        x: 数据
+        labels: 标签列表 (默认: None)
+        colors: 颜色列表 (默认: None)
+        autopct: 是否显示百分比 (默认: False)
+    """
+    return _rsplot.pie(x, labels, colors, autopct)
+
+
+def boxplot(x, labels=None, vert=True):
+    """绘制箱线图
+    
+    Args:
+        x: 数据列表
+        labels: 标签列表 (默认: None)
+        vert: 是否垂直显示 (默认: True)
+    """
+    return _rsplot.boxplot(x, labels, vert)
+
+
+def fill_between(x, y1, y2=None, color=None, alpha=1.0, label=None):
+    """填充区域
+    
+    Args:
+        x: x 轴数据
+        y1: 上边界
+        y2: 下边界 (默认: None, 0)
+        color: 颜色 (默认: None)
+        alpha: 透明度 (默认: 1.0)
+        label: 图例标签 (默认: None)
+    """
+    return _rsplot.fill_between(x, y1, y2, color, alpha, label)
+
+
+def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0):
+    """绘制误差棒图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        yerr: y 方向误差 (默认: None)
+        xerr: x 方向误差 (默认: None)
+        fmt: 标记格式 (默认: 'o')
+        color: 颜色 (默认: None)
+        label: 图例标签 (默认: None)
+        capsize: 误差帽大小 (默认: 3.0)
+    """
+    return _rsplot.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
+
+
+def stem(x, y, linefmt=None, markerfmt=None, label=None):
+    """绘制茎叶图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        linefmt: 茎线样式 (默认: None)
+        markerfmt: 标记样式 (默认: None)
+        label: 图例标签 (默认: None)
+    """
+    return _rsplot.stem(x, y, linefmt, markerfmt, label)
+
+
+def step(x, y, where_='pre', label=None, color=None, linestyle='-', linewidth=1.5):
+    """绘制阶梯图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        where_: 阶梯位置 ('pre', 'post', 'mid', 默认: 'pre')
+        label: 图例标签 (默认: None)
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: '-')
+        linewidth: 线宽 (默认: 1.5)
+    """
+    return _rsplot.step(x, y, where_, label, color, linestyle, linewidth)
+
+
+def imshow(x, cmap='gray', aspect='auto'):
+    """显示图像
+    
+    Args:
+        x: 2D 数据数组
+        cmap: 色图 (默认: 'gray', 可选: 'hot', 'cool')
+        aspect: 纵横比 (默认: 'auto', 可选: 'equal')
+    """
+    return _rsplot.imshow(x, cmap, aspect)
+
+
+def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians=True):
+    """绘制小提琴图
+    
+    Args:
+        dataset: 数据集，可以是数组列表或 2D 数组
+        positions: 位置数组 (默认: None)
+        widths: 小提琴宽度 (默认: 0.5)
+        showmeans: 是否显示均值 (默认: False)
+        showmedians: 是否显示中位数 (默认: True)
+    """
+    try:
+        return _rsplot.violinplot(dataset, positions, widths, showmeans, showmedians)
+    except AttributeError:
+        import warnings
+        warnings.warn("violinplot is not yet implemented in rsplot, using boxplot instead")
+        return boxplot(dataset)
+
+
+def hexbin(x, y, gridsize=100, cmap='hot', bins='log', mincnt=1):
+    """绘制六边形分箱图
+    
+    Args:
+        x: x 坐标数组
+        y: y 坐标数组
+        gridsize: 网格大小 (默认: 100)
+        cmap: 色图 (默认: 'hot')
+        bins: 分箱方式 (默认: 'log')
+        mincnt: 最小计数 (默认: 1)
+    """
+    try:
+        return _rsplot.hexbin(x, y, gridsize, cmap, bins, mincnt)
+    except AttributeError:
+        import warnings
+        warnings.warn("hexbin is not yet implemented in rsplot, using scatter instead")
+        return scatter(x, y, s=10, alpha=0.5)
+
+
+def contour(X, Y, Z, levels=None, colors=None, linestyles=None):
+    """绘制等高线图
+    
+    Args:
+        X: x 坐标网格
+        Y: y 坐标网格
+        Z: z 值数组
+        levels: 等高线级别 (默认: None)
+        colors: 颜色 (默认: None)
+        linestyles: 线型 (默认: None)
+    """
+    try:
+        return _rsplot.contour(X, Y, Z, levels, colors, linestyles)
+    except AttributeError:
+        import warnings
+        warnings.warn("contour is not yet implemented in rsplot")
+        return None
+
+
+def contourf(X, Y, Z, levels=None, cmap='coolwarm', alpha=1.0):
+    """绘制填充等高线图
+    
+    Args:
+        X: x 坐标网格
+        Y: y 坐标网格
+        Z: z 值数组
+        levels: 等高线级别 (默认: None)
+        cmap: 色图 (默认: 'coolwarm')
+        alpha: 透明度 (默认: 1.0)
+    """
+    try:
+        return _rsplot.contourf(X, Y, Z, levels, cmap, alpha)
+    except AttributeError:
+        import warnings
+        warnings.warn("contourf is not yet implemented in rsplot")
+        return None
+
+
+def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
+    """绘制堆叠面积图
+    
+    Args:
+        x: x 轴数据
+        *args: 多个 y 数据数组
+        labels: 标签列表 (默认: None)
+        colors: 颜色列表 (默认: None)
+        alpha: 透明度 (默认: 1.0)
+    """
+    try:
+        return _rsplot.stackplot(x, args, labels, colors, alpha)
+    except AttributeError:
+        import warnings
+        warnings.warn("stackplot is not yet implemented in rsplot")
+        return None
+
+
+# ==================== 辅助元素 ====================
+
+def text(x, y, text, fontsize=None, color=None):
+    """添加文本
+    
+    Args:
+        x: x 位置
+        y: y 位置
+        text: 文本内容
+        fontsize: 字体大小 (默认: None)
+        color: 颜色 (默认: None)
+    """
+    return _rsplot.text(x, y, text, fontsize, color)
+
+
+def axhline(y=None, color=None, linestyle=None, linewidth=None):
+    """添加水平参考线
+    
+    Args:
+        y: y 位置 (默认: None, 0)
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.axhline(y, color, linestyle, linewidth)
+
+
+def axvline(x=None, color=None, linestyle=None, linewidth=None):
+    """添加垂直参考线
+    
+    Args:
+        x: x 位置 (默认: None, 0)
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.axvline(x, color, linestyle, linewidth)
+
+
+def hlines(y, xmin, xmax, color=None, linestyle=None, linewidth=None):
+    """绘制水平线段
+    
+    Args:
+        y: y 位置
+        xmin: 线段起点 x
+        xmax: 线段终点 x
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.axhline(y, color, linestyle, linewidth)
+
+
+def vlines(x, ymin, ymax, color=None, linestyle=None, linewidth=None):
+    """绘制垂直线段
+    
+    Args:
+        x: x 位置
+        ymin: 线段起点 y
+        ymax: 线段终点 y
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.axvline(x, color, linestyle, linewidth)
+
+
+# ==================== 配置函数 ====================
+
+def xlabel(text):
+    """设置 x 轴标签
+    
+    Args:
+        text: 标签文本
+    """
+    return _rsplot.xlabel(text)
+
+
+def ylabel(text):
+    """设置 y 轴标签
+    
+    Args:
+        text: 标签文本
+    """
+    return _rsplot.ylabel(text)
+
+
+def title(text):
+    """设置图表标题
+    
+    Args:
+        text: 标题文本
+    """
+    return _rsplot.title(text)
+
+
+def grid(visible=True):
+    """显示/隐藏网格
+    
+    Args:
+        visible: 是否显示网格 (默认: True)
+    """
+    return _rsplot.grid(visible)
+
+
+def legend(loc='best'):
+    """显示图例
+    
+    Args:
+        loc: 位置 (默认: 'best', 可选: 'upper right', 'upper left', 
+              'lower right', 'lower left', 'upper center')
+    """
+    return _rsplot.legend(loc)
+
+
+def xlim(left, right):
+    """设置 x 轴范围
+    
+    Args:
+        left: 左边界
+        right: 右边界
+    """
+    return _rsplot.xlim(left, right)
+
+
+def ylim(bottom, top):
+    """设置 y 轴范围
+    
+    Args:
+        bottom: 下边界
+        top: 上边界
+    """
+    return _rsplot.ylim(bottom, top)
+
+
+def xticks(ticks=None, labels=None):
+    """设置 x 轴刻度
+    
+    Args:
+        ticks: 刻度位置列表 (默认: None)
+        labels: 刻度标签列表 (默认: None)
+    """
+    return _rsplot.xticks(ticks, labels)
+
+
+def yticks(ticks=None, labels=None):
+    """设置 y 轴刻度
+    
+    Args:
+        ticks: 刻度位置列表 (默认: None)
+        labels: 刻度标签列表 (默认: None)
+    """
+    return _rsplot.yticks(ticks, labels)
+
+
+# ==================== 子图与布局 ====================
+
+def subplots(nrows=1, ncols=1):
+    """创建子图网格
+    
+    Args:
+        nrows: 行数 (默认: 1)
+        ncols: 列数 (默认: 1)
+    
+    Returns:
+        tuple: (Figure, axes_list)
+    """
+    return _rsplot.subplots(nrows, ncols)
+
+
+def subplot(nrows, ncols, index):
+    """创建单个子图
+    
+    Args:
+        nrows: 总行数
+        ncols: 总列数
+        index: 子图索引 (从1开始)
+    
+    Returns:
+        Axes: 创建的子图
+    """
+    return _rsplot.subplot(nrows, ncols, index)
+
+
+def tight_layout():
+    """自动调整子图布局"""
+    return _rsplot.tight_layout()
+
+
+def set_size(width, height):
+    """设置图形尺寸
+    
+    Args:
+        width: 宽度 (像素)
+        height: 高度 (像素)
+    """
+    return _rsplot.set_size(width, height)
+
+
+def twinx():
+    """创建共享 x 轴的双 y 轴
+    
+    Returns:
+        Axes: 新的 y 轴
+    """
+    return _rsplot.twinx()
+
+
+def twiny():
+    """创建共享 y 轴的双 x 轴
+    
+    Returns:
+        Axes: 新的 x 轴
+    """
+    return _rsplot.twiny()
+
+
+# ==================== 图形控制 ====================
+
+def figure():
+    """创建新图形
+    
+    Returns:
+        Figure: 创建的图形对象
+    """
+    return _rsplot.figure()
+
+
+def savefig(filename):
+    """保存图形
+    
+    Args:
+        filename: 文件名 (支持 .svg 和 .png)
+    """
+    return _rsplot.savefig(filename)
+
+
+def show():
+    """显示图形 (保存到默认位置)"""
+    return _rsplot.show()
+
+
+def gca():
+    """获取当前 Axes
+    
+    Returns:
+        Axes: 当前坐标轴
+    """
+    return _rsplot.gca()
+
+
+def gcf():
+    """获取当前 Figure
+    
+    Returns:
+        Figure: 当前图形对象
+    """
+    return _rsplot.gcf()
+
+
+def cla():
+    """清空当前 Axes"""
+    return _rsplot.cla()
+
+
+def clf():
+    """清空当前 Figure"""
+    return _rsplot.clf()
+
+
+def close():
+    """关闭当前 Figure"""
+    return _rsplot.close()
+
+
+# ==================== 对数坐标 ====================
+
+def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
+    """x 轴对数坐标折线图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        label: 图例标签 (默认: None)
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: None)
+        marker: 标记样式 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.semilogx(x, y, label, color, linestyle, marker, linewidth)
+
+
+def semilogy(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
+    """y 轴对数坐标折线图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        label: 图例标签 (默认: None)
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: None)
+        marker: 标记样式 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.semilogy(x, y, label, color, linestyle, marker, linewidth)
+
+
+def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
+    """双对数坐标折线图
+    
+    Args:
+        x: x 轴数据
+        y: y 轴数据
+        label: 图例标签 (默认: None)
+        color: 颜色 (默认: None)
+        linestyle: 线型 (默认: None)
+        marker: 标记样式 (默认: None)
+        linewidth: 线宽 (默认: None)
+    """
+    return _rsplot.loglog(x, y, label, color, linestyle, marker, linewidth)
+
+
+# ==================== 样式控制 ====================
+
+def use(backend):
+    """选择后端 (兼容 matplotlib API)
+    
+    Args:
+        backend: 后端名称 (如 'Agg', 'SVG')
+    """
+    _rsplot.use_(backend)
+
+
+def xscale(scale):
+    """设置 x 轴缩放
+    Args:
+        scale: 缩放类型 ('linear', 'log', 'symlog', 'logit')
+    """
+    return _rsplot.xscale(scale)
+
+
+def yscale(scale):
+    """设置 y 轴缩放
+    Args:
+        scale: 缩放类型 ('linear', 'log', 'symlog', 'logit')
+    """
+    return _rsplot.yscale(scale)
+
+
+def margins(x_margin=None, y_margin=None):
+    """设置自动缩放的边距"""
+    return _rsplot.margins(x_margin, y_margin)
+
+
+def box(on=None):
+    """设置坐标轴边框"""
+    return _rsplot.box_(on)
+
+
+def minorticks_on():
+    """显示次要刻度"""
+    return _rsplot.minorticks_on()
+
+
+def minorticks_off():
+    """隐藏次要刻度"""
+    return _rsplot.minorticks_off()
+
+
+# ==================== 模块导出 ====================
+
+__all__ = [
+    # 绘图函数
+    'plot', 'scatter', 'bar', 'barh', 'hist', 'pie', 'boxplot',
+    'fill_between', 'errorbar', 'stem', 'step', 'imshow',
+    # 辅助元素
+    'text', 'axhline', 'axvline', 'hlines', 'vlines',
+    # 配置函数
+    'xlabel', 'ylabel', 'title', 'grid', 'legend',
+    'xlim', 'ylim', 'xticks', 'yticks',
+    'xscale', 'yscale', 'margins', 'box', 'minorticks_on', 'minorticks_off',
+    # 子图与布局
+    'subplots', 'subplot', 'tight_layout', 'set_size', 'twinx', 'twiny',
+    # 图形控制
+    'figure', 'savefig', 'show', 'gca', 'cla', 'clf', 'close', 'gcf',
+    # 对数坐标
+    'semilogx', 'semilogy', 'loglog',
+    # 样式
+    'use',
+    # 类
+    'Figure', 'Axes',
+]
