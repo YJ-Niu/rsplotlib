@@ -43,6 +43,8 @@ pub struct Axes {
     pub grid_linestyle: Option<String>,
     pub grid_axis: String,
     pub minor_grid_visible: bool,
+    pub minor_grid_x_visible: bool,
+    pub minor_grid_y_visible: bool,
     pub minor_grid_color: Option<String>,
     pub minor_grid_linewidth: Option<f64>,
     pub minor_grid_linestyle: Option<String>,
@@ -90,6 +92,8 @@ impl Clone for Axes {
             grid_linestyle: self.grid_linestyle.clone(),
             grid_axis: self.grid_axis.clone(),
             minor_grid_visible: self.minor_grid_visible,
+            minor_grid_x_visible: self.minor_grid_x_visible,
+            minor_grid_y_visible: self.minor_grid_y_visible,
             minor_grid_color: self.minor_grid_color.clone(),
             minor_grid_linewidth: self.minor_grid_linewidth,
             minor_grid_linestyle: self.minor_grid_linestyle.clone(),
@@ -141,6 +145,8 @@ impl Axes {
             grid_linestyle: None,
             grid_axis: "both".to_string(),
             minor_grid_visible: false,
+            minor_grid_x_visible: false,
+            minor_grid_y_visible: false,
             minor_grid_color: None,
             minor_grid_linewidth: None,
             minor_grid_linestyle: None,
@@ -1042,13 +1048,17 @@ impl Axes {
                 .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
         }).flatten().or_else(|| self.yticks_val.clone());
 
-        let computed_xminor: Option<Vec<f64>> = self.xaxis_minor_locator.as_ref().map(|locator| {
+        const MAX_MAJOR_TICKS_FOR_MINOR: usize = 30;
+        const MAX_MINOR_TICKS: usize = 100;
+
+        let should_compute_x_minor = self.minor_grid_x_visible || (!self.minor_grid_x_visible && !self.minor_grid_y_visible && self.minor_grid_visible);
+        let computed_xminor: Option<Vec<f64>> = self.xaxis_minor_locator.as_ref().and_then(|locator| {
             locator.bind(py).call_method1("tick_values", (x_min, x_max))
                 .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
-        }).flatten().or_else(|| {
-            if self.minor_grid_visible {
+        }).filter(|ticks| ticks.len() <= MAX_MINOR_TICKS).or_else(|| {
+            if should_compute_x_minor {
                 computed_xticks.as_ref().and_then(|major_ticks| {
-                    if major_ticks.len() < 2 { return None; }
+                    if major_ticks.len() < 2 || major_ticks.len() > MAX_MAJOR_TICKS_FOR_MINOR { return None; }
                     let mut minor = Vec::new();
                     for i in 0..major_ticks.len().saturating_sub(1) {
                         let spacing = major_ticks[i + 1] - major_ticks[i];
@@ -1062,20 +1072,21 @@ impl Axes {
                             v += step;
                         }
                     }
-                    if minor.is_empty() { None } else { Some(minor) }
+                    if minor.is_empty() || minor.len() > MAX_MINOR_TICKS { None } else { Some(minor) }
                 })
             } else {
                 None
             }
         });
 
-        let computed_yminor: Option<Vec<f64>> = self.yaxis_minor_locator.as_ref().map(|locator| {
+        let should_compute_y_minor = self.minor_grid_y_visible || (!self.minor_grid_x_visible && !self.minor_grid_y_visible && self.minor_grid_visible);
+        let computed_yminor: Option<Vec<f64>> = self.yaxis_minor_locator.as_ref().and_then(|locator| {
             locator.bind(py).call_method1("tick_values", (y_min, y_max))
                 .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
-        }).flatten().or_else(|| {
-            if self.minor_grid_visible {
+        }).filter(|ticks| ticks.len() <= MAX_MINOR_TICKS).or_else(|| {
+            if should_compute_y_minor {
                 computed_yticks.as_ref().and_then(|major_ticks| {
-                    if major_ticks.len() < 2 { return None; }
+                    if major_ticks.len() < 2 || major_ticks.len() > MAX_MAJOR_TICKS_FOR_MINOR { return None; }
                     let mut minor = Vec::new();
                     for i in 0..major_ticks.len().saturating_sub(1) {
                         let spacing = major_ticks[i + 1] - major_ticks[i];
@@ -1089,7 +1100,7 @@ impl Axes {
                             v += step;
                         }
                     }
-                    if minor.is_empty() { None } else { Some(minor) }
+                    if minor.is_empty() || minor.len() > MAX_MINOR_TICKS { None } else { Some(minor) }
                 })
             } else {
                 None
@@ -1102,21 +1113,16 @@ impl Axes {
         let major_color = if let Some(ref c) = self.grid_color {
             parse_color(c, 0).unwrap_or(RgbColor(200, 200, 200))
         } else {
-            RgbColor(200, 200, 200)
+            RgbColor(128, 128, 128)
         };
         let major_lw_f64 = self.grid_linewidth.unwrap_or(0.8);
-        let _major_lw_u32 = (major_lw_f64.max(0.1)).ceil() as u32;
-
+        
         let minor_color = if let Some(ref c) = self.minor_grid_color {
             parse_color(c, 0).unwrap_or(RgbColor(230, 230, 230))
         } else {
-            RgbColor(230, 230, 230)
+            RgbColor(120, 122, 120)
         };
         let minor_lw_f64 = self.minor_grid_linewidth.unwrap_or(0.4);
-        let _minor_lw_u32 = (minor_lw_f64.max(0.1)).ceil() as u32;
-
-        let grid_ls = self.grid_linestyle.as_deref().unwrap_or("-");
-        let minor_ls = self.minor_grid_linestyle.as_deref().unwrap_or("--");
 
         let label_size: i32 = self.tick_labelsize as i32;
         mesh_builder
@@ -1177,7 +1183,7 @@ impl Axes {
                 if let Some(ref ticks) = computed_xticks {
                     for &tx in ticks {
                         if tx >= x_min && tx <= x_max {
-                            draw_grid_line(chart, tx, y_min, tx, y_max, major_color, major_lw_f64, grid_ls)?;
+                            draw_grid_line(chart, tx, y_min, tx, y_max, major_color, major_lw_f64, "-")?;
                         }
                     }
                 }
@@ -1186,7 +1192,7 @@ impl Axes {
                 if let Some(ref ticks) = computed_yticks {
                     for &ty in ticks {
                         if ty >= y_min && ty <= y_max {
-                            draw_grid_line(chart, x_min, ty, x_max, ty, major_color, major_lw_f64, grid_ls)?;
+                            draw_grid_line(chart, x_min, ty, x_max, ty, major_color, major_lw_f64, "-")?;
                         }
                     }
                 }
@@ -1194,17 +1200,21 @@ impl Axes {
         }
 
         if self.minor_grid_visible {
-            if let Some(ref ticks) = computed_xminor {
-                for &tx in ticks {
-                    if tx > x_min && tx < x_max {
-                        draw_grid_line(chart, tx, y_min, tx, y_max, minor_color, minor_lw_f64, minor_ls)?;
+            if self.minor_grid_x_visible || (!self.minor_grid_x_visible && !self.minor_grid_y_visible) {
+                if let Some(ref ticks) = computed_xminor {
+                    for &tx in ticks {
+                        if tx > x_min && tx < x_max {
+                            draw_grid_line(chart, tx, y_min, tx, y_max, minor_color, minor_lw_f64, "-")?;
+                        }
                     }
                 }
             }
-            if let Some(ref ticks) = computed_yminor {
-                for &ty in ticks {
-                    if ty > y_min && ty < y_max {
-                        draw_grid_line(chart, x_min, ty, x_max, ty, minor_color, minor_lw_f64, minor_ls)?;
+            if self.minor_grid_y_visible || (!self.minor_grid_x_visible && !self.minor_grid_y_visible) {
+                if let Some(ref ticks) = computed_yminor {
+                    for &ty in ticks {
+                        if ty > y_min && ty < y_max {
+                            draw_grid_line(chart, x_min, ty, x_max, ty, minor_color, minor_lw_f64, "-")?;
+                        }
                     }
                 }
             }
@@ -1222,44 +1232,22 @@ impl Axes {
                             })
                             .collect();
                         if points.len() >= 2 {
-                            if linestyle == "-" {
-                                let style = shape_style(col, *linewidth, linestyle);
-                                chart.draw_series(LineSeries::new(points.clone(), style))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw line: {}", e)))?;
-                                if solid_capstyle == "round" && *linewidth > 1.0 && marker.as_ref().map_or(true, |m| m.is_empty()) {
-                                    let rgb = to_plotters_color(col);
-                                    let circle_r = *linewidth / 2.0;
-                                    let n_seg = 16;
-                                    let cap_points = [points.first().unwrap().clone(), points.last().unwrap().clone()];
-                                    for pt in cap_points.iter() {
-                                        let mut pts = Vec::with_capacity(n_seg + 1);
-                                        for i in 0..=n_seg {
-                                            let angle = i as f64 * 2.0 * std::f64::consts::PI / n_seg as f64;
-                                            pts.push((pt.0 + circle_r * angle.cos(), pt.1 + circle_r * angle.sin()));
-                                        }
-                                        chart.draw_series(std::iter::once(PathElement::new(pts, rgb.filled())))
-                                            .map_err(|e| PyRuntimeError::new_err(format!("Cap path: {}", e)))?;
+                            let style = shape_style(col, *linewidth, linestyle);
+                            chart.draw_series(LineSeries::new(points.clone(), style))
+                                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw line: {}", e)))?;
+                            if solid_capstyle == "round" && *linewidth > 1.0 && marker.as_ref().map_or(true, |m| m.is_empty()) {
+                                let rgb = to_plotters_color(col);
+                                let circle_r = *linewidth / 2.0;
+                                let n_seg = 16;
+                                let cap_points = [points.first().unwrap().clone(), points.last().unwrap().clone()];
+                                for pt in cap_points.iter() {
+                                    let mut pts = Vec::with_capacity(n_seg + 1);
+                                    for i in 0..=n_seg {
+                                        let angle = i as f64 * 2.0 * std::f64::consts::PI / n_seg as f64;
+                                        pts.push((pt.0 + circle_r * angle.cos(), pt.1 + circle_r * angle.sin()));
                                     }
-                                }
-                            } else if linestyle == "--" {
-                                let rgb = to_plotters_color(col);
-                                let lw_u32 = (linewidth.max(0.1)).ceil() as u32;
-                                let style = rgb.stroke_width(lw_u32);
-                                chart.draw_series(DashedLineSeries::new(
-                                    points.clone(), 6 as f64, 3 as f64, style,
-                                )).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dashed line: {}", e)))?;
-                            } else if linestyle == ":" {
-                                let rgb = to_plotters_color(col);
-                                let lw_u32 = (linewidth.max(0.1)).ceil() as u32;
-                                let style = rgb.stroke_width(lw_u32);
-                                chart.draw_series(DashedLineSeries::new(
-                                    points.clone(), 2 as f64, 4 as f64, style,
-                                )).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dotted line: {}", e)))?;
-                            } else {
-                                for i in 0..points.len() - 1 {
-                                    let (x1, y1) = points[i];
-                                    let (x2, y2) = points[i + 1];
-                                    draw_grid_line(chart, x1, y1, x2, y2, col, *linewidth, linestyle)?;
+                                    chart.draw_series(std::iter::once(PathElement::new(pts, rgb.filled())))
+                                        .map_err(|e| PyRuntimeError::new_err(format!("Cap path: {}", e)))?;
                                 }
                             }
                         }
@@ -1578,31 +1566,9 @@ impl Axes {
                             points.push((x[x.len() - 1], y[y.len() - 1]));
                         }
                     }
-                    if linestyle == "-" || linestyle.is_empty() {
-                        let style = shape_style(col, *linewidth, linestyle);
-                        chart.draw_series(LineSeries::new(points.clone(), style))
-                            .map_err(|e| PyRuntimeError::new_err(format!("Step draw: {}", e)))?;
-                    } else if linestyle == "--" {
-                        let rgb = to_plotters_color(col);
-                        let lw_u32 = (linewidth.max(0.1)).ceil() as u32;
-                        let style = rgb.stroke_width(lw_u32);
-                        chart.draw_series(DashedLineSeries::new(
-                            points, 6 as f64, 3 as f64, style,
-                        )).map_err(|e| PyRuntimeError::new_err(format!("Step dashed: {}", e)))?;
-                    } else if linestyle == ":" {
-                        let rgb = to_plotters_color(col);
-                        let lw_u32 = (linewidth.max(0.1)).ceil() as u32;
-                        let style = rgb.stroke_width(lw_u32);
-                        chart.draw_series(DashedLineSeries::new(
-                            points, 2 as f64, 4 as f64, style,
-                        )).map_err(|e| PyRuntimeError::new_err(format!("Step dotted: {}", e)))?;
-                    } else {
-                        for i in 0..points.len() - 1 {
-                            let (x1, y1) = points[i];
-                            let (x2, y2) = points[i + 1];
-                            draw_grid_line(chart, x1, y1, x2, y2, col, *linewidth, linestyle)?;
-                        }
-                    }
+                    let style = shape_style(col, *linewidth, linestyle);
+                    chart.draw_series(LineSeries::new(points, style))
+                        .map_err(|e| PyRuntimeError::new_err(format!("Step draw: {}", e)))?;
                 }
                 PlotElement::BoxPlot { data, labels, .. } => {
                     let box_width = 0.6;

@@ -1,4 +1,4 @@
-"""rsplot.gridspec - Matplotlib GridSpec 兼容接口"""
+"""rsplotlib.gridspec - Matplotlib GridSpec 兼容接口"""
 
 
 class GridSpec:

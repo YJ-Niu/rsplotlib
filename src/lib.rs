@@ -15,7 +15,7 @@ use crate::axes::Axes;
 use crate::figure::Figure;
 
 #[pymodule]
-fn rsplot(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(target_os = "macos")]
     {
         if let Ok(font_data) = std::fs::read("/System/Library/Fonts/Supplemental/Andale Mono.ttf") {

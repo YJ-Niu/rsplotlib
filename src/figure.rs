@@ -133,14 +133,16 @@ impl Figure {
             let backend = BitMapBackend::new(filename, (self.width, self.height));
             self.render_to_backend(py, backend, self.width, self.height)
         } else {
-            let backend = SVGBackend::new(filename, (self.width, self.height));
-            self.render_to_backend(py, backend, self.width, self.height)?;
-            let w_in = self.width as f64 / self.dpi;
-            let h_in = self.height as f64 / self.dpi;
+            let svg_w = (self.width as f64 * 72.0 / self.dpi).round() as u32;
+            let svg_h = (self.height as f64 * 72.0 / self.dpi).round() as u32;
+            let backend = SVGBackend::new(filename, (svg_w, svg_h));
+            self.render_to_backend(py, backend, svg_w, svg_h)?;
+            let w_in = svg_w as f64 / 72.0;
+            let h_in = svg_h as f64 / 72.0;
             if let Ok(content) = std::fs::read_to_string(filename) {
                 let content = content
-                    .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{:.4}in\"", w_in), 1)
-                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", h_in), 1);
+                    .replacen(&format!("width=\"{}\"", svg_w), &format!("width=\"{:.4}in\"", w_in), 1)
+                    .replacen(&format!("height=\"{}\"", svg_h), &format!("height=\"{:.4}in\"", h_in), 1);
                 let _ = std::fs::write(filename, content);
             }
             Ok(())

@@ -1,12 +1,12 @@
-"""rsplot API 完整函数定义
+"""rsplotlib API 完整函数定义
 
-此模块包含 rsplot 库所有函数的 Python 包装，显示完整的参数签名和默认值。
+此模块包含 rsplotlib 库所有函数的 Python 包装，显示完整的参数签名和默认值。
 """
 
 # 使用别名导入原始模块，避免与包装函数重名
-from . import rsplot as _rsplot
+from . import rsplotlib as _rsplotlib
 # 导入原始类
-from .rsplot import Figure, Axes
+from .rsplotlib import Figure, Axes
 
 
 # ==================== 绘图函数 ====================
@@ -23,7 +23,7 @@ def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=No
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.plot(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.plot(x, y, label, color, linestyle, marker, linewidth)
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
@@ -38,7 +38,7 @@ def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
         label: 图例标签 (默认: None)
         alpha: 透明度 (默认: 1.0)
     """
-    return _rsplot.scatter(x, y, s, c, marker, label, alpha)
+    return _rsplotlib.scatter(x, y, s, c, marker, label, alpha)
 
 
 def bar(x, height, width=0.8, color=None, label=None):
@@ -51,7 +51,7 @@ def bar(x, height, width=0.8, color=None, label=None):
         color: 颜色 (默认: None)
         label: 图例标签 (默认: None)
     """
-    return _rsplot.bar(x, height, width, color, label)
+    return _rsplotlib.bar(x, height, width, color, label)
 
 
 def barh(y, width, height=0.8, color=None, label=None):
@@ -64,7 +64,7 @@ def barh(y, width, height=0.8, color=None, label=None):
         color: 颜色 (默认: None)
         label: 图例标签 (默认: None)
     """
-    return _rsplot.barh(y, width, height, color, label)
+    return _rsplotlib.barh(y, width, height, color, label)
 
 
 def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None):
@@ -78,7 +78,7 @@ def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None):
         alpha: 透明度 (默认: 0.7)
         color: 颜色 (默认: None)
     """
-    return _rsplot.hist(x, bins, density, label, alpha, color)
+    return _rsplotlib.hist(x, bins, density, label, alpha, color)
 
 
 def pie(x, labels=None, colors=None, autopct=False):
@@ -90,7 +90,7 @@ def pie(x, labels=None, colors=None, autopct=False):
         colors: 颜色列表 (默认: None)
         autopct: 是否显示百分比 (默认: False)
     """
-    return _rsplot.pie(x, labels, colors, autopct)
+    return _rsplotlib.pie(x, labels, colors, autopct)
 
 
 def boxplot(x, labels=None, vert=True):
@@ -101,7 +101,7 @@ def boxplot(x, labels=None, vert=True):
         labels: 标签列表 (默认: None)
         vert: 是否垂直显示 (默认: True)
     """
-    return _rsplot.boxplot(x, labels, vert)
+    return _rsplotlib.boxplot(x, labels, vert)
 
 
 def fill_between(x, y1, y2=None, color=None, alpha=1.0, label=None):
@@ -115,7 +115,7 @@ def fill_between(x, y1, y2=None, color=None, alpha=1.0, label=None):
         alpha: 透明度 (默认: 1.0)
         label: 图例标签 (默认: None)
     """
-    return _rsplot.fill_between(x, y1, y2, color, alpha, label)
+    return _rsplotlib.fill_between(x, y1, y2, color, alpha, label)
 
 
 def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0):
@@ -131,7 +131,7 @@ def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsiz
         label: 图例标签 (默认: None)
         capsize: 误差帽大小 (默认: 3.0)
     """
-    return _rsplot.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
+    return _rsplotlib.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
 
 
 def stem(x, y, linefmt=None, markerfmt=None, label=None):
@@ -144,7 +144,7 @@ def stem(x, y, linefmt=None, markerfmt=None, label=None):
         markerfmt: 标记样式 (默认: None)
         label: 图例标签 (默认: None)
     """
-    return _rsplot.stem(x, y, linefmt, markerfmt, label)
+    return _rsplotlib.stem(x, y, linefmt, markerfmt, label)
 
 
 def step(x, y, where_='pre', label=None, color=None, linestyle='-', linewidth=1.5):
@@ -159,7 +159,7 @@ def step(x, y, where_='pre', label=None, color=None, linestyle='-', linewidth=1.
         linestyle: 线型 (默认: '-')
         linewidth: 线宽 (默认: 1.5)
     """
-    return _rsplot.step(x, y, where_, label, color, linestyle, linewidth)
+    return _rsplotlib.step(x, y, where_, label, color, linestyle, linewidth)
 
 
 def imshow(x, cmap='gray', aspect='auto'):
@@ -170,7 +170,7 @@ def imshow(x, cmap='gray', aspect='auto'):
         cmap: 色图 (默认: 'gray', 可选: 'hot', 'cool')
         aspect: 纵横比 (默认: 'auto', 可选: 'equal')
     """
-    return _rsplot.imshow(x, cmap, aspect)
+    return _rsplotlib.imshow(x, cmap, aspect)
 
 
 def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians=True):
@@ -184,10 +184,10 @@ def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians
         showmedians: 是否显示中位数 (默认: True)
     """
     try:
-        return _rsplot.violinplot(dataset, positions, widths, showmeans, showmedians)
+        return _rsplotlib.violinplot(dataset, positions, widths, showmeans, showmedians)
     except AttributeError:
         import warnings
-        warnings.warn("violinplot is not yet implemented in rsplot, using boxplot instead")
+        warnings.warn("violinplot is not yet implemented in rsplotlib, using boxplot instead")
         return boxplot(dataset)
 
 
@@ -203,10 +203,10 @@ def hexbin(x, y, gridsize=100, cmap='hot', bins='log', mincnt=1):
         mincnt: 最小计数 (默认: 1)
     """
     try:
-        return _rsplot.hexbin(x, y, gridsize, cmap, bins, mincnt)
+        return _rsplotlib.hexbin(x, y, gridsize, cmap, bins, mincnt)
     except AttributeError:
         import warnings
-        warnings.warn("hexbin is not yet implemented in rsplot, using scatter instead")
+        warnings.warn("hexbin is not yet implemented in rsplotlib, using scatter instead")
         return scatter(x, y, s=10, alpha=0.5)
 
 
@@ -222,10 +222,10 @@ def contour(X, Y, Z, levels=None, colors=None, linestyles=None):
         linestyles: 线型 (默认: None)
     """
     try:
-        return _rsplot.contour(X, Y, Z, levels, colors, linestyles)
+        return _rsplotlib.contour(X, Y, Z, levels, colors, linestyles)
     except AttributeError:
         import warnings
-        warnings.warn("contour is not yet implemented in rsplot")
+        warnings.warn("contour is not yet implemented in rsplotlib")
         return None
 
 
@@ -241,10 +241,10 @@ def contourf(X, Y, Z, levels=None, cmap='coolwarm', alpha=1.0):
         alpha: 透明度 (默认: 1.0)
     """
     try:
-        return _rsplot.contourf(X, Y, Z, levels, cmap, alpha)
+        return _rsplotlib.contourf(X, Y, Z, levels, cmap, alpha)
     except AttributeError:
         import warnings
-        warnings.warn("contourf is not yet implemented in rsplot")
+        warnings.warn("contourf is not yet implemented in rsplotlib")
         return None
 
 
@@ -259,10 +259,10 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
         alpha: 透明度 (默认: 1.0)
     """
     try:
-        return _rsplot.stackplot(x, args, labels, colors, alpha)
+        return _rsplotlib.stackplot(x, args, labels, colors, alpha)
     except AttributeError:
         import warnings
-        warnings.warn("stackplot is not yet implemented in rsplot")
+        warnings.warn("stackplot is not yet implemented in rsplotlib")
         return None
 
 
@@ -278,7 +278,7 @@ def text(x, y, text, fontsize=None, color=None):
         fontsize: 字体大小 (默认: None)
         color: 颜色 (默认: None)
     """
-    return _rsplot.text(x, y, text, fontsize, color)
+    return _rsplotlib.text(x, y, text, fontsize, color)
 
 
 def axhline(y=None, color=None, linestyle=None, linewidth=None):
@@ -290,7 +290,7 @@ def axhline(y=None, color=None, linestyle=None, linewidth=None):
         linestyle: 线型 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.axhline(y, color, linestyle, linewidth)
+    return _rsplotlib.axhline(y, color, linestyle, linewidth)
 
 
 def axvline(x=None, color=None, linestyle=None, linewidth=None):
@@ -302,7 +302,7 @@ def axvline(x=None, color=None, linestyle=None, linewidth=None):
         linestyle: 线型 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.axvline(x, color, linestyle, linewidth)
+    return _rsplotlib.axvline(x, color, linestyle, linewidth)
 
 
 def hlines(y, xmin, xmax, color=None, linestyle=None, linewidth=None):
@@ -316,7 +316,7 @@ def hlines(y, xmin, xmax, color=None, linestyle=None, linewidth=None):
         linestyle: 线型 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.axhline(y, color, linestyle, linewidth)
+    return _rsplotlib.axhline(y, color, linestyle, linewidth)
 
 
 def vlines(x, ymin, ymax, color=None, linestyle=None, linewidth=None):
@@ -330,7 +330,7 @@ def vlines(x, ymin, ymax, color=None, linestyle=None, linewidth=None):
         linestyle: 线型 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.axvline(x, color, linestyle, linewidth)
+    return _rsplotlib.axvline(x, color, linestyle, linewidth)
 
 
 # ==================== 配置函数 ====================
@@ -341,7 +341,7 @@ def xlabel(text):
     Args:
         text: 标签文本
     """
-    return _rsplot.xlabel(text)
+    return _rsplotlib.xlabel(text)
 
 
 def ylabel(text):
@@ -350,7 +350,7 @@ def ylabel(text):
     Args:
         text: 标签文本
     """
-    return _rsplot.ylabel(text)
+    return _rsplotlib.ylabel(text)
 
 
 def title(text):
@@ -359,7 +359,7 @@ def title(text):
     Args:
         text: 标题文本
     """
-    return _rsplot.title(text)
+    return _rsplotlib.title(text)
 
 
 def grid(visible=True):
@@ -368,7 +368,7 @@ def grid(visible=True):
     Args:
         visible: 是否显示网格 (默认: True)
     """
-    return _rsplot.grid(visible)
+    return _rsplotlib.grid(visible)
 
 
 def legend(loc='best'):
@@ -378,7 +378,7 @@ def legend(loc='best'):
         loc: 位置 (默认: 'best', 可选: 'upper right', 'upper left', 
               'lower right', 'lower left', 'upper center')
     """
-    return _rsplot.legend(loc)
+    return _rsplotlib.legend(loc)
 
 
 def xlim(left, right):
@@ -388,7 +388,7 @@ def xlim(left, right):
         left: 左边界
         right: 右边界
     """
-    return _rsplot.xlim(left, right)
+    return _rsplotlib.xlim(left, right)
 
 
 def ylim(bottom, top):
@@ -398,7 +398,7 @@ def ylim(bottom, top):
         bottom: 下边界
         top: 上边界
     """
-    return _rsplot.ylim(bottom, top)
+    return _rsplotlib.ylim(bottom, top)
 
 
 def xticks(ticks=None, labels=None):
@@ -408,7 +408,7 @@ def xticks(ticks=None, labels=None):
         ticks: 刻度位置列表 (默认: None)
         labels: 刻度标签列表 (默认: None)
     """
-    return _rsplot.xticks(ticks, labels)
+    return _rsplotlib.xticks(ticks, labels)
 
 
 def yticks(ticks=None, labels=None):
@@ -418,7 +418,7 @@ def yticks(ticks=None, labels=None):
         ticks: 刻度位置列表 (默认: None)
         labels: 刻度标签列表 (默认: None)
     """
-    return _rsplot.yticks(ticks, labels)
+    return _rsplotlib.yticks(ticks, labels)
 
 
 # ==================== 子图与布局 ====================
@@ -433,7 +433,7 @@ def subplots(nrows=1, ncols=1):
     Returns:
         tuple: (Figure, axes_list)
     """
-    return _rsplot.subplots(nrows, ncols)
+    return _rsplotlib.subplots(nrows, ncols)
 
 
 def subplot(nrows, ncols, index):
@@ -447,12 +447,12 @@ def subplot(nrows, ncols, index):
     Returns:
         Axes: 创建的子图
     """
-    return _rsplot.subplot(nrows, ncols, index)
+    return _rsplotlib.subplot(nrows, ncols, index)
 
 
 def tight_layout():
     """自动调整子图布局"""
-    return _rsplot.tight_layout()
+    return _rsplotlib.tight_layout()
 
 
 def set_size(width, height):
@@ -462,7 +462,7 @@ def set_size(width, height):
         width: 宽度 (像素)
         height: 高度 (像素)
     """
-    return _rsplot.set_size(width, height)
+    return _rsplotlib.set_size(width, height)
 
 
 def twinx():
@@ -471,7 +471,7 @@ def twinx():
     Returns:
         Axes: 新的 y 轴
     """
-    return _rsplot.twinx()
+    return _rsplotlib.twinx()
 
 
 def twiny():
@@ -480,7 +480,7 @@ def twiny():
     Returns:
         Axes: 新的 x 轴
     """
-    return _rsplot.twiny()
+    return _rsplotlib.twiny()
 
 
 # ==================== 图形控制 ====================
@@ -491,7 +491,7 @@ def figure():
     Returns:
         Figure: 创建的图形对象
     """
-    return _rsplot.figure()
+    return _rsplotlib.figure()
 
 
 def savefig(filename):
@@ -500,12 +500,12 @@ def savefig(filename):
     Args:
         filename: 文件名 (支持 .svg 和 .png)
     """
-    return _rsplot.savefig(filename)
+    return _rsplotlib.savefig(filename)
 
 
 def show():
     """显示图形 (保存到默认位置)"""
-    return _rsplot.show()
+    return _rsplotlib.show()
 
 
 def gca():
@@ -514,7 +514,7 @@ def gca():
     Returns:
         Axes: 当前坐标轴
     """
-    return _rsplot.gca()
+    return _rsplotlib.gca()
 
 
 def gcf():
@@ -523,22 +523,22 @@ def gcf():
     Returns:
         Figure: 当前图形对象
     """
-    return _rsplot.gcf()
+    return _rsplotlib.gcf()
 
 
 def cla():
     """清空当前 Axes"""
-    return _rsplot.cla()
+    return _rsplotlib.cla()
 
 
 def clf():
     """清空当前 Figure"""
-    return _rsplot.clf()
+    return _rsplotlib.clf()
 
 
 def close():
     """关闭当前 Figure"""
-    return _rsplot.close()
+    return _rsplotlib.close()
 
 
 # ==================== 对数坐标 ====================
@@ -555,7 +555,7 @@ def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidt
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.semilogx(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.semilogx(x, y, label, color, linestyle, marker, linewidth)
 
 
 def semilogy(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
@@ -570,7 +570,7 @@ def semilogy(x, y, label=None, color=None, linestyle=None, marker=None, linewidt
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.semilogy(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.semilogy(x, y, label, color, linestyle, marker, linewidth)
 
 
 def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
@@ -585,7 +585,7 @@ def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplot.loglog(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.loglog(x, y, label, color, linestyle, marker, linewidth)
 
 
 # ==================== 样式控制 ====================
@@ -596,7 +596,7 @@ def use(backend):
     Args:
         backend: 后端名称 (如 'Agg', 'SVG')
     """
-    _rsplot.use_(backend)
+    _rsplotlib.use_(backend)
 
 
 def xscale(scale):
@@ -604,7 +604,7 @@ def xscale(scale):
     Args:
         scale: 缩放类型 ('linear', 'log', 'symlog', 'logit')
     """
-    return _rsplot.xscale(scale)
+    return _rsplotlib.xscale(scale)
 
 
 def yscale(scale):
@@ -612,27 +612,27 @@ def yscale(scale):
     Args:
         scale: 缩放类型 ('linear', 'log', 'symlog', 'logit')
     """
-    return _rsplot.yscale(scale)
+    return _rsplotlib.yscale(scale)
 
 
 def margins(x_margin=None, y_margin=None):
     """设置自动缩放的边距"""
-    return _rsplot.margins(x_margin, y_margin)
+    return _rsplotlib.margins(x_margin, y_margin)
 
 
 def box(on=None):
     """设置坐标轴边框"""
-    return _rsplot.box_(on)
+    return _rsplotlib.box_(on)
 
 
 def minorticks_on():
     """显示次要刻度"""
-    return _rsplot.minorticks_on()
+    return _rsplotlib.minorticks_on()
 
 
 def minorticks_off():
     """隐藏次要刻度"""
-    return _rsplot.minorticks_off()
+    return _rsplotlib.minorticks_off()
 
 
 # ==================== 模块导出 ====================

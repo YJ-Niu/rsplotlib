@@ -30,6 +30,8 @@ Thumbs.db
 N238B W1-plots/
 N238B W1.csv
 wheelhouse/
+analyze*.py
+test*.py
 # Environment
 .env
 .env.local

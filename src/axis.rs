@@ -59,6 +59,11 @@ impl Axis {
                     ax.minor_grid_color = c.map(|s| s.to_string());
                     ax.minor_grid_linewidth = lw;
                     ax.minor_grid_linestyle = ls.map(|s| s.to_string());
+                    if self.which == "x" {
+                        ax.minor_grid_x_visible = true;
+                    } else {
+                        ax.minor_grid_y_visible = true;
+                    }
                 }
                 if "major".eq_ignore_ascii_case(which) || "both".eq_ignore_ascii_case(which) {
                     ax.grid_color = c.map(|s| s.to_string());

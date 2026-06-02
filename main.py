@@ -1,26 +1,26 @@
 import os
-from rsplot import use
+from rsplotlib import use
 from multiprocessing import Process, freeze_support
-import rsplot.pyplot as plt
-from rsplot import style
+import rsplotlib.pyplot as plt
+from rsplotlib import style
 import xlrd
 import datetime
 import rsnum as np
-from rsplot.gridspec import GridSpec
+from rsplotlib.gridspec import GridSpec
 # import test_times
 # import version
 import sys
 import re
 import time
 import json
-from rsplot.ticker import MaxNLocator, MultipleLocator
+from rsplotlib.ticker import MaxNLocator, MultipleLocator
 import threading
 import math
-import rsplot.ticker as ticker
-# import rsplot.patches as patches
+import rsplotlib.ticker as ticker
+# import rsplotlib.patches as patches
 from pylab import mpl
 
-os.environ["MPLCONFIGDIR"] = "/Applications/plots/rsplot_cache"
+os.environ["MPLCONFIGDIR"] = "/Applications/plots/rsplotlib_cache"
 use("Agg")
 
 
@@ -975,7 +975,6 @@ class Reportopp:
                 thread.join()
 
             plt.savefig(os.path.join(path_p, f'{plt_idix} {test_name}.svg'))
-            print(" 保存: ", os.path.join(path_p, f'{plt_idix} {test_name}.svg'))
             fig.clf()
             fig.clear()
             plt.close("all")

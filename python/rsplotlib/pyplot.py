@@ -1,16 +1,16 @@
-"""rsplot.pyplot - Matplotlib pyplot 兼容接口
+"""rsplotlib.pyplot - Matplotlib pyplot 兼容接口
 
-此模块提供与 matplotlib.pyplot 兼容的 API，所有函数代理到 rsplot 核心模块。
-使用方法: import rsplot.pyplot as plt
+此模块提供与 matplotlib.pyplot 兼容的 API，所有函数代理到 rsplotlib 核心模块。
+使用方法: import rsplotlib.pyplot as plt
 """
 
-from . import rsplot as _rsplot
+from . import rsplotlib as _rsplotlib
 
 
 def _get_axes():
     """获取当前 axes，如果没有则返回 None"""
     try:
-        return _rsplot.gca()
+        return _rsplotlib.gca()
     except Exception:
         return None
 
@@ -18,7 +18,7 @@ def _get_axes():
 def _get_figure():
     """获取当前 figure，如果没有则返回 None"""
     try:
-        return _rsplot.gcf()
+        return _rsplotlib.gcf()
     except Exception:
         return None
 
@@ -41,7 +41,7 @@ def plot(*args, **kwargs):
     if ax is not None:
         ax.plot(x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'), kw.get('marker'), kw.get('linewidth'), kw.get('markersize'), kw.get('markeredgewidth'), kw.get('solid_capstyle'))
         return _get_figure()
-    return _rsplot.plot(x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'), kw.get('marker'), kw.get('linewidth'), kw.get('markersize'), kw.get('markeredgewidth'), kw.get('solid_capstyle'))
+    return _rsplotlib.plot(x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'), kw.get('marker'), kw.get('linewidth'), kw.get('markersize'), kw.get('markeredgewidth'), kw.get('solid_capstyle'))
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
@@ -50,7 +50,7 @@ def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
     if ax is not None:
         ax.scatter(x, y, s, c, marker, label, alpha)
         return _get_figure()
-    return _rsplot.scatter(x, y, s, c, marker, label, alpha)
+    return _rsplotlib.scatter(x, y, s, c, marker, label, alpha)
 
 
 def bar(x, height, width=0.8, color=None, label=None):
@@ -59,7 +59,7 @@ def bar(x, height, width=0.8, color=None, label=None):
     if ax is not None:
         ax.bar(x, height, width, color, label)
         return _get_figure()
-    return _rsplot.bar(x, height, width, color, label)
+    return _rsplotlib.bar(x, height, width, color, label)
 
 
 def barh(y, width, height=0.8, color=None, label=None):
@@ -68,7 +68,7 @@ def barh(y, width, height=0.8, color=None, label=None):
     if ax is not None:
         ax.barh(y, width, height, color, label)
         return _get_figure()
-    return _rsplot.barh(y, width, height, color, label)
+    return _rsplotlib.barh(y, width, height, color, label)
 
 
 def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs):
@@ -108,7 +108,7 @@ def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs)
         result = ax.hist(x_list, bins, density, label, alpha, color_list, None, align, histtype)
         return _get_figure()
     
-    result = _rsplot.hist(x_list, bins, density, label, alpha, color_list)
+    result = _rsplotlib.hist(x_list, bins, density, label, alpha, color_list)
     return result
 
 
@@ -134,7 +134,7 @@ def pie(x, labels=None, colors=None, autopct=False, **kwargs):
     if ax is not None:
         ax.pie(x, labels, colors, autopct_str)
         return _get_figure()
-    return _rsplot.pie(x, labels, colors, autopct_str)
+    return _rsplotlib.pie(x, labels, colors, autopct_str)
 
 
 def boxplot(x, labels=None, vert=True, **kwargs):
@@ -143,7 +143,7 @@ def boxplot(x, labels=None, vert=True, **kwargs):
     if ax is not None:
         ax.boxplot(x, labels, vert)
         return _get_figure()
-    return _rsplot.boxplot(x, labels, vert)
+    return _rsplotlib.boxplot(x, labels, vert)
 
 
 def fill_between(x, y1, y2=0.0, color=None, alpha=0.3, label=None, **kwargs):
@@ -152,7 +152,7 @@ def fill_between(x, y1, y2=0.0, color=None, alpha=0.3, label=None, **kwargs):
     if ax is not None:
         ax.fill_between(x, y1, y2, color, alpha, label)
         return _get_figure()
-    return _rsplot.fill_between(x, y1, y2, color, alpha, label)
+    return _rsplotlib.fill_between(x, y1, y2, color, alpha, label)
 
 
 def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0, **kwargs):
@@ -161,7 +161,7 @@ def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsiz
     if ax is not None:
         ax.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
         return _get_figure()
-    return _rsplot.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
+    return _rsplotlib.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
 
 
 def stem(x, y, linefmt=None, markerfmt=None, label=None, **kwargs):
@@ -170,7 +170,7 @@ def stem(x, y, linefmt=None, markerfmt=None, label=None, **kwargs):
     if ax is not None:
         ax.stem(x, y, linefmt or '-', markerfmt or 'o', label)
         return _get_figure()
-    return _rsplot.stem(x, y, linefmt or '-', markerfmt or 'o', label)
+    return _rsplotlib.stem(x, y, linefmt or '-', markerfmt or 'o', label)
 
 
 def step(x, y, where='pre', label=None, color=None, linestyle='-', linewidth=1.5, **kwargs):
@@ -179,7 +179,7 @@ def step(x, y, where='pre', label=None, color=None, linestyle='-', linewidth=1.5
     if ax is not None:
         ax.step(x, y, where, label, color, linestyle, linewidth)
         return _get_figure()
-    return _rsplot.step(x, y, where, label, color, linestyle, linewidth)
+    return _rsplotlib.step(x, y, where, label, color, linestyle, linewidth)
 
 
 def imshow(x, cmap='viridis', aspect='auto', **kwargs):
@@ -188,7 +188,7 @@ def imshow(x, cmap='viridis', aspect='auto', **kwargs):
     if ax is not None:
         ax.imshow(x, cmap, aspect)
         return _get_figure()
-    return _rsplot.imshow(x, cmap, aspect)
+    return _rsplotlib.imshow(x, cmap, aspect)
 
 
 # ==================== 辅助元素 ====================
@@ -202,44 +202,44 @@ def text(x, y, s, fontdict=None, **kwargs):
     # Convert s to string to handle int/float types
     if not isinstance(s, str):
         s = str(s)
-    return _rsplot.text(x, y, s, fontsize, color, c, family)
+    return _rsplotlib.text(x, y, s, fontsize, color, c, family)
 
 
 def axhline(y=0, **kwargs):
     """添加水平参考线"""
-    return _rsplot.axhline(y, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
+    return _rsplotlib.axhline(y, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
 
 
 def axvline(x=0, **kwargs):
     """添加垂直参考线"""
-    return _rsplot.axvline(x, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
+    return _rsplotlib.axvline(x, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
 
 
 def hlines(y, xmin, xmax, **kwargs):
     """绘制水平线段"""
-    return _rsplot.axhline(y, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
+    return _rsplotlib.axhline(y, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
 
 
 def vlines(x, ymin, ymax, **kwargs):
     """绘制垂直线段"""
-    return _rsplot.axvline(x, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
+    return _rsplotlib.axvline(x, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
 
 
 # ==================== 配置函数 ====================
 
 def xlabel(text, **kwargs):
     """设置 x 轴标签"""
-    return _rsplot.xlabel(text)
+    return _rsplotlib.xlabel(text)
 
 
 def ylabel(text, **kwargs):
     """设置 y 轴标签"""
-    return _rsplot.ylabel(text)
+    return _rsplotlib.ylabel(text)
 
 
 def title(label, fontdict=None, **kwargs):
     """设置图表标题"""
-    return _rsplot.title(label)
+    return _rsplotlib.title(label)
 
 
 def grid(visible=True, **kwargs):
@@ -248,79 +248,79 @@ def grid(visible=True, **kwargs):
     ls = kwargs.get('linestyle') or kwargs.get('ls')
     lw = kwargs.get('linewidth') or kwargs.get('lw')
     axis = kwargs.get('axis')
-    return _rsplot.grid(visible, c, ls, lw, axis)
+    return _rsplotlib.grid(visible, c, ls, lw, axis)
 
 
 def legend(loc='best', **kwargs):
     """显示图例"""
-    return _rsplot.legend(loc)
+    return _rsplotlib.legend(loc)
 
 
 def xlim(left=None, right=None, **kwargs):
     """设置/获取 x 轴范围"""
-    return _rsplot.xlim(left, right)
+    return _rsplotlib.xlim(left, right)
 
 
 def ylim(bottom=None, top=None, **kwargs):
     """设置/获取 y 轴范围"""
-    return _rsplot.ylim(bottom, top)
+    return _rsplotlib.ylim(bottom, top)
 
 
 def xticks(ticks=None, labels=None, **kwargs):
     """设置 x 轴刻度"""
-    return _rsplot.xticks(ticks, labels)
+    return _rsplotlib.xticks(ticks, labels)
 
 
 def yticks(ticks=None, labels=None, **kwargs):
     """设置 y 轴刻度"""
-    return _rsplot.yticks(ticks, labels)
+    return _rsplotlib.yticks(ticks, labels)
 
 
 def xscale(scale, **kwargs):
     """设置 x 轴缩放"""
-    return _rsplot.xscale(scale)
+    return _rsplotlib.xscale(scale)
 
 
 def yscale(scale, **kwargs):
     """设置 y 轴缩放"""
-    return _rsplot.yscale(scale)
+    return _rsplotlib.yscale(scale)
 
 
 def margins(x_margin=None, y_margin=None, **kwargs):
     """设置自动缩放的边距"""
-    return _rsplot.margins(x_margin, y_margin)
+    return _rsplotlib.margins(x_margin, y_margin)
 
 
 def box(on=None):
     """设置坐标轴边框"""
-    return _rsplot.box_(on)
+    return _rsplotlib.box_(on)
 
 
 def minorticks_on():
     """显示次要刻度"""
-    return _rsplot.minorticks_on()
+    return _rsplotlib.minorticks_on()
 
 
 def minorticks_off():
     """隐藏次要刻度"""
-    return _rsplot.minorticks_off()
+    return _rsplotlib.minorticks_off()
 
 
 # ==================== 子图与布局 ====================
 
 def subplots(nrows=1, ncols=1, **kwargs):
     """创建子图网格"""
-    return _rsplot.subplots(nrows, ncols)
+    return _rsplotlib.subplots(nrows, ncols)
 
 
 def subplot(nrows, ncols, index, **kwargs):
     """创建单个子图"""
-    return _rsplot.subplot(nrows, ncols, index)
+    return _rsplotlib.subplot(nrows, ncols, index)
 
 
 def tight_layout(**kwargs):
     """自动调整子图布局"""
-    return _rsplot.tight_layout()
+    return _rsplotlib.tight_layout()
 
 
 def subplots_adjust(left=None, right=None, bottom=None, top=None, wspace=None, hspace=None):
@@ -332,17 +332,17 @@ def subplots_adjust(left=None, right=None, bottom=None, top=None, wspace=None, h
 
 def set_size(width, height):
     """设置图形尺寸"""
-    return _rsplot.set_size(width, height)
+    return _rsplotlib.set_size(width, height)
 
 
 def twinx():
     """创建共享 x 轴的双 y 轴"""
-    return _rsplot.twinx()
+    return _rsplotlib.twinx()
 
 
 def twiny():
     """创建共享 y 轴的双 x 轴"""
-    return _rsplot.twiny()
+    return _rsplotlib.twiny()
 
 
 # ==================== 图形控制 ====================
@@ -355,7 +355,7 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
         figsize: (width, height) 元组，单位为英寸
         dpi: 分辨率
     """
-    fig = _rsplot.figure()
+    fig = _rsplotlib.figure()
     d = dpi if dpi is not None else 100
     fig.set_dpi(d)
     if figsize is not None:
@@ -369,32 +369,32 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
 
 def savefig(fname, **kwargs):
     """保存图形"""
-    _rsplot.savefig(fname)
+    _rsplotlib.savefig(fname)
 
 
 def show(**kwargs):
     """显示图形"""
-    return _rsplot.show()
+    return _rsplotlib.show()
 
 
 def gca(**kwargs):
     """获取当前 Axes"""
-    return _rsplot.gca()
+    return _rsplotlib.gca()
 
 
 def gcf(**kwargs):
     """获取当前 Figure"""
-    return _rsplot.gcf()
+    return _rsplotlib.gcf()
 
 
 def cla():
     """清空当前 Axes"""
-    return _rsplot.cla()
+    return _rsplotlib.cla()
 
 
 def clf():
     """清空当前 Figure"""
-    return _rsplot.clf()
+    return _rsplotlib.clf()
 
 
 def close(fig=None):
@@ -403,7 +403,7 @@ def close(fig=None):
     Args:
         fig: 图形或 'all' (兼容 matplotlib)
     """
-    return _rsplot.close()
+    return _rsplotlib.close()
 
 
 def axis(arg=None, **kwargs):
@@ -430,14 +430,14 @@ def colorbar(mappable=None, **kwargs):
 
 def _get_current_figure():
     try:
-        return _rsplot.gcf()
+        return _rsplotlib.gcf()
     except:
         return None
 
 
 def _set_axis_off():
     try:
-        ax = _rsplot.gca()
+        ax = _rsplotlib.gca()
         ax._axis_off()
     except:
         pass

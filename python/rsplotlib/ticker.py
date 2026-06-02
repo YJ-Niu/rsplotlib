@@ -1,4 +1,4 @@
-"""rsplot.ticker - Matplotlib ticker 兼容接口
+"""rsplotlib.ticker - Matplotlib ticker 兼容接口
 
 提供刻度定位器和格式化器类。
 """

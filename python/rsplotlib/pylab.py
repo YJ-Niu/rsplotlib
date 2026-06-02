@@ -1,4 +1,4 @@
-"""rsplot.pylab - Matplotlib pylab 兼容接口"""
+"""rsplotlib.pylab - Matplotlib pylab 兼容接口"""
 
 from .pyplot import rcParams, rcParamsOrig, figure, gca, gcf
 

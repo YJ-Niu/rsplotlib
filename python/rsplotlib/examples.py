@@ -1,14 +1,14 @@
-"""rsplot 使用示例
+"""rsplotlib 使用示例
 
-这个模块提供 rsplot 库的详细使用示例。
+这个模块提供 rsplotlib 库的详细使用示例。
 
 使用方式：
->>> from rsplot import examples
+>>> from rsplotlib import examples
 >>> examples.run_example('line')  # 运行指定示例
 >>> examples.run_all()  # 运行所有示例（会生成图片文件）
 """
 
-import rsplot as plt
+import rsplotlib as plt
 import rsnum as np
 from rsnum import random
 
@@ -29,8 +29,8 @@ def example_line_plot():
     plt.title('正弦和余弦曲线')
     plt.legend('upper right')
     plt.grid(True)
-    plt.savefig('/tmp/rsplot_example_line.svg')
-    print("已保存: /tmp/rsplot_example_line.svg")
+    plt.savefig('/tmp/rsplotlib_example_line.svg')
+    print("已保存: /tmp/rsplotlib_example_line.svg")
 
 
 def example_scatter():
@@ -49,8 +49,8 @@ def example_scatter():
     plt.ylabel('Y')
     plt.title('散点图示例')
     plt.grid(True)
-    plt.savefig('/tmp/rsplot_example_scatter.svg')
-    print("已保存: /tmp/rsplot_example_scatter.svg")
+    plt.savefig('/tmp/rsplotlib_example_scatter.svg')
+    print("已保存: /tmp/rsplotlib_example_scatter.svg")
 
 
 def example_bar():
@@ -67,8 +67,8 @@ def example_bar():
         plt.bar(np.array([i]), np.array([values[i]]), color='#1f77b4')
     plt.xticks([0, 1, 2, 3, 4], categories)
     plt.title('柱状图')
-    plt.savefig('/tmp/rsplot_example_bar.svg')
-    print("已保存: /tmp/rsplot_example_bar.svg")
+    plt.savefig('/tmp/rsplotlib_example_bar.svg')
+    print("已保存: /tmp/rsplotlib_example_bar.svg")
 
 
 def example_histogram():
@@ -85,8 +85,8 @@ def example_histogram():
     plt.xlabel('值')
     plt.ylabel('频数')
     plt.title('直方图 (1000个样本)')
-    plt.savefig('/tmp/rsplot_example_hist.svg')
-    print("已保存: /tmp/rsplot_example_hist.svg")
+    plt.savefig('/tmp/rsplotlib_example_hist.svg')
+    print("已保存: /tmp/rsplotlib_example_hist.svg")
 
 
 def example_subplots():
@@ -112,8 +112,8 @@ def example_subplots():
     axes[3].set_title('tan(x)')
     axes[3].set_ylim(-5, 5)
     
-    plt.savefig('/tmp/rsplot_example_subplots.svg')
-    print("已保存: /tmp/rsplot_example_subplots.svg")
+    plt.savefig('/tmp/rsplotlib_example_subplots.svg')
+    print("已保存: /tmp/rsplotlib_example_subplots.svg")
 
 
 def example_pie():
@@ -128,8 +128,8 @@ def example_pie():
     plt.figure()
     plt.pie(sizes, labels=labels, autopct=True)
     plt.title('饼图')
-    plt.savefig('/tmp/rsplot_example_pie.svg')
-    print("已保存: /tmp/rsplot_example_pie.svg")
+    plt.savefig('/tmp/rsplotlib_example_pie.svg')
+    print("已保存: /tmp/rsplotlib_example_pie.svg")
 
 
 def example_boxplot():
@@ -147,8 +147,8 @@ def example_boxplot():
     plt.boxplot([data1.tolist(), data2.tolist(), data3.tolist()],
                 labels=['Group A', 'Group B', 'Group C'])
     plt.title('箱线图')
-    plt.savefig('/tmp/rsplot_example_boxplot.svg')
-    print("已保存: /tmp/rsplot_example_boxplot.svg")
+    plt.savefig('/tmp/rsplotlib_example_boxplot.svg')
+    print("已保存: /tmp/rsplotlib_example_boxplot.svg")
 
 
 def example_errorbar():
@@ -167,8 +167,8 @@ def example_errorbar():
     plt.ylabel('y')
     plt.title('误差棒图')
     plt.grid(True)
-    plt.savefig('/tmp/rsplot_example_errorbar.svg')
-    print("已保存: /tmp/rsplot_example_errorbar.svg")
+    plt.savefig('/tmp/rsplotlib_example_errorbar.svg')
+    print("已保存: /tmp/rsplotlib_example_errorbar.svg")
 
 
 def example_twin_axis():
@@ -191,8 +191,8 @@ def example_twin_axis():
     ax2.set_ylabel('exp(x/5)', color='red')
     
     plt.title('双 Y 轴示例')
-    plt.savefig('/tmp/rsplot_example_twin.svg')
-    print("已保存: /tmp/rsplot_example_twin.svg")
+    plt.savefig('/tmp/rsplotlib_example_twin.svg')
+    print("已保存: /tmp/rsplotlib_example_twin.svg")
 
 
 def example_log_scale():
@@ -210,8 +210,8 @@ def example_log_scale():
     plt.ylabel('exp(x)')
     plt.title('半对数坐标')
     plt.grid(True)
-    plt.savefig('/tmp/rsplot_example_log.svg')
-    print("已保存: /tmp/rsplot_example_log.svg")
+    plt.savefig('/tmp/rsplotlib_example_log.svg')
+    print("已保存: /tmp/rsplotlib_example_log.svg")
 
 
 def example_imshow():
@@ -226,8 +226,8 @@ def example_imshow():
     plt.figure()
     plt.imshow(data, cmap='hot', aspect='auto')
     plt.title('热力图')
-    plt.savefig('/tmp/rsplot_example_imshow.svg')
-    print("已保存: /tmp/rsplot_example_imshow.svg")
+    plt.savefig('/tmp/rsplotlib_example_imshow.svg')
+    print("已保存: /tmp/rsplotlib_example_imshow.svg")
 
 
 def example_mixed():
@@ -247,8 +247,8 @@ def example_mixed():
     plt.ylabel('y')
     plt.title('混合图表')
     plt.legend('upper right')
-    plt.savefig('/tmp/rsplot_example_mixed.svg')
-    print("已保存: /tmp/rsplot_example_mixed.svg")
+    plt.savefig('/tmp/rsplotlib_example_mixed.svg')
+    print("已保存: /tmp/rsplotlib_example_mixed.svg")
 
 
 def run_example(name):
@@ -292,7 +292,7 @@ def run_all():
     
     print("\n" + "=" * 60)
     print("所有示例运行完成!")
-    print("图片已保存到 /tmp/rsplot_example_*.svg")
+    print("图片已保存到 /tmp/rsplotlib_example_*.svg")
     print("=" * 60)
 
 

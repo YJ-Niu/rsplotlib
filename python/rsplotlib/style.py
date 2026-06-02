@@ -1,6 +1,6 @@
-"""rsplot.style - Matplotlib style 兼容接口"""
+"""rsplotlib.style - Matplotlib style 兼容接口"""
 
-from . import rsplot as _rsplot
+from . import rsplotlib as _rsplotlib
 
 
 # ==================== 可用样式 ====================
