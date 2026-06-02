@@ -26,6 +26,10 @@ uv.lock
 .DS_Store
 Thumbs.db
 
+# Data / plots
+N238B W1-plots/
+N238B W1.csv
+
 # Environment
 .env
 .env.local
