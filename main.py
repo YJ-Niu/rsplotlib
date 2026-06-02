@@ -1018,7 +1018,7 @@ if __name__ == "__main__":
     # while True:
     if 1:
         # path_s = input(" =>").rstrip()
-        path_s = "/Users/user/Desktop/rust_project/N238B W1.csv"
+        path_s = "/Users/user/Desktop/rust_project/rsplotlib/N238B W1.csv"
         if "\\" in path_s:
             path_ = path_s.replace("\\", "")
         elif path_s:

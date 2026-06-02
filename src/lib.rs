@@ -3699,6 +3699,6 @@ fn rsplot(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(box_, m)?)?;
     m.add_function(wrap_pyfunction!(minorticks_on, m)?)?;
     m.add_function(wrap_pyfunction!(minorticks_off, m)?)?;
-    m.setattr("__version__", "0.1.2")?;
+    m.setattr("__version__", "0.1.3")?;
     Ok(())
 }

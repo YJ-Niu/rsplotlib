@@ -11,6 +11,11 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
+dependencies = [
+    "matplotlib>=3.7.5",
+    "maturin>=1.13.3",
+    "xlrd>=2.0.2",
+]
 
 [tool.maturin]
 python-source = "python"

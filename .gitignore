@@ -29,7 +29,7 @@ Thumbs.db
 # Data / plots
 N238B W1-plots/
 N238B W1.csv
-
+wheelhouse/
 # Environment
 .env
 .env.local
