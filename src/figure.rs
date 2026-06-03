@@ -204,20 +204,16 @@ impl Figure {
                 (0.0, 1.0, 0.0, 1.0)
             };
 
-            let (plot_left, plot_right, plot_bottom_frac, plot_top_frac) = {
-                let margin_l = self.subplot_left;
-                let margin_r = 1.0 - self.subplot_right;
-                let margin_b = self.subplot_bottom;
-                let margin_t = 1.0 - self.subplot_top;
-                let usable_w = 1.0 - margin_l - margin_r;
-                let usable_h = 1.0 - margin_b - margin_t;
-                (
-                    left * usable_w + margin_l,
-                    right * usable_w + margin_l,
-                    bottom * usable_h + margin_b,
-                    top * usable_h + margin_b,
-                )
-            };
+            let margin_l = self.subplot_left;
+            let margin_r = 1.0 - self.subplot_right;
+            let margin_b = self.subplot_bottom;
+            let margin_t = 1.0 - self.subplot_top;
+            let usable_w = 1.0 - margin_l - margin_r;
+            let usable_h = 1.0 - margin_b - margin_t;
+            let plot_left = left * usable_w + margin_l;
+            let plot_right = right * usable_w + margin_l;
+            let plot_bottom_frac = bottom * usable_h + margin_b;
+            let plot_top_frac = top * usable_h + margin_b;
 
             let x0 = (plot_left * total_w) as f64;
             let y0 = ((1.0 - plot_top_frac) * total_h) as f64;
