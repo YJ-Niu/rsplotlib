@@ -28,7 +28,7 @@ uv pip install matplotlib
 主要关注点
 
 - 目标并非逐字复刻 Matplotlib 的实现，而是在兼容其常用 API 的前提下尽量匹配输出效果。
-- 注意 SVG 与 PNG 的渲染差异；对于 SVG，避免做会影响 raster 输出（PNG）布局的改动。
+- 注意 SVG 与 PNG 的渲染差异；对于 保存SVG不要过多的修改，避免做会影响 raster 输出（PNG）布局的改动。
 - 保持代码简洁：优先实现常用、稳定的接口，避免过度复杂化。
 
 重要文件
@@ -36,6 +36,8 @@ uv pip install matplotlib
 - `main.py`：项目示例/测试入口，负责批量生成测试图像（查看并运行以生成 `plots/` 下的图像）。
 - `python/rsplotlib/`：Python 封装实现，主要工作区。
 - `testing/`：测试脚本集合。
+- `python/rsplotlib/`: python库接口
+- `src/'`：Rust 实现的绘图库，主要工作区。
 
 如何执行第一轮（快速验证）
 
@@ -62,4 +64,4 @@ uv run python main.py
 
 - 提交 PR 时请附带生成的示例图像以及说明本次改动修复/改进了哪些问题。
 
-顺序循环原则：修复 → 重构 → 画图 → 对比 → 再修复（重复）
+顺序循环原则：修复一部分问题后 → 重构 → 画图 → 对比 → 再修复（重复）

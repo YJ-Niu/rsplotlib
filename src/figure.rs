@@ -6,7 +6,7 @@ use pyo3::types::PyAny;
 use plotters::prelude::*;
 
 use crate::axes::Axes;
-use crate::colors::{parse_color, to_plotters_color, RgbColor};
+// colors not needed directly in this module
 
 pub(crate) static CURRENT_FIGURE: Mutex<Option<Py<Figure>>> = Mutex::new(None);
 
@@ -175,7 +175,9 @@ impl Figure {
     {
         let root = backend.into_drawing_area();
 
-        // 不填充全屏背景，与matplotlib一致（matplotlib的SVG不包含全屏背景rect）
+        // 为位图输出填充白色背景以匹配 Matplotlib 的默认白色画布
+        // 这也会在 SVG 中添加白色背景矩形，但在多数对比场景中更易于可视比对
+        let _ = root.fill(&WHITE);
 
         if self.axes_list.is_empty() {
             root.present()

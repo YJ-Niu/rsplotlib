@@ -11,18 +11,13 @@ pub fn draw_marker<DB: DrawingBackend>(
     size: f64,
     color: RGBColor,
 ) -> PyResult<()> {
-    let s = size.max(2.0);
+    let s = size;
     let style: ShapeStyle = color.filled().into();
     match marker {
         "o" => {
+            // Use Circle element for filled circle markers
             let r = s;
-            let n = 20;
-            let mut points = Vec::with_capacity(n + 1);
-            for i in 0..=n {
-                let angle = i as f64 * 2.0 * std::f64::consts::PI / n as f64;
-                points.push((x + r * angle.cos(), y + r * angle.sin()));
-            }
-            chart.draw_series(std::iter::once(PathElement::new(points, style)))
+            chart.draw_series(std::iter::once(Circle::new((x, y), r as i32, style)))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
         "s" => {

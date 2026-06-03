@@ -174,15 +174,31 @@ pub fn errorbar<'a>(
     py: Python<'a>,
     x: Vec<f64>,
     y: Vec<f64>,
-    yerr: Option<f64>,
-    xerr: Option<f64>,
+    yerr: Option<Py<PyAny>>,
+    xerr: Option<Py<PyAny>>,
     fmt: &'a str,
     color: Option<String>,
     label: Option<String>,
     capsize: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
+    // Convert possible scalar or sequence yerr/xerr into Vec<f64>
+    let make_vec = |maybe: Option<Py<PyAny>>, n: usize| -> Option<Vec<f64>> {
+        if let Some(obj) = maybe {
+            if let Ok(v) = obj.extract::<Vec<f64>>(py) {
+                return Some(v);
+            }
+            if let Ok(v) = obj.extract::<f64>(py) {
+                return Some(vec![v; n]);
+            }
+        }
+        None
+    };
+
+    let yerr_vec = make_vec(yerr, x.len());
+    let xerr_vec = make_vec(xerr, x.len());
+
     let mut ax = Axes::new();
-    ax.errorbar(x, y, yerr, xerr, fmt, color, label, capsize);
+    ax.errorbar(x, y, yerr_vec, xerr_vec, fmt, color, label, capsize);
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();

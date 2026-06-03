@@ -94,8 +94,8 @@ pub enum PlotElement {
     ErrorBar {
         x: Vec<f64>,
         y: Vec<f64>,
-        yerr: Option<f64>,
-        xerr: Option<f64>,
+        yerr: Option<Vec<f64>>,
+        xerr: Option<Vec<f64>>,
         fmt: String,
         color: String,
         label: Option<String>,

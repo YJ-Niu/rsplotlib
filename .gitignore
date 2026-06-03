@@ -30,6 +30,7 @@ Thumbs.db
 N238B W1-plots/
 N238B W1.csv
 wheelhouse/
+testing/
 analyze*.py
 check*.py
 compare_all.py

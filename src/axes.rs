@@ -186,6 +186,9 @@ impl Axes {
         let linestyle = ls.as_deref().unwrap_or(linestyle);
         let idx = self.element_count;
         self.element_count += 1;
+        // consume optional params to avoid unused variable warnings while preserving Python API
+        let _ = markersize;
+        let _ = markeredgewidth;
         let color_val = color.clone().unwrap_or_default();
         let linestyle_val = linestyle.to_string();
         self.elements.push(PlotElement::Line {
@@ -557,8 +560,8 @@ impl Axes {
         &mut self,
         x: Vec<f64>,
         y: Vec<f64>,
-        yerr: Option<f64>,
-        xerr: Option<f64>,
+        yerr: Option<Vec<f64>>,
+        xerr: Option<Vec<f64>>,
         fmt: &str,
         color: Option<String>,
         label: Option<String>,
@@ -936,8 +939,9 @@ impl Axes {
                         if v < y_min { y_min = v; }
                         if v > y_max { y_max = v; }
                     }
-                    if let Some(ye) = yerr {
-                        for &yv in y {
+                    if let Some(ye_vec) = yerr.as_ref() {
+                        for (i, &yv) in y.iter().enumerate() {
+                            let ye = if i < ye_vec.len() { ye_vec[i] } else { 0.0 };
                             if yv - ye < y_min { y_min = yv - ye; }
                             if yv + ye > y_max { y_max = yv + ye; }
                         }
@@ -1187,8 +1191,13 @@ impl Axes {
             mesh_builder.y_labels(0);
         }
 
-        mesh_builder.draw()
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
+        // 尝试禁用 plotters 的内置 mesh 绘制（我们使用自定义网格绘制逻辑）
+        // 尝试通过多种禁用调用关闭 mesh 的网格绘制
+        #[allow(unused_must_use)]
+        {
+            let _ = mesh_builder.disable_mesh().disable_x_mesh().disable_y_mesh().draw()
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
+        }
 
         let draw_grid_lines = |chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
                               vertical: bool, ticks: &[f64],
@@ -1257,7 +1266,7 @@ impl Axes {
 
         for el in &self.elements {
             match el {
-                PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, .. } => {
+                PlotElement::Line { x, y, color, linestyle: _, marker, linewidth, color_idx, solid_capstyle, .. } => {
                     let col = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
                     if x.len() >= 2 && x.len() == y.len() {
                         let points: Vec<(f64, f64)> = x.iter().zip(y.iter())
@@ -1522,8 +1531,10 @@ impl Axes {
                     let rgb = to_plotters_color(col);
                     let line_style: ShapeStyle = rgb.stroke_width(1).into();
                     let cap_half = capsize / 2.0;
-                    for (&xv, &yv) in x.iter().zip(y.iter()) {
-                        if let Some(ye) = yerr {
+                    for (i, (&xv, &yv)) in x.iter().zip(y.iter()).enumerate() {
+                        let ye = if let Some(vec) = yerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0 } } else { 0.0 };
+                        let xe = if let Some(vec) = xerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0 } } else { 0.0 };
+                        if ye != 0.0 {
                             chart.draw_series(std::iter::once(PathElement::new(
                                 vec![(xv, yv - ye), (xv, yv + ye)], line_style,
                             ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar line: {}", e)))?;
@@ -1534,7 +1545,7 @@ impl Axes {
                                 vec![(xv - cap_half, yv + ye), (xv + cap_half, yv + ye)], line_style,
                             ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar cap: {}", e)))?;
                         }
-                        if let Some(xe) = xerr {
+                        if xe != 0.0 {
                             chart.draw_series(std::iter::once(PathElement::new(
                                 vec![(xv - xe, yv), (xv + xe, yv)], line_style,
                             ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar xline: {}", e)))?;
@@ -1547,7 +1558,7 @@ impl Axes {
                         }
                         if !fmt.is_empty() {
                             let marker_name = fmt;
-                            draw_marker(chart, marker_name, xv, yv, 5.0, rgb)
+                            draw_marker(chart, marker_name, xv, yv, 3.0, rgb)
                                 .map_err(|e| PyRuntimeError::new_err(format!("ErrorBar marker: {}", e)))?;
                         }
                     }

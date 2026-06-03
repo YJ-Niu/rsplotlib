@@ -462,7 +462,11 @@ def _parse_plot_args(args, kwargs):
     if len(args) == 2:
         return args[0], args[1], kwargs
     elif len(args) == 1:
-        return range(len(args[0])), args[0], kwargs
+        try:
+            x = list(range(len(args[0])))
+        except Exception:
+            x = list(args[0]) if hasattr(args[0], '__iter__') else []
+        return x, args[0], kwargs
     return [], [], kwargs
 
 

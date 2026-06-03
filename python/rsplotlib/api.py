@@ -485,13 +485,32 @@ def twiny():
 
 # ==================== 图形控制 ====================
 
-def figure():
-    """创建新图形
-    
+def figure(num=None, figsize=None, dpi=None):
+    """创建新图形（兼容 Matplotlib 风格的 `figsize` 和 `dpi` 参数）
+
+    Args:
+        num: 图形编号（兼容，未使用）
+        figsize: (width, height) 元组，单位为英寸
+        dpi: 分辨率
+
     Returns:
         Figure: 创建的图形对象
     """
-    return _rsplotlib.figure()
+    fig = _rsplotlib.figure()
+    # 默认 dpi 保持与 pyplot 一致的 100
+    d = dpi if dpi is not None else 100
+    # 调用底层设置方法（Rust 侧实现）
+    try:
+        fig.set_dpi(d)
+    except Exception:
+        pass
+    if figsize is not None:
+        try:
+            w_inch, h_inch = figsize
+            fig.set_size(round(w_inch * d), round(h_inch * d))
+        except Exception:
+            pass
+    return fig
 
 
 def savefig(filename):
