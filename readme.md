@@ -48,7 +48,7 @@ uv pip install -r requirements.txt || true
 ./build_wheel.sh
 
 # 3. 运行示例脚本以生成图像
-python main.py
+uv run python main.py
 
 # 生成的图像位于 plots/ 或 N238B W1-plots/，与 Matplotlib 输出进行对比。
 ```
