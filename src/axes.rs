@@ -423,8 +423,8 @@ impl Axes {
         }
     }
 
-    #[pyo3(signature = (visible=None, c=None, lw=None, ls=None, axis=None))]
-    pub fn grid(&mut self, visible: Option<bool>, c: Option<String>, lw: Option<f64>, ls: Option<String>, axis: Option<String>) {
+    #[pyo3(signature = (visible=None, c=None, ls=None, lw=None, axis=None))]
+    pub fn grid(&mut self, visible: Option<bool>, c: Option<String>, ls: Option<String>, lw: Option<f64>, axis: Option<String>) {
         self.grid_visible = visible.unwrap_or(true);
         if let Some(a) = axis {
             self.grid_axis = a;
@@ -1034,19 +1034,43 @@ impl Axes {
 
         let mut mesh_builder = chart.configure_mesh();
 
-        let frame_color = RgbColor(50, 50, 50);
+        let frame_color = RgbColor(0, 0, 0);  // 黑色，与matplotlib一致
         let frame_lw = ((0.6f64).ceil().max(1.0)) as u32;
         let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw).into();
+
+        // 自动计算主tick位置（matplotlib兼容）：使用MaxNLocator的"漂亮"算法
+        fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
+            if min >= max || !min.is_finite() || !max.is_finite() {
+                return vec![min, max];
+            }
+            let range = max - min;
+            if range <= 0.0 { return vec![min]; }
+            // 选择合适的步长（matplotlib的MaxNLocator简化版）
+            let rough = range / 7.0;
+            let mag = 10f64.powf(rough.log10().floor());
+            let norm = rough / mag;
+            let step = if norm < 1.5 { mag } else if norm < 3.0 { 2.0 * mag } else if norm < 7.0 { 5.0 * mag } else { 10.0 * mag };
+            let start = (min / step).ceil() * step;
+            let end = (max / step).floor() * step;
+            let mut ticks = Vec::new();
+            let mut t = start;
+            while t <= end + step * 0.001 {
+                ticks.push(t);
+                t += step;
+            }
+            if ticks.is_empty() { ticks.push(min); }
+            ticks
+        }
 
         let computed_xticks: Option<Vec<f64>> = self.xaxis_major_locator.as_ref().map(|locator| {
             locator.bind(py).call_method1("tick_values", (x_min, x_max))
                 .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
-        }).flatten().or_else(|| self.xticks_val.clone());
+        }).flatten().or_else(|| self.xticks_val.clone()).or_else(|| Some(nice_ticks(x_min, x_max)));
 
         let computed_yticks: Option<Vec<f64>> = self.yaxis_major_locator.as_ref().map(|locator| {
             locator.bind(py).call_method1("tick_values", (y_min, y_max))
                 .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
-        }).flatten().or_else(|| self.yticks_val.clone());
+        }).flatten().or_else(|| self.yticks_val.clone()).or_else(|| Some(nice_ticks(y_min, y_max)));
 
         const MAX_MAJOR_TICKS_FOR_MINOR: usize = 30;
         const MAX_MINOR_TICKS: usize = 100;
@@ -1166,35 +1190,54 @@ impl Axes {
         mesh_builder.draw()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
 
-        let draw_grid_line = |chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
-                              x1: f64, y1: f64, x2: f64, y2: f64,
-                              color: RgbColor, lw: f64, _ls: &str| -> PyResult<()> {
+        let draw_grid_lines = |chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+                              vertical: bool, ticks: &[f64],
+                              color: RgbColor, lw: f64| -> PyResult<()> {
+            let rgb = to_plotters_color(color);
+            let lw_u32 = (lw.max(0.1)).ceil() as u32;
+            let style = rgb.stroke_width(lw_u32);
+            
+            let mut paths: Vec<Vec<(f64, f64)>> = Vec::new();
+            for &tick in ticks {
+                if vertical {
+                    if tick >= x_min && tick <= x_max {
+                        paths.push(vec![(tick, y_min), (tick, y_max)]);
+                    }
+                } else {
+                    if tick >= y_min && tick <= y_max {
+                        paths.push(vec![(x_min, tick), (x_max, tick)]);
+                    }
+                }
+            }
+            
+            for path in paths {
+                chart.draw_series(std::iter::once(PathElement::new(path, style)))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Grid line: {}", e)))?;
+            }
+            Ok(())
+        };
+        
+        let draw_single_line = |chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+                               x1: f64, y1: f64, x2: f64, y2: f64,
+                               color: RgbColor, lw: f64| -> PyResult<()> {
             let rgb = to_plotters_color(color);
             let lw_u32 = (lw.max(0.1)).ceil() as u32;
             let style = rgb.stroke_width(lw_u32);
             chart.draw_series(std::iter::once(PathElement::new(
                 vec![(x1, y1), (x2, y2)], style,
-            ))).map_err(|e| PyRuntimeError::new_err(format!("Grid line: {}", e)))?;
+            ))).map_err(|e| PyRuntimeError::new_err(format!("Line: {}", e)))?;
             Ok(())
         };
 
         if self.grid_visible {
             if self.grid_axis == "both" || self.grid_axis == "x" {
                 if let Some(ref ticks) = computed_xticks {
-                    for &tx in ticks {
-                        if tx >= x_min && tx <= x_max {
-                            draw_grid_line(chart, tx, y_min, tx, y_max, major_color, major_lw_f64, "-")?;
-                        }
-                    }
+                    draw_grid_lines(chart, true, ticks, major_color, major_lw_f64)?;
                 }
             }
             if self.grid_axis == "both" || self.grid_axis == "y" {
                 if let Some(ref ticks) = computed_yticks {
-                    for &ty in ticks {
-                        if ty >= y_min && ty <= y_max {
-                            draw_grid_line(chart, x_min, ty, x_max, ty, major_color, major_lw_f64, "-")?;
-                        }
-                    }
+                    draw_grid_lines(chart, false, ticks, major_color, major_lw_f64)?;
                 }
             }
         }
@@ -1202,20 +1245,12 @@ impl Axes {
         if self.minor_grid_visible {
             if self.minor_grid_x_visible || (!self.minor_grid_x_visible && !self.minor_grid_y_visible) {
                 if let Some(ref ticks) = computed_xminor {
-                    for &tx in ticks {
-                        if tx > x_min && tx < x_max {
-                            draw_grid_line(chart, tx, y_min, tx, y_max, minor_color, minor_lw_f64, "-")?;
-                        }
-                    }
+                    draw_grid_lines(chart, true, ticks, minor_color, minor_lw_f64)?;
                 }
             }
             if self.minor_grid_y_visible || (!self.minor_grid_x_visible && !self.minor_grid_y_visible) {
                 if let Some(ref ticks) = computed_yminor {
-                    for &ty in ticks {
-                        if ty > y_min && ty < y_max {
-                            draw_grid_line(chart, x_min, ty, x_max, ty, minor_color, minor_lw_f64, "-")?;
-                        }
-                    }
+                    draw_grid_lines(chart, false, ticks, minor_color, minor_lw_f64)?;
                 }
             }
         }
@@ -1232,11 +1267,12 @@ impl Axes {
                             })
                             .collect();
                         if points.len() >= 2 {
-                            let style = shape_style(col, *linewidth, linestyle);
-                            chart.draw_series(LineSeries::new(points.clone(), style))
+                            let rgb = to_plotters_color(col);
+                            let style = rgb.stroke_width(*linewidth as u32);
+                            let path = PathElement::new(points.clone(), style);
+                            chart.draw_series(std::iter::once(path))
                                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw line: {}", e)))?;
                             if solid_capstyle == "round" && *linewidth > 1.0 && marker.as_ref().map_or(true, |m| m.is_empty()) {
-                                let rgb = to_plotters_color(col);
                                 let circle_r = *linewidth / 2.0;
                                 let n_seg = 16;
                                 let cap_points = [points.first().unwrap().clone(), points.last().unwrap().clone()];
@@ -1401,14 +1437,14 @@ impl Axes {
                         text_style,
                     ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw text: {}", e)))?;
                 }
-                PlotElement::HLine { y, color, linestyle, linewidth, color_idx } => {
+                PlotElement::HLine { y, color, linewidth, color_idx, .. } => {
                     let col = parse_color(color, *color_idx).unwrap_or_else(|_| RgbColor(0, 0, 0));
-                    draw_grid_line(chart, x_min, *y, x_max, *y, col, *linewidth, linestyle)?;
+                    draw_single_line(chart, x_min, *y, x_max, *y, col, *linewidth)?;
                 }
-                PlotElement::VLine { x, color, linestyle, linewidth, color_idx } => {
+                PlotElement::VLine { x, color, linewidth, color_idx, .. } => {
                     let col = parse_color(color, *color_idx).unwrap_or_else(|_| RgbColor(0, 0, 0));
                     let x_val = if self.xscale == "log" { x.max(1e-10).log10() } else { *x };
-                    draw_grid_line(chart, x_val, y_min, x_val, y_max, col, *linewidth, linestyle)?;
+                    draw_single_line(chart, x_val, y_min, x_val, y_max, col, *linewidth)?;
                 }
                 PlotElement::Pie { x, labels, colors, autopct, startangle } => {
                     let total: f64 = x.iter().sum();
@@ -1528,7 +1564,7 @@ impl Axes {
                         }
                     } else {
                         for (&xv, &yv) in x.iter().zip(y.iter()) {
-                            draw_grid_line(chart, xv, 0.0, xv, yv, col, 1.0, linefmt)?;
+                            draw_single_line(chart, xv, 0.0, xv, yv, col, 1.0)?;
                         }
                     }
                     for (&xv, &yv) in x.iter().zip(y.iter()) {

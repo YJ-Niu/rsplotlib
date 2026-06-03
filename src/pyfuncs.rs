@@ -11,7 +11,9 @@ pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
     if fig_ref.axes_list.is_empty() {
         return Err(PyRuntimeError::new_err("No axes found in current figure."));
     }
-    Ok(fig_ref.axes_list[0].clone_ref(py))
+    // 返回最后创建的axes（更符合matplotlib行为，plt.*应该作用于最近操作的axes）
+    let last_idx = fig_ref.axes_list.len() - 1;
+    Ok(fig_ref.axes_list[last_idx].clone_ref(py))
 }
 
 pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
@@ -65,7 +67,7 @@ pub fn title(py: Python, text: String) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (visible=None, c=None, ls=None, lw=None, axis=None))]
 pub fn grid(py: Python, visible: Option<bool>, c: Option<String>, ls: Option<String>, lw: Option<f64>, axis: Option<String>) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).grid(visible, c, lw, ls, axis);
+    get_current_axes(py)?.borrow_mut(py).grid(visible, c, ls, lw, axis);
     Ok(())
 }
 
@@ -529,7 +531,9 @@ pub fn gca(py: Python) -> PyResult<Py<Axes>> {
     if fig_ref.axes_list.is_empty() {
         return Err(PyRuntimeError::new_err("No axes found. Create a figure first."));
     }
-    Ok(fig_ref.axes_list[0].clone_ref(py))
+    // 返回最后创建的axes（更符合matplotlib行为）
+    let last_idx = fig_ref.axes_list.len() - 1;
+    Ok(fig_ref.axes_list[last_idx].clone_ref(py))
 }
 
 #[pyfunction]

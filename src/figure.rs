@@ -112,10 +112,12 @@ impl Figure {
             let row_stop: f64 = spec.getattr("rowStop")?.extract::<i32>().map(|v| v as f64).unwrap_or(num_rows);
             let col_start: f64 = spec.getattr("colStart")?.extract::<i32>().map(|v| v as f64).unwrap_or(0.0);
             let col_stop: f64 = spec.getattr("colStop")?.extract::<i32>().map(|v| v as f64).unwrap_or(num_cols);
+            
             let left = col_start / num_cols;
             let right = col_stop / num_cols;
             let bottom = 1.0 - row_stop / num_rows;
             let top = 1.0 - row_start / num_rows;
+            
             (left, right, bottom, top)
         } else {
             (0.0, 1.0, 0.0, 1.0)
@@ -137,12 +139,11 @@ impl Figure {
             let svg_h = (self.height as f64 * 72.0 / self.dpi).round() as u32;
             let backend = SVGBackend::new(filename, (svg_w, svg_h));
             self.render_to_backend(py, backend, svg_w, svg_h)?;
-            let w_in = svg_w as f64 / 72.0;
-            let h_in = svg_h as f64 / 72.0;
+            // 与matplotlib一致，使用pt单位
             if let Ok(content) = std::fs::read_to_string(filename) {
                 let content = content
-                    .replacen(&format!("width=\"{}\"", svg_w), &format!("width=\"{:.4}in\"", w_in), 1)
-                    .replacen(&format!("height=\"{}\"", svg_h), &format!("height=\"{:.4}in\"", h_in), 1);
+                    .replacen(&format!("width=\"{}\"", svg_w), &format!("width=\"{}pt\"", svg_w), 1)
+                    .replacen(&format!("height=\"{}\"", svg_h), &format!("height=\"{}pt\"", svg_h), 1);
                 let _ = std::fs::write(filename, content);
             }
             Ok(())
@@ -174,9 +175,7 @@ impl Figure {
     {
         let root = backend.into_drawing_area();
 
-        let fig_bg = parse_color(&self.facecolor, 0).unwrap_or(RgbColor(255, 255, 255));
-        root.fill(&to_plotters_color(fig_bg))
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to fill background: {}", e)))?;
+        // 不填充全屏背景，与matplotlib一致（matplotlib的SVG不包含全屏背景rect）
 
         if self.axes_list.is_empty() {
             root.present()
@@ -205,45 +204,43 @@ impl Figure {
                 (0.0, 1.0, 0.0, 1.0)
             };
 
-            let margin_l = self.subplot_left;
-            let margin_r = 1.0 - self.subplot_right;
-            let margin_b = self.subplot_bottom;
-            let margin_t = 1.0 - self.subplot_top;
+            let (plot_left, plot_right, plot_bottom_frac, plot_top_frac) = {
+                let margin_l = self.subplot_left;
+                let margin_r = 1.0 - self.subplot_right;
+                let margin_b = self.subplot_bottom;
+                let margin_t = 1.0 - self.subplot_top;
+                let usable_w = 1.0 - margin_l - margin_r;
+                let usable_h = 1.0 - margin_b - margin_t;
+                (
+                    left * usable_w + margin_l,
+                    right * usable_w + margin_l,
+                    bottom * usable_h + margin_b,
+                    top * usable_h + margin_b,
+                )
+            };
 
-            let usable_w = 1.0 - margin_l - margin_r;
-            let usable_h = 1.0 - margin_b - margin_t;
+            let x0 = (plot_left * total_w) as f64;
+            let y0 = ((1.0 - plot_top_frac) * total_h) as f64;
+            let sub_w = ((plot_right - plot_left) * total_w) as f64;
+            let sub_h = ((plot_top_frac - plot_bottom_frac) * total_h) as f64;
 
-            let plot_left = left * usable_w + margin_l;
-            let plot_right = right * usable_w + margin_l;
-            let plot_bottom_frac = bottom * usable_h + margin_b;
-            let plot_top_frac = top * usable_h + margin_b;
-
-            let x0 = (plot_left * total_w) as i32;
-            let y0 = ((1.0 - plot_top_frac) * total_h) as i32;
-            let sub_w = ((plot_right - plot_left) * total_w) as u32;
-            let sub_h = ((plot_top_frac - plot_bottom_frac) * total_h) as u32;
-
-            if sub_w <= 0 || sub_h <= 0 {
+            if sub_w <= 0.0 || sub_h <= 0.0 {
                 drop(ax);
                 continue;
             }
 
             let chart_area = root.clone().shrink(
-                (x0, y0),
-                (sub_w, sub_h),
+                (x0 as i32, y0 as i32),
+                (sub_w as u32, sub_h as u32),
             );
 
-            let margin_top = if ax.title.is_empty() { 5 } else { 25 };
-            let margin_right = 10;
-            let margin_bottom = if ax.xlabel.is_empty() { 5 } else { 25 };
-            let margin_left = if ax.ylabel.is_empty() { 5 } else { 40 };
-
+            // GridSpec已定义了包含标签的完整区域，ChartBuilder不需要额外margin
+            // 与matplotlib一致：GridSpec位置就是axes的完整边界框
             let mut chart = ChartBuilder::on(&chart_area)
-                .margin_top(margin_top)
-                .margin_right(margin_right)
-                .margin_bottom(margin_bottom)
-                .margin_left(margin_left)
-                .caption(ax.title.clone(), ("sans-serif", 18))
+                .margin_top(0)
+                .margin_right(0)
+                .margin_bottom(0)
+                .margin_left(0)
                 .build_cartesian_2d(x_min..x_max, y_min..y_max)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to build chart: {}", e)))?;
 
@@ -256,11 +253,10 @@ impl Figure {
                 let (ux_min, ux_max) = if twin.is_twin_x { (tx_min, tx_max) } else { (x_min, x_max) };
                 let (uy_min, uy_max) = if twin.is_twin_y { (ty_min, ty_max) } else { (y_min, y_max) };
                 let mut twin_chart = ChartBuilder::on(&chart_area)
-                    .margin_top(if twin.title.is_empty() { 5 } else { 25 })
-                    .margin_right(10)
-                    .margin_bottom(if twin.xlabel.is_empty() { 5 } else { 25 })
-                    .margin_left(if twin.ylabel.is_empty() { 5 } else { 40 })
-                    .caption(twin.title.clone(), ("sans-serif", 18))
+                    .margin_top(0)
+                    .margin_right(0)
+                    .margin_bottom(0)
+                    .margin_left(0)
                     .build_cartesian_2d(ux_min..ux_max, uy_min..uy_max)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to build twin chart: {}", e)))?;
                 twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max))?;

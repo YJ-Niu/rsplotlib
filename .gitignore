@@ -31,7 +31,10 @@ N238B W1-plots/
 N238B W1.csv
 wheelhouse/
 analyze*.py
+check*.py
+compare_all.py
 test*.py
+*.svg
 # Environment
 .env
 .env.local

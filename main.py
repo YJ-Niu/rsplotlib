@@ -975,6 +975,7 @@ class Reportopp:
                 thread.join()
 
             plt.savefig(os.path.join(path_p, f'{plt_idix} {test_name}.svg'))
+            plt.savefig(os.path.join(path_p, f'{plt_idix} {test_name}.png'))
             fig.clf()
             fig.clear()
             plt.close("all")
