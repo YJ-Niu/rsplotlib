@@ -133,12 +133,12 @@ impl Figure {
     fn savefig(&self, py: Python, filename: &str) -> PyResult<()> {
         if filename.ends_with(".png") || filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
             let backend = BitMapBackend::new(filename, (self.width, self.height));
-            self.render_to_backend(py, backend, self.width, self.height)
+            self.render_to_backend(py, backend, self.width, self.height, true)
         } else {
             let svg_w = (self.width as f64 * 72.0 / self.dpi).round() as u32;
             let svg_h = (self.height as f64 * 72.0 / self.dpi).round() as u32;
             let backend = SVGBackend::new(filename, (svg_w, svg_h));
-            self.render_to_backend(py, backend, svg_w, svg_h)?;
+            self.render_to_backend(py, backend, svg_w, svg_h, false)?;
             // 与matplotlib一致，使用pt单位
             if let Ok(content) = std::fs::read_to_string(filename) {
                 let content = content
@@ -155,7 +155,7 @@ impl Figure {
         let path = tmpdir.join("rsplot_output.png");
         let filename = path.to_str().unwrap_or("/tmp/rsplot_output.png").to_string();
         let backend = BitMapBackend::new(&filename, (self.width, self.height));
-        self.render_to_backend(py, backend, self.width, self.height)?;
+        self.render_to_backend(py, backend, self.width, self.height, true)?;
 
         if cfg!(target_os = "macos") {
             let _ = std::process::Command::new("open").arg(&filename).spawn();
@@ -169,15 +169,17 @@ impl Figure {
 }
 
 impl Figure {
-    fn render_to_backend<B: DrawingBackend>(&self, py: Python, backend: B, actual_w: u32, actual_h: u32) -> PyResult<()>
+    fn render_to_backend<B: DrawingBackend>(&self, py: Python, backend: B, actual_w: u32, actual_h: u32, fill_bg: bool) -> PyResult<()>
     where
         B::ErrorType: 'static,
     {
         let root = backend.into_drawing_area();
 
-        // 为位图输出填充白色背景以匹配 Matplotlib 的默认白色画布
-        // 这也会在 SVG 中添加白色背景矩形，但在多数对比场景中更易于可视比对
-        let _ = root.fill(&WHITE);
+        // 仅位图后端填充白色背景，避免在SVG中产生额外的背景rect，
+        // 保持与matplotlib的SVG输出一致（matplotlib SVG仅在axes区域内有白色背景）
+        if fill_bg {
+            let _ = root.fill(&WHITE);
+        }
 
         if self.axes_list.is_empty() {
             root.present()

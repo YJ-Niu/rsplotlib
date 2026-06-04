@@ -23,7 +23,7 @@ uv pip install matplotlib
 2. 重构（Refactor）: 将修复后的代码整理为更清晰的模块（优先修改 `python/rsplotlib` 下的代码）。
 3. 画图（Plot）: 使用 `main.py` 或 `python/examples.py` 生成对比图像，输出目录为 `plots/` 或 `N238B W1-plots/`。
 4. 对比（Compare）: 将生成的 SVG/PNG 与使用 Matplotlib 原生生成的图片逐一比较，记录差异（布局、字体、间距、图例、刻度等）。
-5. 再修复（Iterate）: 基于差异继续修复并进入下一轮。
+5. 再修复（Iterate）: 基于差异继续修复并自动进入下一轮。
 
 主要关注点
 
@@ -64,4 +64,4 @@ uv run python main.py
 
 - 提交 PR 时请附带生成的示例图像以及说明本次改动修复/改进了哪些问题。
 
-顺序循环原则：修复一部分问题后 → 重构 → 画图 → 对比 → 再修复（重复）
+顺序循环原则：修复一部分问题后 → 重构 → 画图 → 对比 → 再修复（自动重复迭代）

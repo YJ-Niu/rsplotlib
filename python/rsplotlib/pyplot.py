@@ -5,7 +5,11 @@
 """
 
 from . import rsplotlib as _rsplotlib
+from ._rcparams import rcParams, rcParamsOrig
+from ._figure_defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
 
+
+# ==================== 内部辅助函数 ====================
 
 def _get_axes():
     """获取当前 axes，如果没有则返回 None"""
@@ -23,77 +27,104 @@ def _get_figure():
         return None
 
 
+def _route_to_ax(ax_method_name, module_method, *args):
+    """将调用路由到当前 axes（如果存在）或模块级函数
+
+    Args:
+        ax_method_name: axes 的方法名（字符串）
+        module_method: 模块级函数（可调用对象）
+        *args: 传递给方法的参数
+    """
+    ax = _get_axes()
+    if ax is not None and hasattr(ax, ax_method_name):
+        method = getattr(ax, ax_method_name)
+        method(*args)
+        return _get_figure()
+    return module_method(*args)
+
+
+def _map_aliases(kwargs):
+    """规范化 matplotlib 别名到标准名"""
+    alias_map = {
+        'lw': 'linewidth',
+        'c': 'color',
+        'ls': 'linestyle',
+    }
+    for alias, target in alias_map.items():
+        if alias in kwargs and target not in kwargs:
+            kwargs[target] = kwargs.pop(alias)
+        elif alias in kwargs:
+            kwargs.pop(alias)
+
+
+def _parse_plot_args(args, kwargs):
+    """解析 plot() 的位置参数为 (x, y, kwargs)"""
+    if len(args) == 2:
+        return args[0], args[1], kwargs
+    elif len(args) == 1:
+        try:
+            x = list(range(len(args[0])))
+        except Exception:
+            x = list(args[0]) if hasattr(args[0], '__iter__') else []
+        return x, args[0], kwargs
+    return [], [], kwargs
+
+
 # ==================== 绘图函数 ====================
 
 def plot(*args, **kwargs):
     """绘制折线图
-    
+
     支持 matplotlib 兼容的关键字参数别名:
         lw: 线宽 (linewidth)
         c: 颜色 (color)
         ls: 线型 (linestyle)
-    
+
     如果存在当前 axes，则复用它；否则创建新的 Figure 和 Axes。
     """
     _map_aliases(kwargs)
     x, y, kw = _parse_plot_args(args, kwargs)
-    ax = _get_axes()
-    if ax is not None:
-        ax.plot(x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'), kw.get('marker'), kw.get('linewidth'), kw.get('markersize'), kw.get('markeredgewidth'), kw.get('solid_capstyle'))
-        return _get_figure()
-    return _rsplotlib.plot(x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'), kw.get('marker'), kw.get('linewidth'), kw.get('markersize'), kw.get('markeredgewidth'), kw.get('solid_capstyle'))
+    plot_args = (x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'),
+                 kw.get('marker'), kw.get('linewidth'), kw.get('markersize'),
+                 kw.get('markeredgewidth'), kw.get('solid_capstyle'))
+    return _route_to_ax('plot', lambda *a: _rsplotlib.plot(*a), *plot_args)
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
     """绘制散点图"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.scatter(x, y, s, c, marker, label, alpha)
-        return _get_figure()
-    return _rsplotlib.scatter(x, y, s, c, marker, label, alpha)
+    return _route_to_ax('scatter', _rsplotlib.scatter, x, y, s, c, marker, label, alpha)
 
 
 def bar(x, height, width=0.8, color=None, label=None):
     """绘制柱状图"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.bar(x, height, width, color, label)
-        return _get_figure()
-    return _rsplotlib.bar(x, height, width, color, label)
+    return _route_to_ax('bar', _rsplotlib.bar, x, height, width, color, label)
 
 
 def barh(y, width, height=0.8, color=None, label=None):
     """绘制水平柱状图"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.barh(y, width, height, color, label)
-        return _get_figure()
-    return _rsplotlib.barh(y, width, height, color, label)
+    return _route_to_ax('barh', _rsplotlib.barh, y, width, height, color, label)
 
 
 def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs):
     """绘制直方图
-    
+
     支持 matplotlib 兼容的参数:
         facecolor: 填充颜色 (优先级高于 color)
         align: 对齐方式 ('mid', 'left', 'right')
         histtype: 直方图类型 ('bar', 'step', 'stepfilled')
-    
+
     如果存在当前 axes，则复用它；否则创建新的 Figure 和 Axes。
     """
-    ax = _get_axes()
     facecolor = kwargs.pop('facecolor', None)
     align = kwargs.pop('align', None)
     histtype = kwargs.pop('histtype', None)
     _color = facecolor if facecolor is not None else color
-    
-    # 处理单数据集和多数据集
+
     if x and isinstance(x[0], (list, tuple)):
         x_list = [list(v) for v in x]
     else:
         x_list = [list(x)]
-    
-    # 处理颜色参数：字符串或列表
+
     if _color is not None:
         if isinstance(_color, str):
             color_list = [_color] * len(x_list)
@@ -103,92 +134,49 @@ def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs)
             color_list = None
     else:
         color_list = None
-    
-    if ax is not None:
-        result = ax.hist(x_list, bins, density, label, alpha, color_list, None, align, histtype)
-        return _get_figure()
-    
-    result = _rsplotlib.hist(x_list, bins, density, label, alpha, color_list)
-    return result
 
-
-def _unwrap_hist_result(ax, result):
-    """将 hist 返回的 Vec<Vec<f64>> 包装成兼容 matplotlib 的形式
-    
-    当只有一个数据集时，将 n 从 [[...]] 解包为 [...]
-    """
-    n, bins, patches = result
-    if len(n) == 1:
-        return (n[0], bins, patches)
-    return (n, bins, patches)
+    return _route_to_ax('hist', _rsplotlib.hist, x_list, bins, density, label, alpha, color_list, None, align, histtype)
 
 
 def pie(x, labels=None, colors=None, autopct=False, **kwargs):
     """绘制饼图"""
-    autopct_str = None
     if autopct and isinstance(autopct, str):
         autopct_str = autopct
     elif autopct:
         autopct_str = "%1.1f%%"
-    ax = _get_axes()
-    if ax is not None:
-        ax.pie(x, labels, colors, autopct_str)
-        return _get_figure()
-    return _rsplotlib.pie(x, labels, colors, autopct_str)
+    else:
+        autopct_str = None
+    return _route_to_ax('pie', _rsplotlib.pie, x, labels, colors, autopct_str)
 
 
 def boxplot(x, labels=None, vert=True, **kwargs):
     """绘制箱线图"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.boxplot(x, labels, vert)
-        return _get_figure()
-    return _rsplotlib.boxplot(x, labels, vert)
+    return _route_to_ax('boxplot', _rsplotlib.boxplot, x, labels, vert)
 
 
 def fill_between(x, y1, y2=0.0, color=None, alpha=0.3, label=None, **kwargs):
     """填充区域"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.fill_between(x, y1, y2, color, alpha, label)
-        return _get_figure()
-    return _rsplotlib.fill_between(x, y1, y2, color, alpha, label)
+    return _route_to_ax('fill_between', _rsplotlib.fill_between, x, y1, y2, color, alpha, label)
 
 
 def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0, **kwargs):
     """绘制误差棒图"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
-        return _get_figure()
-    return _rsplotlib.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
+    return _route_to_ax('errorbar', _rsplotlib.errorbar, x, y, yerr, xerr, fmt, color, label, capsize)
 
 
 def stem(x, y, linefmt=None, markerfmt=None, label=None, **kwargs):
     """绘制茎叶图"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.stem(x, y, linefmt or '-', markerfmt or 'o', label)
-        return _get_figure()
-    return _rsplotlib.stem(x, y, linefmt or '-', markerfmt or 'o', label)
+    return _route_to_ax('stem', _rsplotlib.stem, x, y, linefmt or '-', markerfmt or 'o', label)
 
 
 def step(x, y, where='pre', label=None, color=None, linestyle='-', linewidth=1.5, **kwargs):
     """绘制阶梯图"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.step(x, y, where, label, color, linestyle, linewidth)
-        return _get_figure()
-    return _rsplotlib.step(x, y, where, label, color, linestyle, linewidth)
+    return _route_to_ax('step', _rsplotlib.step, x, y, where, label, color, linestyle, linewidth)
 
 
 def imshow(x, cmap='viridis', aspect='auto', **kwargs):
     """显示图像"""
-    ax = _get_axes()
-    if ax is not None:
-        ax.imshow(x, cmap, aspect)
-        return _get_figure()
-    return _rsplotlib.imshow(x, cmap, aspect)
+    return _route_to_ax('imshow', _rsplotlib.imshow, x, cmap, aspect)
 
 
 # ==================== 辅助元素 ====================
@@ -199,7 +187,6 @@ def text(x, y, s, fontdict=None, **kwargs):
     color = kwargs.get('color', fontdict.get('color', 'black') if fontdict else 'black')
     c = kwargs.get('c', None)
     family = kwargs.get('family', None)
-    # Convert s to string to handle int/float types
     if not isinstance(s, str):
         s = str(s)
     return _rsplotlib.text(x, y, s, fontsize, color, c, family)
@@ -325,7 +312,7 @@ def tight_layout(**kwargs):
 
 def subplots_adjust(left=None, right=None, bottom=None, top=None, wspace=None, hspace=None):
     """调整子图布局参数"""
-    fig = _get_current_figure()
+    fig = _get_figure()
     if fig is not None:
         fig.subplots_adjust(left, right, bottom, top, wspace, hspace)
 
@@ -349,20 +336,20 @@ def twiny():
 
 def figure(num=None, figsize=None, dpi=None, **kwargs):
     """创建新图形
-    
+
     Args:
         num: 图形编号 (未使用, 兼容 matplotlib)
         figsize: (width, height) 元组，单位为英寸
         dpi: 分辨率
     """
     fig = _rsplotlib.figure()
-    d = dpi if dpi is not None else 100
+    d = dpi if dpi is not None else DEFAULT_DPI
     fig.set_dpi(d)
     if figsize is not None:
         w_inch, h_inch = figsize
         fig.set_size(round(w_inch * d), round(h_inch * d))
     else:
-        w, h = rcParams.get('figure.figsize', [6.4, 4.8])
+        w, h = rcParams.get('figure.figsize', list(DEFAULT_FIGSIZE))
         fig.set_size(round(w * d), round(h * d))
     return fig
 
@@ -399,7 +386,7 @@ def clf():
 
 def close(fig=None):
     """关闭图形
-    
+
     Args:
         fig: 图形或 'all' (兼容 matplotlib)
     """
@@ -408,15 +395,18 @@ def close(fig=None):
 
 def axis(arg=None, **kwargs):
     """坐标轴控制
-    
+
     支持:
         axis('off'): 隐藏坐标轴
         axis('equal'): 等比例
         axis('tight'): 紧凑
     """
     if arg == 'off':
-        _set_axis_off()
-    elif arg == 'equal' or arg == 'scaled':
+        try:
+            _rsplotlib.gca()._axis_off()
+        except Exception:
+            pass
+    elif arg in ('equal', 'scaled'):
         gca().set_aspect('equal')
     return None
 
@@ -426,75 +416,10 @@ def colorbar(mappable=None, **kwargs):
     pass
 
 
-# ==================== 当前图形/坐标轴辅助 ====================
+# ==================== rcParams 重新导出 ====================
+# rcParams / rcParamsOrig 从 _rcparams 模块导入，提供统一的配置访问
+# （保留此注释以便读者了解 rcParams 的来源）
 
-def _get_current_figure():
-    try:
-        return _rsplotlib.gcf()
-    except:
-        return None
-
-
-def _set_axis_off():
-    try:
-        ax = _rsplotlib.gca()
-        ax._axis_off()
-    except:
-        pass
-
-
-def _map_aliases(kwargs):
-    alias_map = {
-        'lw': 'linewidth',
-        'c': 'color',
-        'ls': 'linestyle',
-        'marker': 'marker',
-        'label': 'label',
-    }
-    for alias, target in alias_map.items():
-        if alias in kwargs and target not in kwargs:
-            kwargs[target] = kwargs.pop(alias)
-        elif alias in kwargs:
-            kwargs.pop(alias)
-
-
-def _parse_plot_args(args, kwargs):
-    if len(args) == 2:
-        return args[0], args[1], kwargs
-    elif len(args) == 1:
-        try:
-            x = list(range(len(args[0])))
-        except Exception:
-            x = list(args[0]) if hasattr(args[0], '__iter__') else []
-        return x, args[0], kwargs
-    return [], [], kwargs
-
-
-# ==================== rcParams 支持 ====================
-
-class RcParams(dict):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.update({
-            'font.sans-serif': ['Helvetica', 'Arial', 'sans-serif'],
-            'axes.unicode_minus': True,
-            'font.size': 10,
-            'figure.figsize': [6.4, 4.8],
-            'figure.dpi': 100.0,
-        })
-
-    def __getitem__(self, key):
-        try:
-            return super().__getitem__(key)
-        except KeyError:
-            return None
-
-    def __setitem__(self, key, value):
-        super().__setitem__(key, value)
-
-
-rcParams = RcParams()
-rcParamsOrig = RcParams()
 
 
 def get_cmap(name=None, lut=None):

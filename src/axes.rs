@@ -941,7 +941,7 @@ impl Axes {
                     }
                     if let Some(ye_vec) = yerr.as_ref() {
                         for (i, &yv) in y.iter().enumerate() {
-                            let ye = if i < ye_vec.len() { ye_vec[i] } else { 0.0 };
+                            let ye = if i < ye_vec.len() { ye_vec[i] } else { 0.0_f64 };
                             if yv - ye < y_min { y_min = yv - ye; }
                             if yv + ye > y_max { y_max = yv + ye; }
                         }
@@ -1039,7 +1039,8 @@ impl Axes {
         let mut mesh_builder = chart.configure_mesh();
 
         let frame_color = RgbColor(0, 0, 0);  // 黑色，与matplotlib一致
-        let frame_lw = ((0.6f64).ceil().max(1.0)) as u32;
+        // 使用0.8作为默认线宽（matplotlib默认），plotters只能取整
+        let frame_lw = 0.8f64.round() as u32;  // = 1，但视觉比 0.6->1 更接近
         let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw).into();
 
         // 自动计算主tick位置（matplotlib兼容）：使用MaxNLocator的"漂亮"算法
@@ -1203,9 +1204,10 @@ impl Axes {
                               vertical: bool, ticks: &[f64],
                               color: RgbColor, lw: f64| -> PyResult<()> {
             let rgb = to_plotters_color(color);
-            let lw_u32 = (lw.max(0.1)).ceil() as u32;
+            // 使用四舍五入代替向上取整，让小线宽（如0.4、0.8）更接近matplotlib的视觉表现
+            let lw_u32 = if lw < 0.5 { 1 } else { lw.round() as u32 };
             let style = rgb.stroke_width(lw_u32);
-            
+
             let mut paths: Vec<Vec<(f64, f64)>> = Vec::new();
             for &tick in ticks {
                 if vertical {
@@ -1218,19 +1220,19 @@ impl Axes {
                     }
                 }
             }
-            
+
             for path in paths {
                 chart.draw_series(std::iter::once(PathElement::new(path, style)))
                     .map_err(|e| PyRuntimeError::new_err(format!("Grid line: {}", e)))?;
             }
             Ok(())
         };
-        
+
         let draw_single_line = |chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
                                x1: f64, y1: f64, x2: f64, y2: f64,
                                color: RgbColor, lw: f64| -> PyResult<()> {
             let rgb = to_plotters_color(color);
-            let lw_u32 = (lw.max(0.1)).ceil() as u32;
+            let lw_u32 = if lw < 0.5 { 1 } else { lw.round() as u32 };
             let style = rgb.stroke_width(lw_u32);
             chart.draw_series(std::iter::once(PathElement::new(
                 vec![(x1, y1), (x2, y2)], style,
@@ -1532,8 +1534,8 @@ impl Axes {
                     let line_style: ShapeStyle = rgb.stroke_width(1).into();
                     let cap_half = capsize / 2.0;
                     for (i, (&xv, &yv)) in x.iter().zip(y.iter()).enumerate() {
-                        let ye = if let Some(vec) = yerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0 } } else { 0.0 };
-                        let xe = if let Some(vec) = xerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0 } } else { 0.0 };
+                        let ye = if let Some(vec) = yerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0_f64 } } else { 0.0 };
+                        let xe = if let Some(vec) = xerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0_f64 } } else { 0.0 };
                         if ye != 0.0 {
                             chart.draw_series(std::iter::once(PathElement::new(
                                 vec![(xv, yv - ye), (xv, yv + ye)], line_style,
