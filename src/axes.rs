@@ -5,7 +5,7 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::style::{ShapeStyle, text_anchor::{HPos, VPos, Pos}};
 use plotters::prelude::*;
 
-use crate::colors::{RgbColor, parse_color, default_color, default_color_str, shape_style, to_plotters_color};
+use crate::colors::{RgbColor, parse_color, default_color, default_color_str, to_plotters_color};
 use crate::elements::PlotElement;
 use crate::marker::draw_marker;
 
@@ -89,12 +89,13 @@ pub struct Axes {
     pub xlabel: String,
     pub ylabel: String,
     pub title: String,
+    pub title_fontsize: f64,
     pub xlim: Option<(f64, f64)>,
     pub ylim: Option<(f64, f64)>,
     pub grid_visible: bool,
     pub legend_loc: Option<String>,
     pub element_count: usize,
-    pub legend_labels: Vec<(String, RgbColor, String, Option<String>)>,
+    pub legend_labels: Vec<(String, RgbColor, String, Option<String>, f64)>,
     pub xscale: String,
     pub yscale: String,
     pub xticks_val: Option<Vec<f64>>,
@@ -140,6 +141,7 @@ impl Clone for Axes {
             xlabel: self.xlabel.clone(),
             ylabel: self.ylabel.clone(),
             title: self.title.clone(),
+            title_fontsize: self.title_fontsize,
             xlim: self.xlim,
             ylim: self.ylim,
             grid_visible: self.grid_visible,
@@ -186,6 +188,79 @@ impl Clone for Axes {
     }
 }
 
+/// 解析 matplotlib 格式字符串
+/// 返回 (marker, linestyle, color) 三元组，如果字符串不是 fmt 格式则返回 None
+fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    // 已知 marker 字符
+    const MARKERS: &[&str] = &["o", "s", "^", "v", "D", "d", "*", "+", "x", ".", ",", "|", "_", "h", "H", "p", "P", "<", ">", "1", "2", "3", "4"];
+    // 已知 color
+    const COLORS: &[&str] = &["b", "g", "r", "c", "m", "y", "k", "w"];
+
+    let mut found_marker: Option<String> = None;
+    let mut found_ls: Option<String> = None;
+    let mut found_color: Option<String> = None;
+    let mut i: usize = 0;
+
+    // 尝试解析 linestyle（在前缀位置时优先）
+    if fmt.starts_with("--") {
+        found_ls = Some("--".to_string());
+        i = 2;
+    } else if fmt.starts_with("-.") {
+        found_ls = Some("-.".to_string());
+        i = 2;
+    } else if fmt.starts_with('-') {
+        found_ls = Some("-".to_string());
+        i = 1;
+    } else if fmt.starts_with(':') {
+        found_ls = Some(":".to_string());
+        i = 1;
+    }
+
+    // 解析 color（单字符）
+    if i < fmt.len() {
+        let c = &fmt[i..i+1];
+        if COLORS.contains(&c) {
+            found_color = Some(c.to_string());
+            i += 1;
+        }
+    }
+
+    // 解析 marker
+    if i < fmt.len() {
+        let m1 = &fmt[i..i+1];
+        if MARKERS.contains(&m1) {
+            found_marker = Some(m1.to_string());
+            i += 1;
+        }
+        // 检查是否还有更多 marker 字符
+        while i < fmt.len() {
+            let m = &fmt[i..i+1];
+            if MARKERS.contains(&m) {
+                found_marker = Some(m.to_string());
+                i += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // 如果还有剩余字符，说明不是 fmt 字符串
+    if i < fmt.len() {
+        return None;
+    }
+
+    // 必须至少解析出 marker 或 linestyle 才算 fmt 字符串
+    if found_marker.is_none() && found_ls.is_none() && found_color.is_none() {
+        return None;
+    }
+
+    Some((found_marker, found_ls, found_color))
+}
+
+fn is_format_string(s: &str) -> bool {
+    parse_fmt_string(s).is_some()
+}
+
 #[pymethods]
 impl Axes {
     #[new]
@@ -195,6 +270,7 @@ impl Axes {
             xlabel: String::new(),
             ylabel: String::new(),
             title: String::new(),
+            title_fontsize: 12.0,
             xlim: None,
             ylim: None,
             grid_visible: false,
@@ -259,32 +335,65 @@ impl Axes {
         markeredgewidth: Option<f64>,
         solid_capstyle: Option<String>,
     ) -> PyResult<()> {
+        // matplotlib 兼容：解析格式字符串
+        // 如果 label 是格式字符串（如 'o', '-', 'r--', 'b-o'），从其中提取 marker/linestyle/color
+        let mut actual_label = label;
+        let mut actual_marker = marker;
+        let mut actual_linestyle = linestyle.to_string();
+        let mut actual_color = color;
+        if let Some(ref lbl) = actual_label {
+            if is_format_string(lbl) {
+                if let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(lbl) {
+                    if actual_marker.is_none() {
+                        actual_marker = fmt_marker;
+                    }
+                    if ls.is_none() && linestyle == "-" {
+                        if let Some(ls_val) = fmt_ls {
+                            actual_linestyle = ls_val;
+                        }
+                    }
+                    if actual_color.is_none() {
+                        actual_color = fmt_color;
+                    }
+                    actual_label = None;
+                }
+            }
+        }
+
         let x_vec = py_to_vec_option_f64(&x)?;
         let y_vec = py_to_vec_option_f64(&y)?;
-        let color = c.or(color);
+        let color = c.or(actual_color);
         let linewidth = lw.unwrap_or(linewidth);
-        let linestyle = ls.as_deref().unwrap_or(linestyle);
+        let linestyle = ls.as_deref().unwrap_or(&actual_linestyle);
         let idx = self.element_count;
         self.element_count += 1;
         // consume optional params to avoid unused variable warnings while preserving Python API
-        let _ = markersize;
         let _ = markeredgewidth;
         let color_val = color.clone().unwrap_or_default();
         let linestyle_val = linestyle.to_string();
+        // matplotlib 兼容：linestyle='' 或 'None'/'none' 都表示无线条
+        let linestyle_eff = if linestyle.is_empty()
+            || linestyle.eq_ignore_ascii_case("none")
+            || linestyle.eq_ignore_ascii_case("null") {
+            " ".to_string()
+        } else {
+            linestyle_val.clone()
+        };
         self.elements.push(PlotElement::Line {
             x: x_vec,
             y: y_vec,
-            label: label.clone(),
+            label: actual_label.clone(),
             color: color_val,
-            linestyle: linestyle_val.clone(),
-            marker,
+            linestyle: linestyle_eff,
+            marker: actual_marker,
             linewidth,
             color_idx: idx,
             solid_capstyle: solid_capstyle.unwrap_or_else(|| "butt".to_string()),
+            markersize,
         });
-        if let Some(lbl) = label {
+        if let Some(lbl) = actual_label {
             let c = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, c, linestyle_val, None));
+            self.legend_labels.push((lbl, c, linestyle_val, None, linewidth));
         }
         Ok(())
     }
@@ -320,7 +429,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = parse_color(&c.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), Some(marker_val)));
+            self.legend_labels.push((lbl, col, "-".to_string(), Some(marker_val), 1.5));
         }
         Ok(())
     }
@@ -350,7 +459,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None));
+            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
         }
         Ok(())
     }
@@ -380,7 +489,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None));
+            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
         }
         Ok(())
     }
@@ -435,7 +544,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = parse_color(colors.first().unwrap_or(&String::new()), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None));
+            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
         }
         let all_data: Vec<f64> = x_parsed.iter().flatten().cloned().collect();
         let global_min = if all_data.is_empty() { 0.0 } else { all_data.iter().cloned().fold(f64::INFINITY, f64::min) };
@@ -494,10 +603,13 @@ impl Axes {
         self.ylabel = text;
     }
 
-    #[pyo3(signature = (text, color=None))]
-    pub fn set_title(&mut self, text: String, color: Option<String>) {
+    #[pyo3(signature = (text, color=None, fontsize=None))]
+    pub fn set_title(&mut self, text: String, color: Option<String>, fontsize: Option<f64>) {
         let _ = color;
         self.title = text;
+        if let Some(fs) = fontsize {
+            self.title_fontsize = fs;
+        }
     }
 
     #[pyo3(signature = (loc="best"))]
@@ -664,7 +776,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None));
+            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
         }
         Ok(())
     }
@@ -716,7 +828,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), Some(fmt.to_string())));
+            self.legend_labels.push((lbl, col, "-".to_string(), Some(fmt.to_string()), 1.5));
         }
         Ok(())
     }
@@ -744,7 +856,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = default_color(idx);
-            self.legend_labels.push((lbl, col, linefmt.to_string(), Some(markerfmt.to_string())));
+            self.legend_labels.push((lbl, col, linefmt.to_string(), Some(markerfmt.to_string()), 1.5));
         }
         Ok(())
     }
@@ -778,7 +890,7 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, linestyle.to_string(), None));
+            self.legend_labels.push((lbl, col, linestyle.to_string(), None, linewidth));
         }
         Ok(())
     }
@@ -874,6 +986,13 @@ impl Axes {
         self.tick_top = false;
         self.tick_left = false;
         self.tick_right = false;
+    }
+
+    /// matplotlib 兼容：启用次刻度（major + minor）
+    pub fn minorticks_on(&mut self) {
+        self.minor_grid_visible = true;
+        self.minor_grid_x_visible = true;
+        self.minor_grid_y_visible = true;
     }
 
     pub fn set_aspect(&mut self, _aspect: &str) {
@@ -1334,15 +1453,17 @@ impl Axes {
         let x_label_count = computed_xticks.as_ref().map(|t| t.len()).unwrap_or(10).max(1);
         let y_label_count = computed_yticks.as_ref().map(|t| t.len()).unwrap_or(10).max(1);
 
+        // matplotlib 默认主网格颜色（约 0.6 alpha 后的 153,153,153），保证视觉接近
         let major_color = if let Some(ref c) = self.grid_color {
-            parse_color(c, 0).unwrap_or(RgbColor(200, 200, 200))
+            parse_color(c, 0).unwrap_or(RgbColor(153, 153, 153))
         } else {
-            RgbColor(128, 128, 128)
+            RgbColor(153, 153, 153)
         };
         let major_lw_f64 = self.grid_linewidth.unwrap_or(0.8);
-        
+
+        // matplotlib minor grid 默认 #787A78 (120,122,120)
         let minor_color = if let Some(ref c) = self.minor_grid_color {
-            parse_color(c, 0).unwrap_or(RgbColor(230, 230, 230))
+            parse_color(c, 0).unwrap_or(RgbColor(120, 122, 120))
         } else {
             RgbColor(120, 122, 120)
         };
@@ -1442,9 +1563,22 @@ impl Axes {
                               vertical: bool, ticks: &[f64],
                               color: RgbColor, lw: f64, ls: Option<&str>| -> PyResult<()> {
             let rgb = to_plotters_color(color);
-            let lw_u32 = if lw < 0.5 { 1 } else { lw.round() as u32 };
-            let style = rgb.stroke_width(lw_u32);
+            // lw 是 points，需要转换为像素：1pt = dpi/72 px
+            // dpi = 72 * font_scale, 所以 px = lw * font_scale
+            // matplotlib 通过 AA 在 0.5pt 量级产生柔和灰线；plotters 无 AA，
+            // plotters stroke_width(n) 实际渲染为 2n-1 像素（带 AA），所以
+            // 使用 stroke = max(1, width_px - 1) 接近 mpl 的视觉粗细
+            let lw_px = ((lw * font_scale).max(1.0)).round() as u32;
+            let stroke_w = (lw_px as i32 - 1).max(1) as u32;
+            let style = rgb.stroke_width(stroke_w);
 
+            // 获取绘图区域像素尺寸，用于 dash 长度从像素转换到数据坐标
+            let area = chart.plotting_area();
+            let dim = area.dim_in_pixel();
+            let pw = dim.0 as f64;
+            let ph = dim.1 as f64;
+            let x_per_pix_p = (x_max - x_min) / pw;
+            let y_per_pix_p = (y_max - y_min) / ph;
             let mut paths: Vec<Vec<(f64, f64)>> = Vec::new();
             for &tick in ticks {
                 if vertical {
@@ -1460,9 +1594,12 @@ impl Axes {
 
             match ls {
                 Some("--") => {
-                    // 虚线网格：每条网格线用dash模式绘制
-                    let dash_len = lw_u32 as f64 * 4.0;
-                    let gap_len = lw_u32 as f64 * 2.0;
+                    // 虚线网格：dash 长度固定为像素单位（视觉一致性），与 linewidth 成正比
+                    // dash 长度 4*lw_px 像素，gap 长度 2*lw_px 像素
+                    let dash_px = (lw_px as f64 * 4.0).max(2.0);
+                    let gap_px = (lw_px as f64 * 2.0).max(2.0);
+                    let dash_len = if vertical { dash_px * y_per_pix_p } else { dash_px * x_per_pix_p };
+                    let gap_len = if vertical { gap_px * y_per_pix_p } else { gap_px * x_per_pix_p };
                     for path in &paths {
                         if path.len() >= 2 {
                             let dx = path[1].0 - path[0].0;
@@ -1490,8 +1627,10 @@ impl Axes {
                 }
                 Some(":") => {
                     // 点线网格
-                    let dot_len = lw_u32 as f64 * 1.0;
-                    let gap_len = lw_u32 as f64 * 2.0;
+                    let dot_px = (lw_px as f64 * 1.0).max(1.0);
+                    let gap_px = (lw_px as f64 * 2.0).max(2.0);
+                    let dot_len = if vertical { dot_px * y_per_pix_p } else { dot_px * x_per_pix_p };
+                    let gap_len = if vertical { gap_px * y_per_pix_p } else { gap_px * x_per_pix_p };
                     for path in &paths {
                         if path.len() >= 2 {
                             let dx = path[1].0 - path[0].0;
@@ -1532,11 +1671,65 @@ impl Axes {
                                x1: f64, y1: f64, x2: f64, y2: f64,
                                color: RgbColor, lw: f64| -> PyResult<()> {
             let rgb = to_plotters_color(color);
-            let lw_u32 = if lw < 0.5 { 1 } else { lw.round() as u32 };
-            let style = rgb.stroke_width(lw_u32);
+            // lw 是 points，转换为像素：lw * font_scale
+            // plotters stroke_width(n) 实际渲染为 2n-1 像素，使用 stroke = max(1, width_px - 1) 接近 mpl
+            let lw_px = (lw * font_scale).max(1.0).round() as u32;
+            let stroke_w = (lw_px as i32 - 1).max(1) as u32;
+            let style = rgb.stroke_width(stroke_w);
             chart.draw_series(std::iter::once(PathElement::new(
                 vec![(x1, y1), (x2, y2)], style,
             ))).map_err(|e| PyRuntimeError::new_err(format!("Line: {}", e)))?;
+            Ok(())
+        };
+
+        // 使用填充多边形绘制指定像素宽度的实线，作为后备方案保留。
+        // 当前实线渲染使用 plotters 原生 stroke_width（见下方实线分支）。
+        let _draw_thick_polyline = |chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+                                   points: &[(f64, f64)], width_px: u32,
+                                   color: RgbColor| -> PyResult<()> {
+            if points.len() < 2 || width_px < 1 { return Ok(()); }
+            let rgb = to_plotters_color(color);
+            // 获取绘图区域的像素尺寸，用于计算像素到数据坐标的换算
+            let area = chart.plotting_area();
+            let dim = area.dim_in_pixel();
+            let pw = dim.0 as f64;
+            let ph = dim.1 as f64;
+            if pw < 1.0 || ph < 1.0 { return Ok(()); }
+            // 数据坐标每像素对应的数据单位
+            let x_range = x_max - x_min;
+            let y_range = y_max - y_min;
+            let x_per_pix = x_range / pw;
+            let y_per_pix = y_range / ph;
+            let half_w = width_px as f64 / 2.0;
+            // 调整半宽：plotters 像素光栅化对半覆盖像素做整行填充。
+            // 测试显示 half_w_adj 与渲染像素宽度的关系：
+            //   half_w_adj=0.5 → 1 px (lw_px=1)
+            //   half_w_adj=1.0 → 2 px (lw_px=2)
+            //   half_w_adj=1.25 → 4 px (因整行填充放大)
+            //   half_w_adj=1.5 → 4 px
+            // 为获得 3 px 视觉效果，需要 half_w_adj ≈ 1.0-1.1
+            // 使用 half_w_adj = half_w - 0.5 来精确控制像素宽度
+            let half_w_adj = (half_w - 0.5).max(0.0);
+            let fill: ShapeStyle = rgb.filled().into();
+            for win in points.windows(2) {
+                let (x1, y1) = win[0];
+                let (x2, y2) = win[1];
+                let dx = x2 - x1;
+                let dy = y2 - y1;
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 1e-10 { continue; }
+                // 单位垂直向量在数据坐标空间中的偏移
+                let perp_x = -dy / len * half_w_adj * x_per_pix;
+                let perp_y = dx / len * half_w_adj * y_per_pix;
+                let poly = vec![
+                    (x1 + perp_x, y1 + perp_y),
+                    (x1 - perp_x, y1 - perp_y),
+                    (x2 - perp_x, y2 - perp_y),
+                    (x2 + perp_x, y2 + perp_y),
+                ];
+                chart.draw_series(std::iter::once(Polygon::new(poly, fill)))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Thick line: {}", e)))?;
+            }
             Ok(())
         };
 
@@ -1576,9 +1769,9 @@ impl Axes {
 
         for el in &self.elements {
             match el {
-                PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, .. } => {
+                PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, markersize, .. } => {
                     let col = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
-                    if x.len() >= 2 && x.len() == y.len() {
+                    if x.len() >= 1 && x.len() == y.len() {
                         let points: Vec<(f64, f64)> = x.iter().zip(y.iter())
                             .filter_map(|(xv, yv)| match (xv, yv) {
                                 (Some(xv), Some(yv)) => {
@@ -1589,9 +1782,13 @@ impl Axes {
                                 _ => None,
                             })
                             .collect();
-                        if points.len() >= 2 {
+                        if points.len() >= 2 && linestyle != " " {
                             let rgb = to_plotters_color(col);
-                            let style = shape_style(col, *linewidth, linestyle);
+                            // 将 linewidth 从 points 转换为像素：1pt = dpi/72 px，dpi = 72 * font_scale
+                            // matplotlib 通过 AA 在 0.5-1.5pt 量级产生柔和的 1-3 像素宽线。
+                            // plotters 无 AA，使用四舍五入以获得接近 mpl 的视觉粗细。
+                            let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
+                            let _style: ShapeStyle = rgb.stroke_width(lw_px).into();
                             // 对于虚线样式，使用分段绘制模拟
                             if linestyle == "--" {
                                 let dash_len = *linewidth * 4.0;
@@ -1626,8 +1823,9 @@ impl Axes {
                                         }
                                     }
                                     if dash_points.len() >= 2 {
-                                        let lw_px = ((*linewidth) * font_scale).round().max(1.0) as u32;
-                                        chart.draw_series(std::iter::once(PathElement::new(dash_points, rgb.stroke_width(lw_px))))
+                                        let lw_px_dash = ((*linewidth) * font_scale).max(1.0).round() as u32;
+                                        let stroke_dash = (lw_px_dash as i32 - 1).max(1) as u32;
+                                        chart.draw_series(std::iter::once(PathElement::new(dash_points, rgb.stroke_width(stroke_dash))))
                                             .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dashed line: {}", e)))?;
                                     }
                                     seg_start = seg_end.max(seg_start + 1);
@@ -1656,8 +1854,10 @@ impl Axes {
                                               points[seg_idx].1 + unit_y * dot_start);
                                     let p2 = (points[seg_idx].0 + unit_x * dot_end,
                                               points[seg_idx].1 + unit_y * dot_end);
+                                    let lw_px_dot = ((*linewidth) * font_scale).max(1.0).round() as u32;
+                                    let stroke_dot = (lw_px_dot as i32 - 1).max(1) as u32;
                                     chart.draw_series(std::iter::once(PathElement::new(
-                                        vec![p1, p2], rgb.stroke_width(*linewidth as u32))))
+                                        vec![p1, p2], rgb.stroke_width(stroke_dot))))
                                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dotted line: {}", e)))?;
                                     // 跳过间隙
                                     let gap_end = dot_end + gap_len;
@@ -1709,8 +1909,10 @@ impl Axes {
                                               points[seg_idx].1 + unit_y * mark_start);
                                     let p2 = (points[seg_idx].0 + unit_x * mark_end,
                                               points[seg_idx].1 + unit_y * mark_end);
+                                    let lw_px_mix = ((*linewidth) * font_scale).max(1.0).round() as u32;
+                                    let stroke_mix = (lw_px_mix as i32 - 1).max(1) as u32;
                                     chart.draw_series(std::iter::once(PathElement::new(
-                                        vec![p1, p2], rgb.stroke_width(*linewidth as u32))))
+                                        vec![p1, p2], rgb.stroke_width(stroke_mix))))
                                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dash-dot line: {}", e)))?;
                                     // 跳过间隙
                                     let gap_end = mark_end + gap_len;
@@ -1737,14 +1939,39 @@ impl Axes {
                                     }
                                 }
                             } else {
-                                // 实线或其他样式
-                                let path = PathElement::new(points.clone(), style);
-                                chart.draw_series(std::iter::once(path))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw line: {}", e)))?;
-                            }
+                // 实线：使用 plotters 原生 stroke_width
+                // plotters BitMapBackend stroke_width(n) 实际渲染近似 2n-1 像素（带 AA 边框）。
+                // matplotlib 通过 AA 在 1pt 量级产生 2-3 像素宽线。
+                // 公式: stroke = max(1, lw_px - 1) 是最接近 mpl 的折中：
+                //   lw=0.5: lw_px=1, stroke=1 → 1px (mpl 1px) ✓
+                //   lw=1.0: lw_px=2, stroke=1 → 1px (mpl 3px) - 略薄
+                //   lw=1.5: lw_px=3, stroke=2 → 3-5px (mpl 4px) ✓
+                //   lw=2.0: lw_px=4, stroke=3 → 5-7px (mpl 5px) ✓
+                //   lw=3.0: lw_px=6, stroke=5 → 9-11px (mpl 8px) ✓
+                let stroke_w = (lw_px as i32 - 1).max(1) as u32;
+                let style_native: ShapeStyle = rgb.stroke_width(stroke_w).into();
+                // 像素中心对齐修正：plotters 在渲染水平线时，线中心对应像素下边缘，
+                // 而 matplotlib 使用像素中心。这导致 rsp 的水平线比 mpl 偏高 1 像素。
+                // 修正方法：将所有 y 坐标向下偏移半像素（half a pixel）。
+                let area = chart.plotting_area();
+                let dim = area.dim_in_pixel();
+                let ph = dim.1 as f64;
+                if ph > 0.0 {
+                    let y_per_pix = (y_max - y_min) / ph;
+                    let y_shift = y_per_pix * 0.5;
+                    let shifted_points: Vec<(f64, f64)> = points.iter()
+                        .map(|(px, py)| (*px, *py - y_shift))
+                        .collect();
+                    chart.draw_series(std::iter::once(PathElement::new(shifted_points, style_native)))
+                        .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
+                } else {
+                    chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
+                        .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
+                }
+            }
                             if solid_capstyle == "round" && *linewidth > 1.0 && marker.as_ref().map_or(true, |m| m.is_empty()) {
                                 // 使用屏幕像素半径（参考 marker "o" 的实现），避免在数据坐标下变成巨大椭圆
-                                let cap_r = ((*linewidth / 2.0) as i32).max(1);
+                                let cap_r = (((*linewidth) * font_scale) / 2.0).round().max(1.0) as i32;
                                 let cap_points = [points.first().unwrap().clone(), points.last().unwrap().clone()];
                                 for pt in cap_points.iter() {
                                     chart.draw_series(std::iter::once(Circle::new(*pt, cap_r, rgb.filled())))
@@ -1757,21 +1984,33 @@ impl Axes {
                         if !marker_name.is_empty() && x.len() == y.len() {
                             let col2 = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
                             let rgb = to_plotters_color(col2);
-                            // matplotlib 中 markersize 的单位是 "points^2"，半径约为 sqrt(s)/2 像素（@72dpi）
-                            // 我们的 line plot 入口没有暴露 markersize，所以按 markersize=6（matplotlib 默认）
-                            // 在 144dpi 下半径约 6 像素。
-                            // 对于 "." 这种像素点 marker，matplotlib 实际只画 1 个像素，需要更小。
-                            let marker_size = if marker_name == "." || marker_name == "," {
-                                2.0_f64.max(((*linewidth) * 1.5).round())
+                            // matplotlib markersize 单位是 points（近似直径）；直径(像素) = markersize * dpi/72
+                            // 在 144dpi 下，markersize=6 (mpl 默认) 直径约为 12 像素。
+                            // "." 是 matplotlib 的 1 像素点 marker，需要保持极小以免覆盖线条
+                            let marker_size = if marker_name == "." {
+                                // "." 1pt 像素点：线宽 <=1pt 时取 1 像素，否则 2 像素（保持可见）
+                                if *linewidth <= 1.0 { 1.0 } else { 2.0 }
+                            } else if marker_name == "," {
+                                // "," 1/2 像素点：保持 1 像素
+                                1.0
                             } else {
-                                // 半径 = sqrt(6) * dpi/72 ≈ 6 在 144dpi 下
-                                let ms_points = 6.0_f64;
-                                ms_points * (font_scale * 144.0 / 72.0) / 2.0
+                                // markersize: None => matplotlib 默认 6
+                                let ms = markersize.unwrap_or(6.0_f64).max(0.01);
+                                // 直径(像素) ≈ markersize * font_scale
+                                // plotters Circle::new 的半径转 i32 会截断，因此 6*2=12 → radius=6
+                                // 渲染直径 = 2*6+1 = 13px（与 mpl ~13px 接近）
+                                let diameter_px = ms * font_scale;
+                                // draw_marker 中半径 = s
+                                diameter_px / 2.0
                             };
                             for (xv, yv) in x.iter().zip(y.iter()) {
                                 if let (Some(xv), Some(yv)) = (xv, yv) {
-                                    draw_marker(chart, marker_name, *xv, *yv, marker_size, rgb)
-                                        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw marker: {}", e)))?;
+                                    let txv = tx(*xv);
+                                    let tyv = ty(*yv);
+                                    if txv.is_finite() && tyv.is_finite() {
+                                        draw_marker(chart, marker_name, txv, tyv, marker_size, rgb)
+                                            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw marker: {}", e)))?;
+                                    }
                                 }
                             }
                         }
@@ -2068,7 +2307,8 @@ impl Axes {
                     let rgb = to_plotters_color(col);
                     let baseline = ty(0.0);
                     if linefmt == "-" || linefmt.is_empty() {
-                        let line_style = shape_style(col, 1.0, linefmt);
+                        let lw_px = (1.0 * font_scale).round().max(1.0) as u32;
+                        let line_style: ShapeStyle = rgb.stroke_width(lw_px).into();
                         for (&xv, &yv) in x.iter().zip(y.iter()) {
                             let txv = tx(xv);
                             let tyv = ty(yv);
@@ -2093,7 +2333,7 @@ impl Axes {
                             .map_err(|e| PyRuntimeError::new_err(format!("Stem marker: {}", e)))?;
                     }
                 }
-                PlotElement::Step { x, y, where_, color, linestyle, linewidth, .. } => {
+                PlotElement::Step { x, y, where_, color, linestyle: _, linewidth, .. } => {
                     let idx = 0;
                     let col = parse_color(color, idx).unwrap_or_else(|_| default_color(idx));
                     if x.len() < 2 || x.len() != y.len() { continue; }
@@ -2141,7 +2381,8 @@ impl Axes {
                         }
                     }
                     if points.len() < 2 { continue; }
-                    let style = shape_style(col, *linewidth, linestyle);
+                    let lw_px = ((*linewidth) * font_scale).round().max(1.0) as u32;
+                    let style: ShapeStyle = to_plotters_color(col).stroke_width(lw_px).into();
                     chart.draw_series(LineSeries::new(points, style))
                         .map_err(|e| PyRuntimeError::new_err(format!("Step draw: {}", e)))?;
                 }
@@ -2299,14 +2540,18 @@ impl Axes {
                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend bg: {}", e)))?;
                 }
 
-                for (i, (label, color, ls, marker_opt)) in self.legend_labels.iter().enumerate() {
+                for (i, (label, color, ls, marker_opt, lw)) in self.legend_labels.iter().enumerate() {
                     let y_pos = box_y1 + entry_height * 0.75 + i as f64 * entry_height;
                     let x_line_start = box_x1 + x_range * 0.015;
                     let x_line_end = box_x1 + x_range * 0.06;
                     let x_text = box_x1 + x_range * 0.07;
 
                     let rgb = to_plotters_color(*color);
-                    let line_style: ShapeStyle = rgb.stroke_width(2).into();
+                    // 使用实际的 linewidth（与数据线保持一致），将 points 转换为像素
+                    // plotters stroke_width(n) 实际渲染为 2n-1 像素，使用 stroke = max(1, width_px - 1) 接近 mpl
+                    let lw_px = ((*lw) * font_scale).max(1.0).round() as u32;
+                    let legend_stroke = (lw_px as i32 - 1).max(1) as u32;
+                    let line_style: ShapeStyle = rgb.stroke_width(legend_stroke).into();
 
                     // 根据线型绘制图例线段
                     match ls.as_str() {
@@ -2393,7 +2638,11 @@ impl Axes {
             // 标题锚点在数据区顶部，使用 VPos::Bottom 让文字向上延伸
             // 偏移量设为数据范围的极小比例，确保文字位于 margin_top 区域内
             let title_y = y_max + y_range * 0.01;
-            let font: FontDesc = ("sans-serif", scale_font(14.0, font_scale)).into();
+            // 使用用户指定的 fontsize；若未指定则取 matplotlib 默认 12pt
+            let title_size = if self.title_fontsize > 0.0 { self.title_fontsize } else { 12.0 };
+            // plotters 的 ab_glyph 字体可见字符高度约 0.94em，而 matplotlib DejaVu Sans 约 1.13em。
+            // 为匹配 matplotlib 视觉高度，乘以 1.20 补偿。
+            let font: FontDesc = ("sans-serif", scale_font(title_size * 1.20, font_scale)).into();
             let colored_font = font.color(&BLACK);
             let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom)).into();
             chart.draw_series(std::iter::once(plotters::element::Text::new(

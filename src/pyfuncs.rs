@@ -23,21 +23,9 @@ pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
 }
 
 fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
-    let fig_py = Py::new(py, Figure {
-        axes_list: Vec::new(),
-        nrows: 1,
-        ncols: 1,
-        suptitle: String::new(),
-        width: 640,
-        height: 480,
-        dpi: 100.0,
-        axes_positions: Vec::new(),
-        facecolor: "white".to_string(),
-        subplot_left: 0.0,
-        subplot_right: 1.0,
-        subplot_bottom: 0.0,
-        subplot_top: 1.0,
-    })?;
+    let mut fig = Figure::new();
+    fig.axes_list.clear();
+    let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
     let ax_py = Py::new(py, ax)?;
     init_axes_self_py(&ax_py, py);
@@ -60,7 +48,7 @@ pub fn ylabel(py: Python, text: String) -> PyResult<()> {
 
 #[pyfunction]
 pub fn title(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_title(text, None);
+    get_current_axes(py)?.borrow_mut(py).set_title(text, None, None);
     Ok(())
 }
 
@@ -436,21 +424,15 @@ pub fn subplots(
         ((ncols as f64 * 4.0 * dpi_val).round() as u32, (nrows as f64 * 3.0 * dpi_val).round() as u32)
     };
 
-    let fig_py = Py::new(py, Figure {
-        axes_list: Vec::new(),
-        nrows,
-        ncols,
-        suptitle: String::new(),
-        width: width.max(100),
-        height: height.max(100),
-        dpi: dpi_val,
-        axes_positions: Vec::new(),
-        facecolor: "white".to_string(),
-        subplot_left: 0.0,
-        subplot_right: 1.0,
-        subplot_bottom: 0.0,
-        subplot_top: 1.0,
-    })?;
+    let mut fig = Figure::new();
+    fig.nrows = nrows;
+    fig.ncols = ncols;
+    fig.width = width.max(100);
+    fig.height = height.max(100);
+    fig.dpi = dpi_val;
+    fig.axes_list.clear();
+    fig.axes_positions.clear();
+    let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
 
     if total == 1 {
@@ -498,21 +480,10 @@ pub fn plot<'a>(
     let mut ax = Axes::new();
     ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), None, None, None, None, None, None)?;
 
-    let fig_py = Py::new(py, Figure {
-        axes_list: Vec::new(),
-        nrows: 1,
-        ncols: 1,
-        suptitle: String::new(),
-        width: 640,
-        height: 480,
-        dpi: 100.0,
-        axes_positions: Vec::new(),
-        facecolor: "white".to_string(),
-        subplot_left: 0.0,
-        subplot_right: 1.0,
-        subplot_bottom: 0.0,
-        subplot_top: 1.0,
-    })?;
+    let mut fig = Figure::new();
+    fig.axes_list.clear();
+    fig.axes_positions.clear();
+    let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
 
     let ax_py = Py::new(py, ax)?;
@@ -576,21 +547,10 @@ pub fn barh<'a>(py: Python<'a>, y: Bound<'a, PyAny>, width: Bound<'a, PyAny>, he
     let mut ax = Axes::new();
     ax.barh(py, y, width, height, color, label)?;
 
-    let fig_py = Py::new(py, Figure {
-        axes_list: Vec::new(),
-        nrows: 1,
-        ncols: 1,
-        suptitle: String::new(),
-        width: 640,
-        height: 480,
-        dpi: 100.0,
-        axes_positions: Vec::new(),
-        facecolor: "white".to_string(),
-        subplot_left: 0.0,
-        subplot_right: 1.0,
-        subplot_bottom: 0.0,
-        subplot_top: 1.0,
-    })?;
+    let mut fig = Figure::new();
+    fig.axes_list.clear();
+    fig.axes_positions.clear();
+    let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
 
     let ax_py = Py::new(py, ax)?;
@@ -625,21 +585,10 @@ pub fn semilogx<'a>(
     let lw = linewidth.unwrap_or(1.5);
     ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
 
-    let fig_py = Py::new(py, Figure {
-        axes_list: Vec::new(),
-        nrows: 1,
-        ncols: 1,
-        suptitle: String::new(),
-        width: 640,
-        height: 480,
-        dpi: 100.0,
-        axes_positions: Vec::new(),
-        facecolor: "white".to_string(),
-        subplot_left: 0.0,
-        subplot_right: 1.0,
-        subplot_bottom: 0.0,
-        subplot_top: 1.0,
-    })?;
+    let mut fig = Figure::new();
+    fig.axes_list.clear();
+    fig.axes_positions.clear();
+    let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
 
     let ax_py = Py::new(py, ax)?;
@@ -674,21 +623,10 @@ pub fn semilogy<'a>(
     let lw = linewidth.unwrap_or(1.5);
     ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
 
-    let fig_py = Py::new(py, Figure {
-        axes_list: Vec::new(),
-        nrows: 1,
-        ncols: 1,
-        suptitle: String::new(),
-        width: 640,
-        height: 480,
-        dpi: 100.0,
-        axes_positions: Vec::new(),
-        facecolor: "white".to_string(),
-        subplot_left: 0.0,
-        subplot_right: 1.0,
-        subplot_bottom: 0.0,
-        subplot_top: 1.0,
-    })?;
+    let mut fig = Figure::new();
+    fig.axes_list.clear();
+    fig.axes_positions.clear();
+    let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
 
     let ax_py = Py::new(py, ax)?;
@@ -724,21 +662,10 @@ pub fn loglog<'a>(
     let lw = linewidth.unwrap_or(1.5);
     ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
 
-    let fig_py = Py::new(py, Figure {
-        axes_list: Vec::new(),
-        nrows: 1,
-        ncols: 1,
-        suptitle: String::new(),
-        width: 640,
-        height: 480,
-        dpi: 100.0,
-        axes_positions: Vec::new(),
-        facecolor: "white".to_string(),
-        subplot_left: 0.0,
-        subplot_right: 1.0,
-        subplot_bottom: 0.0,
-        subplot_top: 1.0,
-    })?;
+    let mut fig = Figure::new();
+    fig.axes_list.clear();
+    fig.axes_positions.clear();
+    let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
     let ax_py = Py::new(py, ax)?;
     init_axes_self_py(&ax_py, py);

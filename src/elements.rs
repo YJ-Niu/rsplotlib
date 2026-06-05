@@ -13,6 +13,7 @@ pub enum PlotElement {
         linewidth: f64,
         color_idx: usize,
         solid_capstyle: String,
+        markersize: Option<f64>,
     },
     Scatter {
         x: Vec<f64>,

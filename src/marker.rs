@@ -134,8 +134,8 @@ pub fn draw_marker<DB: DrawingBackend>(
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
         _ => {
-            // 默认 marker（如 "."）使用屏幕像素半径，参考 "o" 的实现
-            let r = (s as i32).max(2);
+            // "." / "," 等像素点 marker：直接画一个小圆（半径 <= 1）
+            let r = (s as i32).max(1);
             chart.draw_series(std::iter::once(Circle::new((x, y), r, style)))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }

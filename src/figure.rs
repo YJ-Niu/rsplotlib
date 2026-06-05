@@ -50,6 +50,7 @@ impl Figure {
     #[new]
     pub fn new() -> Self {
         // matplotlib 兼容的默认 subplots_adjust 边距
+        // matplotlib 默认: left=0.125, right=0.9, bottom=0.11, top=0.88
         Figure {
             axes_list: Vec::new(),
             nrows: 1,
@@ -63,7 +64,7 @@ impl Figure {
             subplot_left: 0.125,
             subplot_right: 0.9,
             subplot_bottom: 0.11,
-            subplot_top: 0.9,
+            subplot_top: 0.88,
         }
     }
 
@@ -273,9 +274,6 @@ impl Figure {
             // 抑制未使用变量警告
             let _ = y_has_ticks;
             let _ = x_has_ticks;
-
-            eprintln!("DEBUG: y_tick_area={}, x_tick_area={}, y_label_area={}, x_label_area={}, font_scale={}, tick_label_size={}, title='{}', ylabel='{}', xlabel='{}'",
-                y_tick_area, x_tick_area, y_label_area, x_label_area, font_scale, tick_label_size, ax.title, ax.ylabel, ax.xlabel);
 
             // 顶部边距：ax.title 是通过 chart.draw_series(Text) 渲染的，
             // 文字在数据区顶部 y_max 处向上延伸 (VPos::Bottom)，所以不需要 plotters margin_top

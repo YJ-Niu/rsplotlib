@@ -33,6 +33,7 @@ wheelhouse/
 diff_output/
 testing/
 analyze*.py
+side*.py
 check*.py
 compare*.py
 
