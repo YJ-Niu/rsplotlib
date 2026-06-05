@@ -18,9 +18,23 @@ use crate::figure::Figure;
 fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(font_data) = std::fs::read("/System/Library/Fonts/Supplemental/Andale Mono.ttf") {
-            let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-            let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+        // 优先使用 Arial（接近 matplotlib 默认 sans-serif 字体宽度），
+        // 备用 HelveticaNeue.ttc / Helvetica.ttc / LucidaGrande。
+        // 不能用 Andale Mono 等 monospace 字体，否则文本会显著变宽。
+        let font_candidates: &[&str] = &[
+            "/Library/Fonts/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/LucidaGrande.ttc",
+        ];
+        for path in font_candidates {
+            if let Ok(font_data) = std::fs::read(path) {
+                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+                    break;
+                }
+            }
         }
     }
 

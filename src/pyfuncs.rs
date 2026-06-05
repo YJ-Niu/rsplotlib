@@ -28,15 +28,15 @@ fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
         nrows: 1,
         ncols: 1,
         suptitle: String::new(),
-        width: 800,
-        height: 600,
+        width: 640,
+        height: 480,
         dpi: 100.0,
         axes_positions: Vec::new(),
         facecolor: "white".to_string(),
-        subplot_left: 0.125,
-        subplot_right: 0.9,
-        subplot_bottom: 0.1,
-        subplot_top: 0.9,
+        subplot_left: 0.0,
+        subplot_right: 1.0,
+        subplot_bottom: 0.0,
+        subplot_top: 1.0,
     })?;
     set_current_figure(fig_py.clone_ref(py));
     let ax_py = Py::new(py, ax)?;
@@ -48,19 +48,19 @@ fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
 
 #[pyfunction]
 pub fn xlabel(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_xlabel(text);
+    get_current_axes(py)?.borrow_mut(py).set_xlabel(text, None);
     Ok(())
 }
 
 #[pyfunction]
 pub fn ylabel(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_ylabel(text);
+    get_current_axes(py)?.borrow_mut(py).set_ylabel(text, None);
     Ok(())
 }
 
 #[pyfunction]
 pub fn title(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_title(text);
+    get_current_axes(py)?.borrow_mut(py).set_title(text, None);
     Ok(())
 }
 
@@ -94,8 +94,8 @@ pub fn ylim(py: Python, bottom: f64, top: f64) -> PyResult<()> {
 #[pyo3(signature = (x, y, s=20.0, c=None, marker="o", label=None, alpha=1.0))]
 pub fn scatter<'a>(
     py: Python<'a>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     s: f64,
     c: Option<String>,
     marker: &'a str,
@@ -103,7 +103,7 @@ pub fn scatter<'a>(
     alpha: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.scatter(x, y, s, c, marker, label, alpha);
+    ax.scatter(py, x, y, s, c, marker, label, alpha)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -112,16 +112,16 @@ pub fn scatter<'a>(
 
 #[pyfunction]
 #[pyo3(signature = (x, height, width=0.8, color=None, label=None))]
-pub fn bar(
-    py: Python<'_>,
-    x: Vec<f64>,
-    height: Vec<f64>,
+pub fn bar<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    height: Bound<'a, PyAny>,
     width: f64,
     color: Option<String>,
     label: Option<String>,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.bar(x, height, width, color, label);
+    ax.bar(py, x, height, width, color, label)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -150,18 +150,18 @@ pub fn hist<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y1, y2=0.0, color=None, alpha=0.3, label=None))]
-pub fn fill_between(
-    py: Python<'_>,
-    x: Vec<f64>,
-    y1: Vec<f64>,
-    y2: f64,
+#[pyo3(signature = (x, y1, y2=None, color=None, alpha=0.3, label=None))]
+pub fn fill_between<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    y1: Bound<'a, PyAny>,
+    y2: Option<Bound<'a, PyAny>>,
     color: Option<String>,
     alpha: f64,
     label: Option<String>,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.fill_between(x, y1, y2, color, alpha, label);
+    ax.fill_between(py, x, y1, y2, color, alpha, label)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -172,8 +172,8 @@ pub fn fill_between(
 #[pyo3(signature = (x, y, yerr=None, xerr=None, fmt="o", color=None, label=None, capsize=3.0))]
 pub fn errorbar<'a>(
     py: Python<'a>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     yerr: Option<Py<PyAny>>,
     xerr: Option<Py<PyAny>>,
     fmt: &'a str,
@@ -181,24 +181,8 @@ pub fn errorbar<'a>(
     label: Option<String>,
     capsize: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    // Convert possible scalar or sequence yerr/xerr into Vec<f64>
-    let make_vec = |maybe: Option<Py<PyAny>>, n: usize| -> Option<Vec<f64>> {
-        if let Some(obj) = maybe {
-            if let Ok(v) = obj.extract::<Vec<f64>>(py) {
-                return Some(v);
-            }
-            if let Ok(v) = obj.extract::<f64>(py) {
-                return Some(vec![v; n]);
-            }
-        }
-        None
-    };
-
-    let yerr_vec = make_vec(yerr, x.len());
-    let xerr_vec = make_vec(xerr, x.len());
-
     let mut ax = Axes::new();
-    ax.errorbar(x, y, yerr_vec, xerr_vec, fmt, color, label, capsize);
+    ax.errorbar(py, x, y, yerr, xerr, fmt, color, label, capsize)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -209,14 +193,14 @@ pub fn errorbar<'a>(
 #[pyo3(signature = (x, y, linefmt="-", markerfmt="o", label=None))]
 pub fn stem<'a>(
     py: Python<'a>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     linefmt: &'a str,
     markerfmt: &'a str,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.stem(x, y, linefmt, markerfmt, label);
+    ax.stem(py, x, y, linefmt, markerfmt, label)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -227,8 +211,8 @@ pub fn stem<'a>(
 #[pyo3(signature = (x, y, where_="pre", label=None, color=None, linestyle="-", linewidth=1.5))]
 pub fn step<'a>(
     py: Python<'a>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     where_: &'a str,
     label: Option<String>,
     color: Option<String>,
@@ -236,7 +220,7 @@ pub fn step<'a>(
     linewidth: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.step(x, y, where_, label, color, linestyle, linewidth);
+    ax.step(py, x, y, where_, label, color, linestyle, linewidth)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -245,9 +229,18 @@ pub fn step<'a>(
 
 #[pyfunction]
 #[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
-pub fn imshow<'a>(py: Python<'a>, x: Vec<Vec<f64>>, cmap: &'a str, aspect: &'a str) -> PyResult<Bound<'a, PyTuple>> {
+pub fn imshow<'a>(py: Python<'a>, x: Bound<'a, PyAny>, cmap: &'a str, aspect: &'a str) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.imshow(x, cmap, aspect);
+    // 将 Python 对象转换为 Vec<Vec<f64>>
+    let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
+        v
+    } else if x.hasattr("tolist")? {
+        let list = x.call_method0("tolist")?;
+        list.extract::<Vec<Vec<f64>>>()?
+    } else {
+        x.extract::<Vec<Vec<f64>>>()?
+    };
+    ax.imshow(data, cmap, aspect);
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -256,16 +249,25 @@ pub fn imshow<'a>(py: Python<'a>, x: Vec<Vec<f64>>, cmap: &'a str, aspect: &'a s
 
 #[pyfunction]
 #[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0))]
-pub fn pie(
-    py: Python<'_>,
-    x: Vec<f64>,
+pub fn pie<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
     labels: Option<Vec<String>>,
     colors: Option<Vec<String>>,
     autopct: Option<String>,
     startangle: f64,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.pie(x, labels, colors, autopct, startangle);
+    // 将 Python 对象转换为 Vec<f64>
+    let x_vec = if let Ok(v) = x.extract::<Vec<f64>>() {
+        v
+    } else if x.hasattr("tolist")? {
+        let list = x.call_method0("tolist")?;
+        list.extract::<Vec<f64>>()?
+    } else {
+        x.extract::<Vec<f64>>()?
+    };
+    ax.pie(x_vec, labels, colors, autopct, startangle);
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -274,14 +276,14 @@ pub fn pie(
 
 #[pyfunction]
 #[pyo3(signature = (x, labels=None, vert=true))]
-pub fn boxplot(
-    py: Python<'_>,
-    x: Vec<Vec<f64>>,
+pub fn boxplot<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
     labels: Option<Vec<String>>,
     vert: bool,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.boxplot(x, labels, vert);
+    ax.boxplot(py, x, labels, vert)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -405,7 +407,7 @@ pub fn subplot(py: Python<'_>, nrows: usize, ncols: usize, index: usize) -> PyRe
     if index == 0 || index > nrows * ncols {
         return Err(PyValueError::new_err("Index out of range"));
     }
-    let result = subplots(py, nrows, ncols)?;
+    let result = subplots(py, nrows, ncols, None, None)?;
     let fig = result.get_item(0)?;
     let axes_all = result.get_item(1)?;
     let ax = if nrows * ncols == 1 {
@@ -418,28 +420,36 @@ pub fn subplot(py: Python<'_>, nrows: usize, ncols: usize, index: usize) -> PyRe
 }
 
 #[pyfunction]
-#[pyo3(signature = (nrows=1, ncols=1))]
+#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None))]
 pub fn subplots(
     py: Python<'_>,
     nrows: usize,
     ncols: usize,
+    figsize: Option<(f64, f64)>,
+    dpi: Option<f64>,
 ) -> PyResult<Bound<'_, PyTuple>> {
     let total = nrows * ncols;
+    let dpi_val = dpi.unwrap_or(100.0);
+    let (width, height) = if let Some((w, h)) = figsize {
+        ((w * dpi_val).round() as u32, (h * dpi_val).round() as u32)
+    } else {
+        ((ncols as f64 * 4.0 * dpi_val).round() as u32, (nrows as f64 * 3.0 * dpi_val).round() as u32)
+    };
 
     let fig_py = Py::new(py, Figure {
         axes_list: Vec::new(),
         nrows,
         ncols,
         suptitle: String::new(),
-        width: (ncols as u32 * 400).max(600),
-        height: (nrows as u32 * 300).max(400),
-        dpi: 100.0,
+        width: width.max(100),
+        height: height.max(100),
+        dpi: dpi_val,
         axes_positions: Vec::new(),
         facecolor: "white".to_string(),
-        subplot_left: 0.125,
-        subplot_right: 0.9,
-        subplot_bottom: 0.1,
-        subplot_top: 0.9,
+        subplot_left: 0.0,
+        subplot_right: 1.0,
+        subplot_bottom: 0.0,
+        subplot_top: 1.0,
     })?;
     set_current_figure(fig_py.clone_ref(py));
 
@@ -475,33 +485,33 @@ pub fn subplots(
 #[pyfunction]
 #[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None))]
 #[allow(clippy::too_many_arguments)]
-pub fn plot(
-    py: Python<'_>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+pub fn plot<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     label: Option<String>,
     color: Option<String>,
     linestyle: Option<String>,
     marker: Option<String>,
     linewidth: Option<f64>,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.plot(x.into_iter().map(Some).collect(), y.into_iter().map(Some).collect(), label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), None, None, None, None, None, None);
+    ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), None, None, None, None, None, None)?;
 
     let fig_py = Py::new(py, Figure {
         axes_list: Vec::new(),
         nrows: 1,
         ncols: 1,
         suptitle: String::new(),
-        width: 800,
-        height: 600,
+        width: 640,
+        height: 480,
         dpi: 100.0,
         axes_positions: Vec::new(),
         facecolor: "white".to_string(),
-        subplot_left: 0.125,
-        subplot_right: 0.9,
-        subplot_bottom: 0.1,
-        subplot_top: 0.9,
+        subplot_left: 0.0,
+        subplot_right: 1.0,
+        subplot_bottom: 0.0,
+        subplot_top: 1.0,
     })?;
     set_current_figure(fig_py.clone_ref(py));
 
@@ -562,24 +572,24 @@ pub fn clf(py: Python) -> PyResult<()> {
 
 #[pyfunction]
 #[pyo3(signature = (y, width, height=0.8, color=None, label=None))]
-pub fn barh(py: Python<'_>, y: Vec<f64>, width: Vec<f64>, height: f64, color: Option<String>, label: Option<String>) -> PyResult<Bound<'_, PyTuple>> {
+pub fn barh<'a>(py: Python<'a>, y: Bound<'a, PyAny>, width: Bound<'a, PyAny>, height: f64, color: Option<String>, label: Option<String>) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.barh(y, width, height, color, label);
+    ax.barh(py, y, width, height, color, label)?;
 
     let fig_py = Py::new(py, Figure {
         axes_list: Vec::new(),
         nrows: 1,
         ncols: 1,
         suptitle: String::new(),
-        width: 800,
-        height: 600,
+        width: 640,
+        height: 480,
         dpi: 100.0,
         axes_positions: Vec::new(),
         facecolor: "white".to_string(),
-        subplot_left: 0.125,
-        subplot_right: 0.9,
-        subplot_bottom: 0.1,
-        subplot_top: 0.9,
+        subplot_left: 0.0,
+        subplot_right: 1.0,
+        subplot_bottom: 0.0,
+        subplot_top: 1.0,
     })?;
     set_current_figure(fig_py.clone_ref(py));
 
@@ -599,36 +609,36 @@ pub fn barh(py: Python<'_>, y: Vec<f64>, width: Vec<f64>, height: f64, color: Op
 #[pyfunction]
 #[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None))]
 #[allow(clippy::too_many_arguments)]
-pub fn semilogx(
-    py: Python<'_>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+pub fn semilogx<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     label: Option<String>,
     color: Option<String>,
     linestyle: Option<String>,
     marker: Option<String>,
     linewidth: Option<f64>,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
     ax.set_xscale("log");
     let ls = linestyle.as_deref().unwrap_or("-");
     let lw = linewidth.unwrap_or(1.5);
-    ax.plot(x.into_iter().map(Some).collect(), y.into_iter().map(Some).collect(), label, color, ls, marker, lw, None, None, None, None, None, None);
+    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
 
     let fig_py = Py::new(py, Figure {
         axes_list: Vec::new(),
         nrows: 1,
         ncols: 1,
         suptitle: String::new(),
-        width: 800,
-        height: 600,
+        width: 640,
+        height: 480,
         dpi: 100.0,
         axes_positions: Vec::new(),
         facecolor: "white".to_string(),
-        subplot_left: 0.125,
-        subplot_right: 0.9,
-        subplot_bottom: 0.1,
-        subplot_top: 0.9,
+        subplot_left: 0.0,
+        subplot_right: 1.0,
+        subplot_bottom: 0.0,
+        subplot_top: 1.0,
     })?;
     set_current_figure(fig_py.clone_ref(py));
 
@@ -648,36 +658,36 @@ pub fn semilogx(
 #[pyfunction]
 #[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None))]
 #[allow(clippy::too_many_arguments)]
-pub fn semilogy(
-    py: Python<'_>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+pub fn semilogy<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     label: Option<String>,
     color: Option<String>,
     linestyle: Option<String>,
     marker: Option<String>,
     linewidth: Option<f64>,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
     ax.set_yscale("log");
     let ls = linestyle.as_deref().unwrap_or("-");
     let lw = linewidth.unwrap_or(1.5);
-    ax.plot(x.into_iter().map(Some).collect(), y.into_iter().map(Some).collect(), label, color, ls, marker, lw, None, None, None, None, None, None);
+    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
 
     let fig_py = Py::new(py, Figure {
         axes_list: Vec::new(),
         nrows: 1,
         ncols: 1,
         suptitle: String::new(),
-        width: 800,
-        height: 600,
+        width: 640,
+        height: 480,
         dpi: 100.0,
         axes_positions: Vec::new(),
         facecolor: "white".to_string(),
-        subplot_left: 0.125,
-        subplot_right: 0.9,
-        subplot_bottom: 0.1,
-        subplot_top: 0.9,
+        subplot_left: 0.0,
+        subplot_right: 1.0,
+        subplot_bottom: 0.0,
+        subplot_top: 1.0,
     })?;
     set_current_figure(fig_py.clone_ref(py));
 
@@ -697,37 +707,37 @@ pub fn semilogy(
 #[pyfunction]
 #[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None))]
 #[allow(clippy::too_many_arguments)]
-pub fn loglog(
-    py: Python<'_>,
-    x: Vec<f64>,
-    y: Vec<f64>,
+pub fn loglog<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
     label: Option<String>,
     color: Option<String>,
     linestyle: Option<String>,
     marker: Option<String>,
     linewidth: Option<f64>,
-) -> PyResult<Bound<'_, PyTuple>> {
+) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
     ax.set_xscale("log");
     ax.set_yscale("log");
     let ls = linestyle.as_deref().unwrap_or("-");
     let lw = linewidth.unwrap_or(1.5);
-    ax.plot(x.into_iter().map(Some).collect(), y.into_iter().map(Some).collect(), label, color, ls, marker, lw, None, None, None, None, None, None);
+    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
 
     let fig_py = Py::new(py, Figure {
         axes_list: Vec::new(),
         nrows: 1,
         ncols: 1,
         suptitle: String::new(),
-        width: 800,
-        height: 600,
+        width: 640,
+        height: 480,
         dpi: 100.0,
         axes_positions: Vec::new(),
         facecolor: "white".to_string(),
-        subplot_left: 0.125,
-        subplot_right: 0.9,
-        subplot_bottom: 0.1,
-        subplot_top: 0.9,
+        subplot_left: 0.0,
+        subplot_right: 1.0,
+        subplot_bottom: 0.0,
+        subplot_top: 1.0,
     })?;
     set_current_figure(fig_py.clone_ref(py));
     let ax_py = Py::new(py, ax)?;

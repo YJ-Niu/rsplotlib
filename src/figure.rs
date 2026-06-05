@@ -54,15 +54,15 @@ impl Figure {
             nrows: 1,
             ncols: 1,
             suptitle: String::new(),
-            width: 800,
-            height: 600,
+            width: 640,
+            height: 480,
             dpi: 100.0,
             axes_positions: Vec::new(),
             facecolor: "white".to_string(),
-            subplot_left: 0.125,
-            subplot_right: 0.9,
-            subplot_bottom: 0.1,
-            subplot_top: 0.9,
+            subplot_left: 0.0,
+            subplot_right: 1.0,
+            subplot_bottom: 0.0,
+            subplot_top: 1.0,
         }
     }
 
@@ -131,19 +131,23 @@ impl Figure {
     }
 
     fn savefig(&self, py: Python, filename: &str) -> PyResult<()> {
+        let font_scale = self.dpi / 72.0;
         if filename.ends_with(".png") || filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
             let backend = BitMapBackend::new(filename, (self.width, self.height));
-            self.render_to_backend(py, backend, self.width, self.height, true)
+            self.render_to_backend(py, backend, self.width, self.height, true, font_scale)
         } else {
-            let svg_w = (self.width as f64 * 72.0 / self.dpi).round() as u32;
-            let svg_h = (self.height as f64 * 72.0 / self.dpi).round() as u32;
-            let backend = SVGBackend::new(filename, (svg_w, svg_h));
-            self.render_to_backend(py, backend, svg_w, svg_h, false)?;
-            // 与matplotlib一致，使用pt单位
+            // 使用完整像素尺寸作为SVG坐标空间，确保字体大小正确
+            let backend = SVGBackend::new(filename, (self.width, self.height));
+            self.render_to_backend(py, backend, self.width, self.height, false, font_scale)?;
+            // 后处理：设置SVG物理尺寸为英寸单位，与matplotlib一致
             if let Ok(content) = std::fs::read_to_string(filename) {
+                let width_in = self.width as f64 / self.dpi;
+                let height_in = self.height as f64 / self.dpi;
+                // plotters SVGBackend 输出 width="pixel_width" height="pixel_height"
+                // 替换为英寸单位
                 let content = content
-                    .replacen(&format!("width=\"{}\"", svg_w), &format!("width=\"{}pt\"", svg_w), 1)
-                    .replacen(&format!("height=\"{}\"", svg_h), &format!("height=\"{}pt\"", svg_h), 1);
+                    .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{}in\"", format!("{:.4}", width_in)), 1)
+                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{}in\"", format!("{:.4}", height_in)), 1);
                 let _ = std::fs::write(filename, content);
             }
             Ok(())
@@ -154,8 +158,9 @@ impl Figure {
         let tmpdir = std::env::temp_dir();
         let path = tmpdir.join("rsplot_output.png");
         let filename = path.to_str().unwrap_or("/tmp/rsplot_output.png").to_string();
+        let font_scale = self.dpi / 72.0;
         let backend = BitMapBackend::new(&filename, (self.width, self.height));
-        self.render_to_backend(py, backend, self.width, self.height, true)?;
+        self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
 
         if cfg!(target_os = "macos") {
             let _ = std::process::Command::new("open").arg(&filename).spawn();
@@ -169,7 +174,7 @@ impl Figure {
 }
 
 impl Figure {
-    fn render_to_backend<B: DrawingBackend>(&self, py: Python, backend: B, actual_w: u32, actual_h: u32, fill_bg: bool) -> PyResult<()>
+    fn render_to_backend<B: DrawingBackend>(&self, py: Python, backend: B, actual_w: u32, actual_h: u32, fill_bg: bool, font_scale: f64) -> PyResult<()>
     where
         B::ErrorType: 'static,
     {
@@ -234,17 +239,45 @@ impl Figure {
                 (sub_w as u32, sub_h as u32),
             );
 
-            // GridSpec已定义了包含标签的完整区域，ChartBuilder不需要额外margin
-            // 与matplotlib一致：GridSpec位置就是axes的完整边界框
+            // 内部边距应基于子图自身的宽高（与 matplotlib 一致），
+            // 而不是整个 figure 的尺寸。否则子图越大，data area 越小。
+            let tick_label_size = (ax.tick_labelsize * font_scale).ceil() as u32;
+            let axis_label_size = (12.0 * font_scale).ceil() as u32;  // 轴标签字体大小
+            let title_size = (14.0 * font_scale).ceil() as u32;
+
+            // Y 轴标签区域: tick 标签 + 轴标签 + 间距
+            let y_label_area = tick_label_size + axis_label_size + 8;
+            // X 轴标签区域: tick 标签 + 轴标签 + 间距
+            let x_label_area = tick_label_size + axis_label_size + 8;
+
+            // 模拟 matplotlib 的 subplot 边距（占子图宽/高的比例）
+            // matplotlib 默认: left=12.5%, right=10%, bottom=10%, top=10%
+            // 但需要为 tick/axis label 预留空间，剩余空间用 margin 补足
+            let target_left = (sub_w * 0.125) as u32;
+            let target_right = (sub_w * 0.10) as u32;
+            let target_bottom = (sub_h * 0.10) as u32;
+            let target_top = if ax.title.is_empty() {
+                (sub_h * 0.10) as u32
+            } else {
+                (sub_h * 0.10) as u32 + title_size + 5
+            };
+
+            let margin_left = target_left.saturating_sub(y_label_area);
+            let margin_right = target_right.saturating_sub(5);
+            let margin_bottom = target_bottom.saturating_sub(x_label_area);
+            let margin_top = target_top.saturating_sub(5);
+
             let mut chart = ChartBuilder::on(&chart_area)
-                .margin_top(0)
-                .margin_right(0)
-                .margin_bottom(0)
-                .margin_left(0)
+                .margin_top(margin_top.max(5))
+                .margin_right(margin_right.max(5))
+                .margin_bottom(margin_bottom.max(5))
+                .margin_left(margin_left.max(5))
+                .x_label_area_size(x_label_area)
+                .y_label_area_size(y_label_area)
                 .build_cartesian_2d(x_min..x_max, y_min..y_max)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to build chart: {}", e)))?;
 
-            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max))?;
+            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, true)?;
 
             let twin_axes = ax.twin_axes.clone();
             drop(ax);
@@ -252,14 +285,22 @@ impl Figure {
                 let ((tx_min, tx_max), (ty_min, ty_max)) = twin.compute_bounds();
                 let (ux_min, ux_max) = if twin.is_twin_x { (tx_min, tx_max) } else { (x_min, x_max) };
                 let (uy_min, uy_max) = if twin.is_twin_y { (ty_min, ty_max) } else { (y_min, y_max) };
+                // twin axes 使用与主轴相同的布局参数
+                let twin_tick_size = (twin.tick_labelsize * font_scale).ceil() as u32;
+                let twin_axis_label_size = (12.0 * font_scale).ceil() as u32;
+                let twin_y_label_area = twin_tick_size + twin_axis_label_size + 8;
+                let twin_x_label_area = twin_tick_size + twin_axis_label_size + 8;
                 let mut twin_chart = ChartBuilder::on(&chart_area)
-                    .margin_top(0)
-                    .margin_right(0)
-                    .margin_bottom(0)
-                    .margin_left(0)
+                    .margin_top(margin_top.max(5))
+                    .margin_right(margin_right.max(5))
+                    .margin_bottom(margin_bottom.max(5))
+                    .margin_left(margin_left.max(5))
+                    .right_y_label_area_size(twin_y_label_area)
+                    .top_x_label_area_size(twin_x_label_area)
                     .build_cartesian_2d(ux_min..ux_max, uy_min..uy_max)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to build twin chart: {}", e)))?;
-                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max))?;
+                // twin axes 不填充背景，避免覆盖主轴数据
+                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max), font_scale, false)?;
             }
         }
 

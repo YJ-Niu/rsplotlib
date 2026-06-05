@@ -86,7 +86,7 @@ pub enum PlotElement {
     FillBetween {
         x: Vec<f64>,
         y1: Vec<f64>,
-        y2: f64,
+        y2: Vec<f64>,
         color: String,
         alpha: f64,
         label: Option<String>,

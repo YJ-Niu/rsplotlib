@@ -30,6 +30,7 @@ Thumbs.db
 N238B W1-plots/
 N238B W1.csv
 wheelhouse/
+diff_output/
 testing/
 analyze*.py
 check*.py

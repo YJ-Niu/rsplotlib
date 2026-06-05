@@ -273,6 +273,6 @@ class StrMethodFormatter(Formatter):
 
 # ==================== 便捷函数 ====================
 
-def AutoLocator():
+def auto_locator():
     """创建自动定位器"""
     return MaxNLocator(nbins=10, integer=False)

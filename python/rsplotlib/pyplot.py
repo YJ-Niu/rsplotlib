@@ -11,6 +11,34 @@ from ._figure_defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
 
 # ==================== 内部辅助函数 ====================
 
+def _to_list(obj):
+    """将 numpy 数组或其他可迭代对象转换为 Python list
+
+    支持 numpy ndarray、Python list、tuple 及其他可迭代对象。
+    标量值直接返回。
+    """
+    if obj is None:
+        return None
+    # numpy ndarray
+    if hasattr(obj, 'tolist'):
+        return obj.tolist()
+    # Python list/tuple 或其他可迭代对象
+    if isinstance(obj, (list, tuple)):
+        return list(obj)
+    # 标量
+    return obj
+
+
+def _to_list_recursive(obj):
+    """递归转换嵌套的 numpy 数组为 Python list"""
+    if obj is None:
+        return None
+    if hasattr(obj, 'tolist'):
+        return obj.tolist()
+    if isinstance(obj, (list, tuple)):
+        return [_to_list_recursive(item) for item in obj]
+    return obj
+
 def _get_axes():
     """获取当前 axes，如果没有则返回 None"""
     try:
@@ -84,24 +112,34 @@ def plot(*args, **kwargs):
     """
     _map_aliases(kwargs)
     x, y, kw = _parse_plot_args(args, kwargs)
+    x = _to_list(x)
+    y = _to_list(y)
     plot_args = (x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'),
-                 kw.get('marker'), kw.get('linewidth'), kw.get('markersize'),
-                 kw.get('markeredgewidth'), kw.get('solid_capstyle'))
+                 kw.get('marker'), kw.get('linewidth'))
     return _route_to_ax('plot', lambda *a: _rsplotlib.plot(*a), *plot_args)
 
 
-def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
+def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
     """绘制散点图"""
+    x = _to_list(x)
+    y = _to_list(y)
+    # 支持 color 作为 c 的别名
+    if c is None and 'color' in kwargs:
+        c = kwargs.pop('color')
     return _route_to_ax('scatter', _rsplotlib.scatter, x, y, s, c, marker, label, alpha)
 
 
 def bar(x, height, width=0.8, color=None, label=None):
     """绘制柱状图"""
+    x = _to_list(x)
+    height = _to_list(height)
     return _route_to_ax('bar', _rsplotlib.bar, x, height, width, color, label)
 
 
 def barh(y, width, height=0.8, color=None, label=None):
     """绘制水平柱状图"""
+    y = _to_list(y)
+    width = _to_list(width)
     return _route_to_ax('barh', _rsplotlib.barh, y, width, height, color, label)
 
 
@@ -120,6 +158,7 @@ def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs)
     histtype = kwargs.pop('histtype', None)
     _color = facecolor if facecolor is not None else color
 
+    x = _to_list_recursive(x)
     if x and isinstance(x[0], (list, tuple)):
         x_list = [list(v) for v in x]
     else:
@@ -140,6 +179,7 @@ def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs)
 
 def pie(x, labels=None, colors=None, autopct=False, **kwargs):
     """绘制饼图"""
+    x = _to_list(x)
     if autopct and isinstance(autopct, str):
         autopct_str = autopct
     elif autopct:
@@ -151,32 +191,66 @@ def pie(x, labels=None, colors=None, autopct=False, **kwargs):
 
 def boxplot(x, labels=None, vert=True, **kwargs):
     """绘制箱线图"""
+    x = _to_list_recursive(x)
     return _route_to_ax('boxplot', _rsplotlib.boxplot, x, labels, vert)
 
 
 def fill_between(x, y1, y2=0.0, color=None, alpha=0.3, label=None, **kwargs):
     """填充区域"""
+    x = _to_list(x)
+    y1 = _to_list(y1)
+    y2 = _to_list(y2)
     return _route_to_ax('fill_between', _rsplotlib.fill_between, x, y1, y2, color, alpha, label)
 
 
 def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0, **kwargs):
     """绘制误差棒图"""
+    x = _to_list(x)
+    y = _to_list(y)
+    yerr = _to_list(yerr)
+    xerr = _to_list(xerr)
     return _route_to_ax('errorbar', _rsplotlib.errorbar, x, y, yerr, xerr, fmt, color, label, capsize)
 
 
 def stem(x, y, linefmt=None, markerfmt=None, label=None, **kwargs):
     """绘制茎叶图"""
+    x = _to_list(x)
+    y = _to_list(y)
     return _route_to_ax('stem', _rsplotlib.stem, x, y, linefmt or '-', markerfmt or 'o', label)
 
 
 def step(x, y, where='pre', label=None, color=None, linestyle='-', linewidth=1.5, **kwargs):
     """绘制阶梯图"""
+    x = _to_list(x)
+    y = _to_list(y)
     return _route_to_ax('step', _rsplotlib.step, x, y, where, label, color, linestyle, linewidth)
 
 
 def imshow(x, cmap='viridis', aspect='auto', **kwargs):
     """显示图像"""
+    x = _to_list_recursive(x)
     return _route_to_ax('imshow', _rsplotlib.imshow, x, cmap, aspect)
+
+
+def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
+    """绘制 x 轴对数刻度图"""
+    x = _to_list(x)
+    y = _to_list(y)
+    return _rsplotlib.semilogx(x, y, label, color, linestyle, marker, linewidth)
+
+
+def semilogy(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
+    """绘制 y 轴对数刻度图"""
+    x = _to_list(x)
+    y = _to_list(y)
+    return _rsplotlib.semilogy(x, y, label, color, linestyle, marker, linewidth)
+
+
+def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
+    """绘制双对数刻度图"""
+    x = _to_list(x)
+    y = _to_list(y)
+    return _rsplotlib.loglog(x, y, label, color, linestyle, marker, linewidth)
 
 
 # ==================== 辅助元素 ====================
@@ -255,11 +329,13 @@ def ylim(bottom=None, top=None, **kwargs):
 
 def xticks(ticks=None, labels=None, **kwargs):
     """设置 x 轴刻度"""
+    ticks = _to_list(ticks)
     return _rsplotlib.xticks(ticks, labels)
 
 
 def yticks(ticks=None, labels=None, **kwargs):
     """设置 y 轴刻度"""
+    ticks = _to_list(ticks)
     return _rsplotlib.yticks(ticks, labels)
 
 
@@ -295,9 +371,9 @@ def minorticks_off():
 
 # ==================== 子图与布局 ====================
 
-def subplots(nrows=1, ncols=1, **kwargs):
+def subplots(nrows=1, ncols=1, figsize=None, dpi=None, **kwargs):
     """创建子图网格"""
-    return _rsplotlib.subplots(nrows, ncols)
+    return _rsplotlib.subplots(nrows, ncols, figsize, dpi)
 
 
 def subplot(nrows, ncols, index, **kwargs):

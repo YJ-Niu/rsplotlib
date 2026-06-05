@@ -973,8 +973,6 @@ class Reportopp:
                         self.ax2.text(1, 85.8 - y * 6.4, "-" * 275, fontsize=8, c="grey")
             for thread in plot_list:
                 thread.join()
-
-            plt.savefig(os.path.join(path_p, f'{plt_idix} {test_name}.svg'))
             plt.savefig(os.path.join(path_p, f'{plt_idix} {test_name}.png'))
             fig.clf()
             fig.clear()

@@ -214,9 +214,21 @@ impl Spine {
         "black".to_string()
     }
 
-    fn set_color(&mut self, _color: &str) {
+    fn set_color(&mut self, color: &str, py: Python<'_>) {
+        if let Some(parent) = &self.parent {
+            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
+                let mut ax = ax_bound.borrow_mut();
+                ax.spine_color = color.to_string();
+            }
+        }
     }
 
-    fn set_linewidth(&mut self, _lw: f64) {
+    fn set_linewidth(&mut self, lw: f64, py: Python<'_>) {
+        if let Some(parent) = &self.parent {
+            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
+                let mut ax = ax_bound.borrow_mut();
+                ax.spine_linewidth = lw;
+            }
+        }
     }
 }

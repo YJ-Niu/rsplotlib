@@ -21,14 +21,13 @@ uv pip install matplotlib
 
 1. 修复（Fix）: 根据测试用例或示例运行输出定位问题并修复。
 2. 重构（Refactor）: 将修复后的代码整理为更清晰的模块（优先修改 `python/rsplotlib` 下的代码）。
-3. 画图（Plot）: 使用 `main.py` 或 `python/examples.py` 生成对比图像，输出目录为 `plots/` 或 `N238B W1-plots/`。
-4. 对比（Compare）: 将生成的 SVG/PNG 与使用 Matplotlib 原生生成的图片逐一比较，记录差异（布局、字体、间距、图例、刻度等）。
+3. 画图（Plot）: 使用 `main.py` 或 `python/examples.py` 生成对比图像，输出目录为 `plots/N238B W1-plots/`。
+4. 对比（Compare）: 将生成的 PNG 与使用 Matplotlib 原生生成的图片`N238B W1-plots/`下的图像逐一比较，记录差异（布局、字体、间距、图例、刻度等）。
 5. 再修复（Iterate）: 基于差异继续修复并自动进入下一轮。
 
 主要关注点
 
 - 目标并非逐字复刻 Matplotlib 的实现，而是在兼容其常用 API 的前提下尽量匹配输出效果。
-- 注意 SVG 与 PNG 的渲染差异；对于 保存SVG不要过多的修改，避免做会影响 raster 输出（PNG）布局的改动。
 - 保持代码简洁：优先实现常用、稳定的接口，避免过度复杂化。
 
 重要文件

@@ -237,10 +237,15 @@ def example_mixed():
     print("=" * 60)
     
     x = np.linspace(0, 10, 100)
-    
+
     plt.figure()
     plt.plot(x, np.sin(x), color='blue', label='sin')
-    plt.scatter(x[::10], np.sin(x[::10]), color='red', s=20, label='points')
+    # rsnum ndarray 不支持切片索引，使用 tolist + 列表推导取子集
+    x_list = x.tolist()
+    y_list = np.sin(x).tolist()
+    x_sub = [x_list[i] for i in range(0, 100, 10)]
+    y_sub = [y_list[i] for i in range(0, 100, 10)]
+    plt.scatter(x_sub, y_sub, color='red', s=20, label='points')
     plt.axhline(0, color='black', linestyle='--')
     plt.text(5, 0.5, 'sin(x)', fontsize=12, color='blue')
     plt.xlabel('x')

@@ -9,11 +9,35 @@ from . import rsplotlib as _rsplotlib
 from .rsplotlib import Figure, Axes
 
 
+# ==================== 内部辅助函数 ====================
+
+def _to_list(obj):
+    """将 numpy 数组或其他可迭代对象转换为 Python list"""
+    if obj is None:
+        return None
+    if hasattr(obj, 'tolist'):
+        return obj.tolist()
+    if isinstance(obj, (list, tuple)):
+        return list(obj)
+    return obj
+
+
+def _to_list_recursive(obj):
+    """递归转换嵌套的 numpy 数组为 Python list"""
+    if obj is None:
+        return None
+    if hasattr(obj, 'tolist'):
+        return obj.tolist()
+    if isinstance(obj, (list, tuple)):
+        return [_to_list_recursive(item) for item in obj]
+    return obj
+
+
 # ==================== 绘图函数 ====================
 
 def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
     """绘制折线图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -23,12 +47,12 @@ def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=No
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplotlib.plot(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.plot(_to_list(x), _to_list(y), label, color, linestyle, marker, linewidth)
 
 
-def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
+def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
     """绘制散点图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -38,12 +62,15 @@ def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0):
         label: 图例标签 (默认: None)
         alpha: 透明度 (默认: 1.0)
     """
-    return _rsplotlib.scatter(x, y, s, c, marker, label, alpha)
+    # 支持 color 作为 c 的别名
+    if c is None and 'color' in kwargs:
+        c = kwargs.pop('color')
+    return _rsplotlib.scatter(_to_list(x), _to_list(y), s, c, marker, label, alpha)
 
 
 def bar(x, height, width=0.8, color=None, label=None):
     """绘制柱状图
-    
+
     Args:
         x: x 轴位置
         height: 柱高度
@@ -51,12 +78,12 @@ def bar(x, height, width=0.8, color=None, label=None):
         color: 颜色 (默认: None)
         label: 图例标签 (默认: None)
     """
-    return _rsplotlib.bar(x, height, width, color, label)
+    return _rsplotlib.bar(_to_list(x), _to_list(height), width, color, label)
 
 
 def barh(y, width, height=0.8, color=None, label=None):
     """绘制水平柱状图
-    
+
     Args:
         y: y 轴位置
         width: 柱宽度
@@ -64,12 +91,12 @@ def barh(y, width, height=0.8, color=None, label=None):
         color: 颜色 (默认: None)
         label: 图例标签 (默认: None)
     """
-    return _rsplotlib.barh(y, width, height, color, label)
+    return _rsplotlib.barh(_to_list(y), _to_list(width), height, color, label)
 
 
 def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None):
     """绘制直方图
-    
+
     Args:
         x: 数据
         bins: 区间数 (默认: 10)
@@ -78,35 +105,42 @@ def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None):
         alpha: 透明度 (默认: 0.7)
         color: 颜色 (默认: None)
     """
-    return _rsplotlib.hist(x, bins, density, label, alpha, color)
+    return _rsplotlib.hist(_to_list_recursive(x), bins, density, label, alpha, color)
 
 
 def pie(x, labels=None, colors=None, autopct=False):
     """绘制饼图
-    
+
     Args:
         x: 数据
         labels: 标签列表 (默认: None)
         colors: 颜色列表 (默认: None)
         autopct: 是否显示百分比 (默认: False)
     """
-    return _rsplotlib.pie(x, labels, colors, autopct)
+    # 将 bool 类型的 autopct 转换为字符串格式
+    if autopct is True:
+        autopct_str = "%1.1f%%"
+    elif isinstance(autopct, str):
+        autopct_str = autopct
+    else:
+        autopct_str = None
+    return _rsplotlib.pie(_to_list(x), labels, colors, autopct_str)
 
 
 def boxplot(x, labels=None, vert=True):
     """绘制箱线图
-    
+
     Args:
         x: 数据列表
         labels: 标签列表 (默认: None)
         vert: 是否垂直显示 (默认: True)
     """
-    return _rsplotlib.boxplot(x, labels, vert)
+    return _rsplotlib.boxplot(_to_list_recursive(x), labels, vert)
 
 
 def fill_between(x, y1, y2=None, color=None, alpha=1.0, label=None):
     """填充区域
-    
+
     Args:
         x: x 轴数据
         y1: 上边界
@@ -115,12 +149,12 @@ def fill_between(x, y1, y2=None, color=None, alpha=1.0, label=None):
         alpha: 透明度 (默认: 1.0)
         label: 图例标签 (默认: None)
     """
-    return _rsplotlib.fill_between(x, y1, y2, color, alpha, label)
+    return _rsplotlib.fill_between(_to_list(x), _to_list(y1), _to_list(y2), color, alpha, label)
 
 
 def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0):
     """绘制误差棒图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -131,12 +165,12 @@ def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsiz
         label: 图例标签 (默认: None)
         capsize: 误差帽大小 (默认: 3.0)
     """
-    return _rsplotlib.errorbar(x, y, yerr, xerr, fmt, color, label, capsize)
+    return _rsplotlib.errorbar(_to_list(x), _to_list(y), _to_list(yerr), _to_list(xerr), fmt, color, label, capsize)
 
 
 def stem(x, y, linefmt=None, markerfmt=None, label=None):
     """绘制茎叶图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -144,12 +178,12 @@ def stem(x, y, linefmt=None, markerfmt=None, label=None):
         markerfmt: 标记样式 (默认: None)
         label: 图例标签 (默认: None)
     """
-    return _rsplotlib.stem(x, y, linefmt, markerfmt, label)
+    return _rsplotlib.stem(_to_list(x), _to_list(y), linefmt, markerfmt, label)
 
 
 def step(x, y, where_='pre', label=None, color=None, linestyle='-', linewidth=1.5):
     """绘制阶梯图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -159,18 +193,18 @@ def step(x, y, where_='pre', label=None, color=None, linestyle='-', linewidth=1.
         linestyle: 线型 (默认: '-')
         linewidth: 线宽 (默认: 1.5)
     """
-    return _rsplotlib.step(x, y, where_, label, color, linestyle, linewidth)
+    return _rsplotlib.step(_to_list(x), _to_list(y), where_, label, color, linestyle, linewidth)
 
 
 def imshow(x, cmap='gray', aspect='auto'):
     """显示图像
-    
+
     Args:
         x: 2D 数据数组
         cmap: 色图 (默认: 'gray', 可选: 'hot', 'cool')
         aspect: 纵横比 (默认: 'auto', 可选: 'equal')
     """
-    return _rsplotlib.imshow(x, cmap, aspect)
+    return _rsplotlib.imshow(_to_list_recursive(x), cmap, aspect)
 
 
 def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians=True):
@@ -335,27 +369,27 @@ def vlines(x, ymin, ymax, color=None, linestyle=None, linewidth=None):
 
 # ==================== 配置函数 ====================
 
-def xlabel(text):
+def xlabel(text, **kwargs):
     """设置 x 轴标签
-    
+
     Args:
         text: 标签文本
     """
     return _rsplotlib.xlabel(text)
 
 
-def ylabel(text):
+def ylabel(text, **kwargs):
     """设置 y 轴标签
-    
+
     Args:
         text: 标签文本
     """
     return _rsplotlib.ylabel(text)
 
 
-def title(text):
+def title(text, **kwargs):
     """设置图表标题
-    
+
     Args:
         text: 标题文本
     """
@@ -564,7 +598,7 @@ def close():
 
 def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
     """x 轴对数坐标折线图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -574,12 +608,12 @@ def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidt
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplotlib.semilogx(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.semilogx(_to_list(x), _to_list(y), label, color, linestyle, marker, linewidth)
 
 
 def semilogy(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
     """y 轴对数坐标折线图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -589,12 +623,12 @@ def semilogy(x, y, label=None, color=None, linestyle=None, marker=None, linewidt
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplotlib.semilogy(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.semilogy(_to_list(x), _to_list(y), label, color, linestyle, marker, linewidth)
 
 
 def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
     """双对数坐标折线图
-    
+
     Args:
         x: x 轴数据
         y: y 轴数据
@@ -604,7 +638,7 @@ def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplotlib.loglog(x, y, label, color, linestyle, marker, linewidth)
+    return _rsplotlib.loglog(_to_list(x), _to_list(y), label, color, linestyle, marker, linewidth)
 
 
 # ==================== 样式控制 ====================
