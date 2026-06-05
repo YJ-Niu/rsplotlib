@@ -134,14 +134,9 @@ pub fn draw_marker<DB: DrawingBackend>(
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
         _ => {
-            let r = 3.0;
-            let n = 16;
-            let mut points = Vec::with_capacity(n + 1);
-            for i in 0..=n {
-                let angle = i as f64 * 2.0 * std::f64::consts::PI / n as f64;
-                points.push((x + r * angle.cos(), y + r * angle.sin()));
-            }
-            chart.draw_series(std::iter::once(PathElement::new(points, style)))
+            // 默认 marker（如 "."）使用屏幕像素半径，参考 "o" 的实现
+            let r = (s as i32).max(2);
+            chart.draw_series(std::iter::once(Circle::new((x, y), r, style)))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
     }

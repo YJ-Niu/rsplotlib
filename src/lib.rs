@@ -18,17 +18,36 @@ use crate::figure::Figure;
 fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(target_os = "macos")]
     {
-        // 优先使用 Arial（接近 matplotlib 默认 sans-serif 字体宽度），
-        // 备用 HelveticaNeue.ttc / Helvetica.ttc / LucidaGrande。
-        // 不能用 Andale Mono 等 monospace 字体，否则文本会显著变宽。
-        let font_candidates: &[&str] = &[
-            "/Library/Fonts/Arial.ttf",
+        // 优先使用 matplotlib 自带的 DejaVu Sans（与 matplotlib 默认字体一致），
+        // 保证字符宽度、字形度量尽量匹配 matplotlib。
+        // 备选：系统 Arial / Helvetica 系，避免 monospace 字体导致文本过宽。
+        let mut font_candidates: Vec<String> = Vec::new();
+        // 1) DejaVu Sans（matplotlib 默认）—— 通过 site-packages/matplotlib 查找
+        for base in &[
+            std::env::var("VIRTUAL_ENV").ok(),
+            Some(std::env::current_dir()
+                .map(|p| p.join(".venv").to_string_lossy().to_string())
+                .unwrap_or_default())
+                .filter(|p| !p.is_empty()),
+        ] {
+            if let Some(prefix) = base {
+                let p = std::path::Path::new(&prefix)
+                    .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
+                if p.exists() {
+                    font_candidates.push(p.to_string_lossy().to_string());
+                }
+            }
+        }
+        // 2) 系统 Arial / Helvetica 备选
+        for sys in &[
             "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
             "/System/Library/Fonts/HelveticaNeue.ttc",
             "/System/Library/Fonts/Helvetica.ttc",
-            "/System/Library/Fonts/LucidaGrande.ttc",
-        ];
-        for path in font_candidates {
+        ] {
+            font_candidates.push((*sys).to_string());
+        }
+        for path in &font_candidates {
             if let Ok(font_data) = std::fs::read(path) {
                 let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
                 if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {

@@ -34,7 +34,8 @@ diff_output/
 testing/
 analyze*.py
 check*.py
-compare_all.py
+compare*.py
+
 test*.py
 *.svg
 # Environment

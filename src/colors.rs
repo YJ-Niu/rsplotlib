@@ -59,11 +59,14 @@ pub fn default_color_str(idx: usize) -> String {
 
 pub fn shape_style(color: RgbColor, linewidth: f64, linestyle: &str) -> ShapeStyle {
     let rgb = RGBColor(color.0, color.1, color.2);
+    // 1pt = dpi/72 px。matmul 1.3pt @144dpi = 2.6px ≈ 3px
+    // 在没有 dpi 信息的 helper 里保守取 ceil，避免线过细
+    let lw_px = (linewidth).round().max(1.0) as u32;
     match linestyle {
-        "--" => rgb.mix(1.0).stroke_width(linewidth as u32).into(),
-        ":" => rgb.mix(1.0).stroke_width(linewidth as u32).into(),
-        "-." => rgb.mix(1.0).stroke_width(linewidth as u32).into(),
-        _ => rgb.mix(1.0).stroke_width(linewidth as u32).into(),
+        "--" => rgb.mix(1.0).stroke_width(lw_px).into(),
+        ":" => rgb.mix(1.0).stroke_width(lw_px).into(),
+        "-." => rgb.mix(1.0).stroke_width(lw_px).into(),
+        _ => rgb.mix(1.0).stroke_width(lw_px).into(),
     }
 }
 

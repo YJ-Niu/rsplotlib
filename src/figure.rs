@@ -49,6 +49,7 @@ pub struct Figure {
 impl Figure {
     #[new]
     pub fn new() -> Self {
+        // matplotlib 兼容的默认 subplots_adjust 边距
         Figure {
             axes_list: Vec::new(),
             nrows: 1,
@@ -59,10 +60,10 @@ impl Figure {
             dpi: 100.0,
             axes_positions: Vec::new(),
             facecolor: "white".to_string(),
-            subplot_left: 0.0,
-            subplot_right: 1.0,
-            subplot_bottom: 0.0,
-            subplot_top: 1.0,
+            subplot_left: 0.125,
+            subplot_right: 0.9,
+            subplot_bottom: 0.11,
+            subplot_top: 0.9,
         }
     }
 
@@ -234,50 +235,107 @@ impl Figure {
                 continue;
             }
 
+            // 计算 tick/label 区域大小
+            let tick_label_size = (ax.tick_labelsize * font_scale).ceil() as u32;
+
+            // 估算 y/x tick label 区域大小（容纳最长的 tick 数字 + 少量 padding）
+            let y_tick_area = tick_label_size + 6;
+            let x_tick_area = tick_label_size + 6;
+
+            // 检测 y 轴是否有可见的 tick 标签或 ylabel
+            // 条件：ylabel 非空 或 (yticks_val 未被设为空 且 tick_left 或 tick_right 为真)
+            let y_has_labels = !ax.ylabel.is_empty()
+                || !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+            let y_has_ticks = ax.tick_left || ax.tick_right;
+
+            // 检测 x 轴是否有可见的 tick 标签或 xlabel
+            let x_has_labels = !ax.xlabel.is_empty()
+                || !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
+            let x_has_ticks = ax.tick_bottom || ax.tick_top;
+
+            // axis label (y_desc/x_desc) 在 tick label 之外，需要额外空间
+            // plotters 会把 y_desc 放在 y_label_area 中心，tick label 放在 y_label_area 右边缘
+            // 如果没有 label 和 tick，最小保留 2px 以确保 plotters 正确绘制边界 spine
+            let y_label_area = if !y_has_labels {
+                2u32
+            } else if ax.ylabel.is_empty() {
+                y_tick_area
+            } else {
+                y_tick_area + tick_label_size + 6
+            };
+            let x_label_area = if !x_has_labels {
+                2u32
+            } else if ax.xlabel.is_empty() {
+                x_tick_area
+            } else {
+                x_tick_area + tick_label_size + 6
+            };
+            // 抑制未使用变量警告
+            let _ = y_has_ticks;
+            let _ = x_has_ticks;
+
+            eprintln!("DEBUG: y_tick_area={}, x_tick_area={}, y_label_area={}, x_label_area={}, font_scale={}, tick_label_size={}, title='{}', ylabel='{}', xlabel='{}'",
+                y_tick_area, x_tick_area, y_label_area, x_label_area, font_scale, tick_label_size, ax.title, ax.ylabel, ax.xlabel);
+
+            // 顶部边距：ax.title 是通过 chart.draw_series(Text) 渲染的，
+            // 文字在数据区顶部 y_max 处向上延伸 (VPos::Bottom)，所以不需要 plotters margin_top
+            // 保留少量 margin_top 作为 title 与数据区之间的视觉间距
+            let margin_top_internal = if ax.title.is_empty() { 0u32 } else { 4u32 };
+
+            // 关键修复：chart 区域向左侧/上扩展，使 plotters 的 y_label_area 和 margin_top
+            // 容纳在子图外部，最终 data area 正好等于 subplot 区域（与 matplotlib 一致）
+            // plotters 内部布局：
+            //   drawing_area = chart_area - margin(top, bottom, left, right)
+            //   然后按 label_areas 切分出 plotting area (data area)
+            // 因此：
+            //   data_area.top    = chart_y0 + margin_top
+            //   data_area.bottom = chart_y0 + chart_h - x_label_area
+            //   data_area.left   = chart_x0 + y_label_area
+            //   data_area.right  = chart_x0 + chart_w
+            // 要使 data_area = subplot：
+            //   chart_x0 = subplot_x - y_label_area
+            //   chart_w  = subplot_w + y_label_area
+            //   chart_y0 = subplot_y - margin_top
+            //   chart_h  = subplot_h + x_label_area
+            let y_label_actual = y_label_area;
+            let x_label_actual = x_label_area;
+            let margin_top_actual = margin_top_internal;
+
+            // 限制扩展不超过 figure 边界（最左侧/最上侧子图可扩展到边）
+            let chart_x0 = (x0 - y_label_actual as f64).max(0.0);
+            let chart_y0 = (y0 - margin_top_actual as f64).max(0.0);
+            let chart_w = (sub_w + y_label_actual as f64) as f64;
+            let chart_h = (sub_h + x_label_actual as f64) as f64;
+
+            // 防止超出 figure 右/下边界
+            let chart_w = chart_w.min((total_w - chart_x0) as f64).max(1.0);
+            let chart_h = chart_h.min((total_h - chart_y0) as f64).max(1.0);
+
             let chart_area = root.clone().shrink(
-                (x0 as i32, y0 as i32),
-                (sub_w as u32, sub_h as u32),
+                (chart_x0 as i32, chart_y0 as i32),
+                (chart_w as u32, chart_h as u32),
             );
 
-            // 内部边距应基于子图自身的宽高（与 matplotlib 一致），
-            // 而不是整个 figure 的尺寸。否则子图越大，data area 越小。
-            let tick_label_size = (ax.tick_labelsize * font_scale).ceil() as u32;
-            let axis_label_size = (12.0 * font_scale).ceil() as u32;  // 轴标签字体大小
-            let title_size = (14.0 * font_scale).ceil() as u32;
-
-            // Y 轴标签区域: tick 标签 + 轴标签 + 间距
-            let y_label_area = tick_label_size + axis_label_size + 8;
-            // X 轴标签区域: tick 标签 + 轴标签 + 间距
-            let x_label_area = tick_label_size + axis_label_size + 8;
-
-            // 模拟 matplotlib 的 subplot 边距（占子图宽/高的比例）
-            // matplotlib 默认: left=12.5%, right=10%, bottom=10%, top=10%
-            // 但需要为 tick/axis label 预留空间，剩余空间用 margin 补足
-            let target_left = (sub_w * 0.125) as u32;
-            let target_right = (sub_w * 0.10) as u32;
-            let target_bottom = (sub_h * 0.10) as u32;
-            let target_top = if ax.title.is_empty() {
-                (sub_h * 0.10) as u32
-            } else {
-                (sub_h * 0.10) as u32 + title_size + 5
-            };
-
-            let margin_left = target_left.saturating_sub(y_label_area);
-            let margin_right = target_right.saturating_sub(5);
-            let margin_bottom = target_bottom.saturating_sub(x_label_area);
-            let margin_top = target_top.saturating_sub(5);
+            // 子图内部边距：y_label_area / x_label_area 已在 chart_area 尺寸中体现
+            // margin_top 取最小值(4)用于 title 与数据区视觉间距
+            let margin_left = 0u32;
+            let margin_right = 0u32;
+            let margin_bottom = 0u32;
+            let margin_top = margin_top_actual;
 
             let mut chart = ChartBuilder::on(&chart_area)
-                .margin_top(margin_top.max(5))
-                .margin_right(margin_right.max(5))
-                .margin_bottom(margin_bottom.max(5))
-                .margin_left(margin_left.max(5))
-                .x_label_area_size(x_label_area)
-                .y_label_area_size(y_label_area)
+                .margin_top(margin_top)
+                .margin_right(margin_right)
+                .margin_bottom(margin_bottom)
+                .margin_left(margin_left)
+                .x_label_area_size(x_label_actual)
+                .y_label_area_size(y_label_actual)
                 .build_cartesian_2d(x_min..x_max, y_min..y_max)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to build chart: {}", e)))?;
 
-            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, true)?;
+            // 将标题信息存到 axes 之外用：传入 subplot 在 figure 中的位置，用于在 figure root 上绘制
+            let fig_subplot_info = (x0, y0, sub_w, sub_h);
+            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, true, Some(&fig_subplot_info))?;
 
             let twin_axes = ax.twin_axes.clone();
             drop(ax);
@@ -285,22 +343,21 @@ impl Figure {
                 let ((tx_min, tx_max), (ty_min, ty_max)) = twin.compute_bounds();
                 let (ux_min, ux_max) = if twin.is_twin_x { (tx_min, tx_max) } else { (x_min, x_max) };
                 let (uy_min, uy_max) = if twin.is_twin_y { (ty_min, ty_max) } else { (y_min, y_max) };
-                // twin axes 使用与主轴相同的布局参数
+                // twin axes 使用与主轴相同的 chart_area，但 label area 在右侧/顶部
                 let twin_tick_size = (twin.tick_labelsize * font_scale).ceil() as u32;
-                let twin_axis_label_size = (12.0 * font_scale).ceil() as u32;
-                let twin_y_label_area = twin_tick_size + twin_axis_label_size + 8;
-                let twin_x_label_area = twin_tick_size + twin_axis_label_size + 8;
+                let twin_y_label_area = twin_tick_size + 6;
+                let twin_x_label_area = twin_tick_size + 6;
                 let mut twin_chart = ChartBuilder::on(&chart_area)
-                    .margin_top(margin_top.max(5))
-                    .margin_right(margin_right.max(5))
-                    .margin_bottom(margin_bottom.max(5))
-                    .margin_left(margin_left.max(5))
+                    .margin_top(0)
+                    .margin_right(0)
+                    .margin_bottom(0)
+                    .margin_left(0)
                     .right_y_label_area_size(twin_y_label_area)
                     .top_x_label_area_size(twin_x_label_area)
                     .build_cartesian_2d(ux_min..ux_max, uy_min..uy_max)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to build twin chart: {}", e)))?;
                 // twin axes 不填充背景，避免覆盖主轴数据
-                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max), font_scale, false)?;
+                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max), font_scale, false, None)?;
             }
         }
 

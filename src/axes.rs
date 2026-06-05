@@ -1220,6 +1220,7 @@ impl Axes {
         (y_min, y_max): (f64, f64),
         font_scale: f64,
         fill_bg: bool,
+        _subplot_info: Option<&(f64, f64, f64, f64)>,
     ) -> PyResult<()>
     where
         DB::ErrorType: 'static,
@@ -1364,6 +1365,30 @@ impl Axes {
         if self.yscale == "log" {
             mesh_builder
                 .y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
+        } else {
+            // 对线性刻度使用与 matplotlib 兼容的格式：
+            // 整数显示为不带 ".0"，小数保留最多两位有效数字。
+            mesh_builder.y_label_formatter(&|v| {
+                let val = *v;
+                if (val - val.round()).abs() < 1e-9 {
+                    format!("{}", val.round() as i64)
+                } else {
+                    let s = format!("{:.2}", val);
+                    // 去掉末尾的 0 和可能的 .
+                    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+                    trimmed.to_string()
+                }
+            });
+            mesh_builder.x_label_formatter(&|v| {
+                let val = *v;
+                if (val - val.round()).abs() < 1e-9 {
+                    format!("{}", val.round() as i64)
+                } else {
+                    let s = format!("{:.2}", val);
+                    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+                    trimmed.to_string()
+                }
+            });
         }
 
         if let Some(ref ticks) = computed_xticks {
@@ -1601,7 +1626,8 @@ impl Axes {
                                         }
                                     }
                                     if dash_points.len() >= 2 {
-                                        chart.draw_series(std::iter::once(PathElement::new(dash_points, rgb.stroke_width(*linewidth as u32))))
+                                        let lw_px = ((*linewidth) * font_scale).round().max(1.0) as u32;
+                                        chart.draw_series(std::iter::once(PathElement::new(dash_points, rgb.stroke_width(lw_px))))
                                             .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dashed line: {}", e)))?;
                                     }
                                     seg_start = seg_end.max(seg_start + 1);
@@ -1717,17 +1743,12 @@ impl Axes {
                                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw line: {}", e)))?;
                             }
                             if solid_capstyle == "round" && *linewidth > 1.0 && marker.as_ref().map_or(true, |m| m.is_empty()) {
-                                let circle_r = *linewidth / 2.0;
-                                let n_seg = 16;
+                                // 使用屏幕像素半径（参考 marker "o" 的实现），避免在数据坐标下变成巨大椭圆
+                                let cap_r = ((*linewidth / 2.0) as i32).max(1);
                                 let cap_points = [points.first().unwrap().clone(), points.last().unwrap().clone()];
                                 for pt in cap_points.iter() {
-                                    let mut pts = Vec::with_capacity(n_seg + 1);
-                                    for i in 0..=n_seg {
-                                        let angle = i as f64 * 2.0 * std::f64::consts::PI / n_seg as f64;
-                                        pts.push((pt.0 + circle_r * angle.cos(), pt.1 + circle_r * angle.sin()));
-                                    }
-                                    chart.draw_series(std::iter::once(PathElement::new(pts, rgb.filled())))
-                                        .map_err(|e| PyRuntimeError::new_err(format!("Cap path: {}", e)))?;
+                                    chart.draw_series(std::iter::once(Circle::new(*pt, cap_r, rgb.filled())))
+                                        .map_err(|e| PyRuntimeError::new_err(format!("Cap circle: {}", e)))?;
                                 }
                             }
                         }
@@ -1736,7 +1757,17 @@ impl Axes {
                         if !marker_name.is_empty() && x.len() == y.len() {
                             let col2 = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
                             let rgb = to_plotters_color(col2);
-                            let marker_size = *linewidth * 3.0 + 3.0;
+                            // matplotlib 中 markersize 的单位是 "points^2"，半径约为 sqrt(s)/2 像素（@72dpi）
+                            // 我们的 line plot 入口没有暴露 markersize，所以按 markersize=6（matplotlib 默认）
+                            // 在 144dpi 下半径约 6 像素。
+                            // 对于 "." 这种像素点 marker，matplotlib 实际只画 1 个像素，需要更小。
+                            let marker_size = if marker_name == "." || marker_name == "," {
+                                2.0_f64.max(((*linewidth) * 1.5).round())
+                            } else {
+                                // 半径 = sqrt(6) * dpi/72 ≈ 6 在 144dpi 下
+                                let ms_points = 6.0_f64;
+                                ms_points * (font_scale * 144.0 / 72.0) / 2.0
+                            };
                             for (xv, yv) in x.iter().zip(y.iter()) {
                                 if let (Some(xv), Some(yv)) = (xv, yv) {
                                     draw_marker(chart, marker_name, *xv, *yv, marker_size, rgb)
@@ -2354,12 +2385,14 @@ impl Axes {
             }
         }
 
-        // 渲染 axes 标题（在绘图区域上方、margin 区域内居中）
+        // 渲染 axes 标题（在数据区域上方的 margin_top 区域内）
         if !self.title.is_empty() {
             let title_x = (x_min + x_max) / 2.0;
-            // 标题位于数据范围上方，使用数据坐标偏移
+            // 标题位于数据范围上方的 margin_top 区域，使用数据坐标的微小偏移
             let y_range = y_max - y_min;
-            let title_y = y_max + y_range * 0.05;
+            // 标题锚点在数据区顶部，使用 VPos::Bottom 让文字向上延伸
+            // 偏移量设为数据范围的极小比例，确保文字位于 margin_top 区域内
+            let title_y = y_max + y_range * 0.01;
             let font: FontDesc = ("sans-serif", scale_font(14.0, font_scale)).into();
             let colored_font = font.color(&BLACK);
             let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom)).into();
