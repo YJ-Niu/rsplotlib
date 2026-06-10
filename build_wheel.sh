@@ -60,7 +60,8 @@ if [[ -n "$WHEEL" && -f "$WHEEL" ]]; then
   echo "Wheel built: $WHEEL"
   if [[ -x ".venv/bin/python" ]]; then
     echo "Installing into .venv ..."
-    uv pip install "$WHEEL"
+    # 使用 --no-deps 避免 uv 重新解析依赖（本地 wheel 本身已包含所有绑定代码）
+    uv pip install --no-deps "$WHEEL"
     echo "Installed into .venv successfully."
   else
     echo "Warning: .venv not found; skip install. Wheels available in $OUT_DIR" >&2

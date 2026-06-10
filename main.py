@@ -16,8 +16,6 @@ import json
 from rsplotlib.ticker import MaxNLocator, MultipleLocator
 import threading
 import math
-import rsplotlib.ticker as ticker
-# import rsplotlib.patches as patches
 from pylab import mpl
 
 os.environ["MPLCONFIGDIR"] = "/Applications/plots/rsplotlib_cache"
@@ -364,8 +362,9 @@ class Reportopp:
                 fig.set_facecolor('#FFFFFF')
                 self.ax1.patch.set_facecolor("#FFFFFF")
                 self.ax1.grid(c='grey', lw=0.8)
-                self.ax1.yaxis.grid(True, which='minor', ls='--', c='#787A78', lw=0.4)
-                self.ax1.xaxis.grid(True, which='minor', ls='--', c='#787A78', lw=0.4)
+                # 副网格线颜色比主网格线浅，宽度更细
+                self.ax1.yaxis.grid(True, which='minor', ls='--', c='#BBBBBB', lw=0.4)
+                self.ax1.xaxis.grid(True, which='minor', ls='--', c='#BBBBBB', lw=0.4)
                 plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
                 plt.title(test_name, fontsize=17, fontweight='bold', style="normal")
             else:
@@ -775,8 +774,6 @@ class Reportopp:
                 else:
                     y_1 = int(int(y_s / 5) // 5) * 5
                 y_2 = y_1 / 5
-                plt.xticks(x)
-
                 try:
                     ymajorLocator = MultipleLocator(y_1)
                     yymajorLocator = MultipleLocator(y_2)
@@ -818,15 +815,28 @@ class Reportopp:
                     else:
                         sim_x = 50
                 x_xlim = sim_x * 5
-                # xminorLocator = MultipleLocator(sim_x)
-                # self.ax1.xaxis.set_minor_locator(xminorLocator)
+                # 使用 MultipleLocator(sim_x) 让副刻度按主刻度等分比例分布
+                # （主刻度间隔为 x_xlim=sim_x*5，副刻度间隔为 sim_x，即主刻度 5 等分）
+                xminorLocator = MultipleLocator(sim_x)
+                self.ax1.xaxis.set_minor_locator(xminorLocator)
 
-                # xmajorLocator = MultipleLocator(x_xlim)
-                x_x = [i for i in range(1, len(x), int(x_xlim))] + [len(x)]
-                plt.xticks(x_x)
-                plt.gca().xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
-
-                # self.ax1.xaxis.set_major_locator(xmajorLocator)
+                # 参考 Y 轴的定义方式：直接用 MultipleLocator 设置主刻度定位器。
+                # 这样：
+                # 1. 主刻度从 0 开始（X 列表的第一个值会显示出来）
+                # 2. 主网格线的位置和显示的刻度值位置一致
+                # MultipleLocator(x_xlim) 默认从 0 开始生成刻度：0, x_xlim, 2*x_xlim, ...
+                xmajorLocator = MultipleLocator(x_xlim)
+                self.ax1.xaxis.set_major_locator(xmajorLocator)
+                # 保证主刻度从 0 开始（X 列表第一个值），且与主网格线位置严格一致
+                x_min_val, x_max_val = 0.0, float(len(x))
+                x_x = xmajorLocator.tick_values(x_min_val, x_max_val)
+                # 转为 Python int 列表
+                x_x = [int(round(v)) for v in x_x]
+                x_x.remove(0)
+                x_x = [1] + x_x
+                x_x_s = [str(v) for v in x_x]
+                plt.xticks(x_x, x_x_s)
+                print(111, x_x, x_x_s)
                 plt.subplots_adjust(left=0, right=1, top=0.995, bottom=0)
                 ax11 = fig.add_subplot(gs[99:, :])
                 ax_list.append(ax11)

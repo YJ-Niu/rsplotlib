@@ -36,4 +36,3 @@ class RcParams(dict):
 
 # 全局单例
 rcParams = RcParams()
-rcParamsOrig = RcParams()

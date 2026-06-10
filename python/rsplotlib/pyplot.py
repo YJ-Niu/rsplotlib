@@ -5,7 +5,7 @@
 """
 
 from . import rsplotlib as _rsplotlib
-from ._rcparams import rcParams, rcParamsOrig
+from ._rcparams import rcParams
 from ._figure_defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
 
 
@@ -495,7 +495,6 @@ def colorbar(mappable=None, **kwargs):
 # ==================== rcParams 重新导出 ====================
 # rcParams / rcParamsOrig 从 _rcparams 模块导入，提供统一的配置访问
 # （保留此注释以便读者了解 rcParams 的来源）
-
 
 
 def get_cmap(name=None, lut=None):

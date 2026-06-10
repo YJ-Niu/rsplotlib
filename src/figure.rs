@@ -333,7 +333,7 @@ impl Figure {
 
             // 将标题信息存到 axes 之外用：传入 subplot 在 figure 中的位置，用于在 figure root 上绘制
             let fig_subplot_info = (x0, y0, sub_w, sub_h);
-            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, true, Some(&fig_subplot_info))?;
+            ax.render(py, &mut chart, &chart_area, (x_min, x_max), (y_min, y_max), font_scale, true, Some(&fig_subplot_info), y_label_actual, x_label_actual)?;
 
             let twin_axes = ax.twin_axes.clone();
             drop(ax);
@@ -355,7 +355,7 @@ impl Figure {
                     .build_cartesian_2d(ux_min..ux_max, uy_min..uy_max)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to build twin chart: {}", e)))?;
                 // twin axes 不填充背景，避免覆盖主轴数据
-                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max), font_scale, false, None)?;
+                twin.render(py, &mut twin_chart, &chart_area, (ux_min, ux_max), (uy_min, uy_max), font_scale, false, None, twin_y_label_area, twin_x_label_area)?;
             }
         }
 
