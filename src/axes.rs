@@ -1335,14 +1335,11 @@ impl Axes {
         &self,
         py: Python<'_>,
         chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
-        chart_area: &DrawingArea<DB, plotters::coord::Shift>,
         (x_min, x_max): (f64, f64),
         (y_min, y_max): (f64, f64),
         font_scale: f64,
         fill_bg: bool,
         _subplot_info: Option<&(f64, f64, f64, f64)>,
-        y_label_w: u32,
-        x_label_h: u32,
     ) -> PyResult<()>
     where
         DB::ErrorType: 'static,
@@ -1506,89 +1503,13 @@ impl Axes {
         };
         let major_lw_f64 = self.grid_linewidth.unwrap_or(0.8);
 
-        // 副网格线颜色比主网格线浅（默认 #C8C8C8），主网格线为 (153,153,153)
+        // matplotlib minor grid 默认 #787A78 (120,122,120)
         let minor_color = if let Some(ref c) = self.minor_grid_color {
-            parse_color(c, 0).unwrap_or(RgbColor(200, 200, 200))
+            parse_color(c, 0).unwrap_or(RgbColor(120, 122, 120))
         } else {
-            RgbColor(200, 200, 200)
+            RgbColor(120, 122, 120)
         };
         let minor_lw_f64 = self.minor_grid_linewidth.unwrap_or(0.4);
-
-        // 提前声明 formatter 闭包要捕获的 tick 列表和标签列表。
-        // 这些变量必须在 mesh_builder.x_label_formatter(...) 调用前声明，
-        // 因为闭包要借用它们的引用，且 mesh_builder 后续还要调用 .draw()
-        let xticks_for_fmt = computed_xticks.clone();
-        let xlabels_for_fmt = self.xtick_labels.clone();
-        let yticks_for_fmt = computed_yticks.clone();
-        let ylabels_for_fmt = self.ytick_labels.clone();
-
-        // 闭包变量必须在 mesh_builder.draw() 调用前一直存活。
-        // 在线性刻度分支内定义的闭包会被 else 块结束回收，导致 draw() 时借用失败。
-        // 所以把两个闭包变量提前到外层 scope，if/else 里只对它们做 &y_fmt_closure / &x_fmt_closure 引用
-        let y_fmt_closure: Box<dyn Fn(&f64) -> String> = if self.yscale == "log" {
-            Box::new(|v: &f64| format!("{:.1e}", 10.0f64.powf(*v)))
-        } else {
-            let yticks_for_fmt_inner = yticks_for_fmt.clone();
-            let ylabels_for_fmt_inner = ylabels_for_fmt.clone();
-            Box::new(move |v: &f64| -> String {
-                let val = *v;
-                if let (Some(ticks), Some(labels)) = (yticks_for_fmt_inner.as_ref(), ylabels_for_fmt_inner.as_ref()) {
-                    if labels.len() == ticks.len() {
-                        let mut best_idx = 0;
-                        let mut best_dist = f64::INFINITY;
-                        for (i, t) in ticks.iter().enumerate() {
-                            let d = (t - val).abs();
-                            if d < best_dist {
-                                best_dist = d;
-                                best_idx = i;
-                            }
-                        }
-                        if best_dist < 1e-6 && best_idx < labels.len() {
-                            return labels[best_idx].clone();
-                        }
-                    }
-                }
-                if (val - val.round()).abs() < 1e-9 {
-                    format!("{}", val.round() as i64)
-                } else {
-                    let s = format!("{:.2}", val);
-                    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
-                    trimmed.to_string()
-                }
-            })
-        };
-        let x_fmt_closure: Box<dyn Fn(&f64) -> String> = if self.xscale == "log" {
-            Box::new(|v: &f64| format!("{:.1e}", 10.0f64.powf(*v)))
-        } else {
-            let xticks_for_fmt_inner = xticks_for_fmt.clone();
-            let xlabels_for_fmt_inner = xlabels_for_fmt.clone();
-            Box::new(move |v: &f64| -> String {
-                let val = *v;
-                if let (Some(ticks), Some(labels)) = (xticks_for_fmt_inner.as_ref(), xlabels_for_fmt_inner.as_ref()) {
-                    if labels.len() == ticks.len() {
-                        let mut best_idx = 0;
-                        let mut best_dist = f64::INFINITY;
-                        for (i, t) in ticks.iter().enumerate() {
-                            let d = (t - val).abs();
-                            if d < best_dist {
-                                best_dist = d;
-                                best_idx = i;
-                            }
-                        }
-                        if best_dist < 1e-6 && best_idx < labels.len() {
-                            return labels[best_idx].clone();
-                        }
-                    }
-                }
-                if (val - val.round()).abs() < 1e-9 {
-                    format!("{}", val.round() as i64)
-                } else {
-                    let s = format!("{:.2}", val);
-                    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
-                    trimmed.to_string()
-                }
-            })
-        };
 
         let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
         mesh_builder
@@ -1600,10 +1521,38 @@ impl Axes {
             .y_desc(self.ylabel.clone())
             .bold_line_style(frame_style);
 
-        // 直接使用外层 scope 定义的 formatter 闭包（y_fmt_closure / x_fmt_closure）。
-        // 这样线性/log 都能复用同一份闭包变量，避免 else 块结束时闭包被回收的借用错误。
-        mesh_builder.y_label_formatter(&y_fmt_closure);
-        mesh_builder.x_label_formatter(&x_fmt_closure);
+        if self.xscale == "log" {
+            mesh_builder
+                .x_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
+        }
+        if self.yscale == "log" {
+            mesh_builder
+                .y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
+        } else {
+            // 对线性刻度使用与 matplotlib 兼容的格式：
+            // 整数显示为不带 ".0"，小数保留最多两位有效数字。
+            mesh_builder.y_label_formatter(&|v| {
+                let val = *v;
+                if (val - val.round()).abs() < 1e-9 {
+                    format!("{}", val.round() as i64)
+                } else {
+                    let s = format!("{:.2}", val);
+                    // 去掉末尾的 0 和可能的 .
+                    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+                    trimmed.to_string()
+                }
+            });
+            mesh_builder.x_label_formatter(&|v| {
+                let val = *v;
+                if (val - val.round()).abs() < 1e-9 {
+                    format!("{}", val.round() as i64)
+                } else {
+                    let s = format!("{:.2}", val);
+                    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+                    trimmed.to_string()
+                }
+            });
+        }
 
         if let Some(ref ticks) = computed_xticks {
             mesh_builder.x_labels(ticks.len().max(1));
@@ -1612,17 +1561,6 @@ impl Axes {
             mesh_builder.y_labels(ticks.len().max(1));
         }
 
-        // 如果用户通过 plt.xticks/yticks 或 set_major_locator 设置了自定义刻度位置，
-        // 需要将 plotters 自动标签设为 0，后续手动绘制标签到正确位置。
-        // （plotters x_labels(N) 只决定标签数量，不支持自定义位置）
-        let has_custom_xticks = self.xticks_val.is_some() || self.xaxis_major_locator.is_some();
-        let has_custom_yticks = self.yticks_val.is_some() || self.yaxis_major_locator.is_some();
-        if has_custom_xticks {
-            mesh_builder.x_labels(0);
-        }
-        if has_custom_yticks {
-            mesh_builder.y_labels(0);
-        }
         if !self.spine_bottom && !self.spine_top {
             mesh_builder.disable_x_axis();
         }
@@ -1660,86 +1598,6 @@ impl Axes {
                 chart.draw_series(std::iter::once(PathElement::new(
                     vec![(x_max, y_min), (x_max, y_max)], spine_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw right spine: {}", e)))?;
-            }
-        }
-
-        // 手动绘制自定义刻度标签 (plt.xticks/yticks 设置的自定义位置)
-        // plotters 的 draw_series 裁剪到数据范围，无法在边距区域绘制。
-        // 因此通过 chart_area（包含边距的完整绘图区域）用像素坐标直接绘制标签。
-        // 如果用户只设置了刻度位置而没有提供标签，则自动生成数字标签。
-        let has_custom_xticks = computed_xticks.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
-        let has_custom_yticks = computed_yticks.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
-
-        // 辅助函数：美化数字显示（整数不显示小数点）
-        let fmt_label = |v: f64| -> String {
-            if (v - v.round()).abs() < 1e-9 {
-                format!("{}", v.round() as i64)
-            } else {
-                let s = format!("{:.2}", v);
-                let trimmed = s.trim_end_matches('0').trim_end_matches('.');
-                trimmed.to_string()
-            }
-        };
-
-        if has_custom_xticks {
-            if let Some(ticks) = computed_xticks.as_ref() {
-                let _tick_height = (label_size as i32).max(10);
-                let black = to_plotters_color(RgbColor(0, 0, 0));
-                let char_width_x = label_size * 0.55;
-                // 如果有自定义标签则使用，否则生成数字标签
-                let x_labels_to_use: Vec<String> = if let Some(l) = self.xtick_labels.as_ref() {
-                    if l.len() == ticks.len() { l.clone() } else {
-                        ticks.iter().map(|v| fmt_label(*v)).collect()
-                    }
-                } else {
-                    ticks.iter().map(|v| fmt_label(*v)).collect()
-                };
-                for (i, &tick) in ticks.iter().enumerate() {
-                    if i < x_labels_to_use.len() && tick >= x_min && tick <= x_max {
-                        let coord = chart.backend_coord(&(tick, y_min));
-                        let text_w = x_labels_to_use[i].chars().count() as f64 * char_width_x;
-                        let label_px = ((coord.0 as f64 - text_w * 0.5) as i32).max(0);
-                        let label_py = coord.1 + 2;
-                        let font: FontDesc = ("sans-serif", label_size).into();
-                        let text_elem = plotters::element::Text::new(
-                            x_labels_to_use[i].clone(),
-                            (label_px, label_py),
-                            font.color(&black),
-                        );
-                        chart_area.draw(&text_elem)
-                            .map_err(|e| PyRuntimeError::new_err(format!("XTick label: {:?}", e)))?;
-                    }
-                }
-            }
-        }
-        if has_custom_yticks {
-            if let Some(ticks) = computed_yticks.as_ref() {
-                let _tick_height = (label_size as i32).max(10);
-                let black = to_plotters_color(RgbColor(0, 0, 0));
-                let char_width = label_size * 0.55;
-                let y_labels_to_use: Vec<String> = if let Some(l) = self.ytick_labels.as_ref() {
-                    if l.len() == ticks.len() { l.clone() } else {
-                        ticks.iter().map(|v| fmt_label(*v)).collect()
-                    }
-                } else {
-                    ticks.iter().map(|v| fmt_label(*v)).collect()
-                };
-                for (i, &tick) in ticks.iter().enumerate() {
-                    if i < y_labels_to_use.len() && tick >= y_min && tick <= y_max {
-                        let coord = chart.backend_coord(&(x_min, tick));
-                        let text_w = (y_labels_to_use[i].chars().count() as f64 * char_width).max(1.0);
-                        let label_px = ((coord.0 as f64 - text_w - 2.0) as i32).max(2);
-                        let label_py = coord.1 + 2;
-                        let font: FontDesc = ("sans-serif", label_size).into();
-                        let text_elem = plotters::element::Text::new(
-                            y_labels_to_use[i].clone(),
-                            (label_px, label_py),
-                            font.color(&black),
-                        );
-                        chart_area.draw(&text_elem)
-                            .map_err(|e| PyRuntimeError::new_err(format!("YTick label: {:?}", e)))?;
-                    }
-                }
             }
         }
 
@@ -1850,45 +1708,9 @@ impl Axes {
                 }
                 _ => {
                     // 实线网格
-                    // 主网格线 (is_major=true) 强制使用 2 像素填充多边形，确保宽度严格为 2px
-                    // 副网格线使用 PathElement，stroke=1 → 1px
-                    if is_major {
-                        // 计算 1 像素在数据坐标中的尺寸
-                        let area = chart.plotting_area();
-                        let dim = area.dim_in_pixel();
-                        let pw = dim.0 as f64;
-                        let ph = dim.1 as f64;
-                        let x_per_pix_p = (x_max - x_min) / pw.max(1.0);
-                        let y_per_pix_p = (y_max - y_min) / ph.max(1.0);
-                        // 目标 2px：half_w = 1.0，half_w_adj = half_w - 0.5 = 0.5
-                        // 这样多边形半宽 = 0.5 * x_per_pix，对应 2px 实际像素宽
-                        let half_w_adj: f64 = 0.5;
-                        let fill: ShapeStyle = rgb.filled().into();
-                        for path in paths {
-                            if path.len() < 2 { continue; }
-                            let (x1, y1) = path[0];
-                            let (x2, y2) = path[1];
-                            let dx = x2 - x1;
-                            let dy = y2 - y1;
-                            let len = (dx * dx + dy * dy).sqrt();
-                            if len < 1e-10 { continue; }
-                            // 垂直方向的单位向量（数据坐标），半宽 = 0.5 像素
-                            let perp_x = -dy / len * half_w_adj * x_per_pix_p;
-                            let perp_y = dx / len * half_w_adj * y_per_pix_p;
-                            let poly = vec![
-                                (x1 + perp_x, y1 + perp_y),
-                                (x1 - perp_x, y1 - perp_y),
-                                (x2 - perp_x, y2 - perp_y),
-                                (x2 + perp_x, y2 + perp_y),
-                            ];
-                            chart.draw_series(std::iter::once(Polygon::new(poly, fill)))
-                                .map_err(|e| PyRuntimeError::new_err(format!("Major grid: {}", e)))?;
-                        }
-                    } else {
-                        for path in paths {
-                            chart.draw_series(std::iter::once(PathElement::new(path, style)))
-                                .map_err(|e| PyRuntimeError::new_err(format!("Grid line: {}", e)))?;
-                        }
+                    for path in paths {
+                        chart.draw_series(std::iter::once(PathElement::new(path, style)))
+                            .map_err(|e| PyRuntimeError::new_err(format!("Grid line: {}", e)))?;
                     }
                 }
             }

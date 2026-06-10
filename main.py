@@ -362,9 +362,8 @@ class Reportopp:
                 fig.set_facecolor('#FFFFFF')
                 self.ax1.patch.set_facecolor("#FFFFFF")
                 self.ax1.grid(c='grey', lw=0.8)
-                # 副网格线颜色比主网格线浅，宽度更细
-                self.ax1.yaxis.grid(True, which='minor', ls='--', c='#BBBBBB', lw=0.4)
-                self.ax1.xaxis.grid(True, which='minor', ls='--', c='#BBBBBB', lw=0.4)
+                self.ax1.yaxis.grid(True, which='minor', ls='--', c='#787A78', lw=0.4)
+                self.ax1.xaxis.grid(True, which='minor', ls='--', c='#787A78', lw=0.4)
                 plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
                 plt.title(test_name, fontsize=17, fontweight='bold', style="normal")
             else:
