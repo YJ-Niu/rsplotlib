@@ -55,20 +55,21 @@ def _get_figure():
         return None
 
 
-def _route_to_ax(ax_method_name, module_method, *args):
+def _route_to_ax(ax_method_name, module_method, *args, **kwargs):
     """将调用路由到当前 axes（如果存在）或模块级函数
 
     Args:
         ax_method_name: axes 的方法名（字符串）
         module_method: 模块级函数（可调用对象）
         *args: 传递给方法的参数
+        **kwargs: 关键字参数（必须同时转发到 axes 端，否则会丢参）
     """
     ax = _get_axes()
     if ax is not None and hasattr(ax, ax_method_name):
         method = getattr(ax, ax_method_name)
-        method(*args)
+        method(*args, **kwargs)
         return _get_figure()
-    return module_method(*args)
+    return module_method(*args, **kwargs)
 
 
 def _map_aliases(kwargs):
@@ -107,6 +108,7 @@ def plot(*args, **kwargs):
         lw: 线宽 (linewidth)
         c: 颜色 (color)
         ls: 线型 (linestyle)
+        solid_capstyle: 端点形状 ('butt' | 'round' | 'projecting')
 
     如果存在当前 axes，则复用它；否则创建新的 Figure 和 Axes。
     """
@@ -114,9 +116,26 @@ def plot(*args, **kwargs):
     x, y, kw = _parse_plot_args(args, kwargs)
     x = _to_list(x)
     y = _to_list(y)
-    plot_args = (x, y, kw.get('label'), kw.get('color'), kw.get('linestyle'),
-                 kw.get('marker'), kw.get('linewidth'))
-    return _route_to_ax('plot', lambda *a: _rsplotlib.plot(*a), *plot_args)
+    # 使用关键字参数转发到 Rust 端，避免遗漏 solid_capstyle 等参数
+
+    plot_kwargs = dict(
+        label=kw.get('label'),
+        color=kw.get('color'),
+        linestyle=kw.get('linestyle', '-'),
+        marker=kw.get('marker'),
+        linewidth=kw.get('linewidth', 1.5),
+        lw=kw.get('lw'),
+        c=kw.get('c'),
+        ls=kw.get('ls'),
+        markersize=kw.get('markersize'),
+        markeredgewidth=kw.get('markeredgewidth'),
+        solid_capstyle=kw.get('solid_capstyle'),
+    )
+
+    def _call(*a, **k):
+        return _rsplotlib.plot(*a, **k)
+
+    return _route_to_ax('plot', _call, x, y, **plot_kwargs)
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):

@@ -35,7 +35,9 @@ def _to_list_recursive(obj):
 
 # ==================== 绘图函数 ====================
 
-def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None):
+def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None,
+         c=None, lw=None, ls=None, markersize=None, markeredgewidth=None,
+         solid_capstyle=None):
     """绘制折线图
 
     Args:
@@ -46,8 +48,25 @@ def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=No
         linestyle: 线型 (默认: None, 实线)
         marker: 标记样式 (默认: None)
         linewidth: 线宽 (默认: None)
+        c: color 的 matplotlib 别名
+        lw: linewidth 的 matplotlib 别名
+        ls: linestyle 的 matplotlib 别名
+        markersize: 标记大小
+        markeredgewidth: 标记边缘宽度
+        solid_capstyle: 端点形状 ('butt' | 'round' | 'projecting')
     """
-    return _rsplotlib.plot(_to_list(x), _to_list(y), label, color, linestyle, marker, linewidth)
+    # 别名兜底：如果只传了 c/lw/ls 而主参数为 None，使用别名
+    if color is None and c is not None:
+        color = c
+    if linewidth is None and lw is not None:
+        linewidth = lw
+    if linestyle is None and ls is not None:
+        linestyle = ls
+    return _rsplotlib.plot(
+        _to_list(x), _to_list(y),
+        label, color, linestyle, marker, linewidth,
+        lw, c, ls, markersize, markeredgewidth, solid_capstyle,
+    )
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):

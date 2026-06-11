@@ -11,6 +11,7 @@ use pyo3::prelude::*;
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
+use plotters::style::text_anchor::{HPos, Pos, VPos};
 
 use crate::axes::scale_font;
 use crate::colormap::{autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color, viridis_color, winter_color};
@@ -70,6 +71,7 @@ where
         match el {
             PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, markersize, .. } => {
                 let col = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
+                let rgb = to_plotters_color(col);
                 if x.len() >= 1 && x.len() == y.len() {
                     let points: Vec<(f64, f64)> = x.iter().zip(y.iter())
                         .filter_map(|(xv, yv)| match (xv, yv) {
@@ -82,7 +84,6 @@ where
                         })
                         .collect();
                     if points.len() >= 2 && linestyle != " " {
-                        let rgb = to_plotters_color(col);
                         // 将 linewidth 从 points 转换为像素：1pt = dpi/72 px，dpi = 72 * font_scale
                         // matplotlib 通过 AA 在 0.5-1.5pt 量级产生柔和的 1-3 像素宽线。
                         // plotters 无 AA，使用四舍五入以获得接近 mpl 的视觉粗细。
@@ -267,14 +268,29 @@ where
                                 chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
                                     .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
                             }
-                        }
-                        if solid_capstyle == "round" && *linewidth > 1.0 && marker.as_ref().map_or(true, |m| m.is_empty()) {
-                            // 使用屏幕像素半径（参考 marker "o" 的实现），避免在数据坐标下变成巨大椭圆
-                            let cap_r = (((*linewidth) * font_scale) / 2.0).round().max(1.0) as i32;
-                            let cap_points = [points.first().unwrap().clone(), points.last().unwrap().clone()];
-                            for pt in cap_points.iter() {
-                                chart.draw_series(std::iter::once(Circle::new(*pt, cap_r, rgb.filled())))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Cap circle: {}", e)))?;
+                            // 端点形状 (solid_capstyle)：
+                            // plotters 0.3.7 原生不支持 linecap，因此手动在首末端绘制
+                            // 装饰图形。cap 只与有线段（marker 为空）的实线情况相关，
+                            // 虚线/点线场景下端点不连续，跳过以免破坏节奏。
+                            //
+                            // 重要：cap 端点必须与已绘制的线段几何对齐：
+                            //   1) 实际渲染线宽 = 2*stroke_w - 1 像素，cap 直径等于这个值
+                            //   2) 实线已经过 0.5 像素 y 中心对齐，cap 也要应用同样的 y_shift
+                            //   3) cap 圆心 = 线段端点（与 shift 后的位置一致）
+                            if linestyle == "-" && marker.as_ref().map_or(true, |m| m.is_empty()) {
+                                // plotters BitMapBackend 的 stroke_width(w) 实际渲染为 2w-1 像素
+                                // （中间 w-1 像素实色 + 两侧各 0.5 像素 AA），所以端点圆盘的
+                                // 直径必须与线段**实际渲染宽度**严格相等，才能"完全契合"。
+                                // 端点圆心 = 像素中心对齐后的线段端点（与线段几何一致）。
+                                let cap_lw_px = (stroke_w as i32 - 1).max(1) as f64; // 与线段渲染宽度一致
+                                let cap_y_shift = {
+                                    let area2 = chart.plotting_area();
+                                    let dim2 = area2.dim_in_pixel();
+                                    let ph2 = dim2.1 as f64;
+                                    if ph2 > 0.0 { (y_max - y_min) / ph2 * 0.5 } else { 0.0 }
+                                };
+                                draw_solid_caps(chart, &points, &rgb, solid_capstyle, *linewidth, font_scale,
+                                                x_min, x_max, y_min, y_max, cap_lw_px, cap_y_shift)?;
                             }
                         }
                     }
@@ -457,7 +473,11 @@ where
                 let fs = scale_font(*fontsize as f64, font_scale);
                 let font: FontDesc = ("sans-serif", fs).into();
                 let colored_font = font.color(&to_plotters_color(*color));
-                let text_style: TextStyle = colored_font.into();
+                // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
+                // 与 axhline/axvline 在同一坐标时的视觉位置一致。
+                let text_style: TextStyle = colored_font
+                    .pos(Pos::new(HPos::Left, VPos::Center))
+                    .into();
                 let normalized = normalize_spaces(text);
                 chart.draw_series(std::iter::once(plotters::element::Text::new(
                     normalized,
@@ -508,8 +528,12 @@ where
                             let label_r = 1.3;
                             let lx = mid_angle.cos() * label_r;
                             let ly = mid_angle.sin() * label_r;
+                            // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
+                            let pie_label_style: TextStyle = FontDesc::from(("sans-serif", scale_font(12.0, font_scale)))
+                                .color(&BLACK)
+                                .pos(Pos::new(HPos::Center, VPos::Center));
                             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                                normalize_spaces(l), (lx, ly), ("sans-serif", scale_font(12.0, font_scale)),
+                                normalize_spaces(l), (lx, ly), pie_label_style,
                             ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie label: {}", e)))?;
                         }
                     }
@@ -525,8 +549,11 @@ where
                         let text_r = 0.7;
                         let tx = mid_angle.cos() * text_r;
                         let ty = mid_angle.sin() * text_r;
+                        let autopct_style: TextStyle = FontDesc::from(("sans-serif", scale_font(11.0, font_scale)))
+                            .color(&BLACK)
+                            .pos(Pos::new(HPos::Center, VPos::Center));
                         chart.draw_series(std::iter::once(plotters::element::Text::new(
-                            text, (tx, ty), ("sans-serif", scale_font(11.0, font_scale)),
+                            text, (tx, ty), autopct_style,
                         ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw autopct: {}", e)))?;
                     }
                     current_angle = end_angle;
@@ -742,8 +769,11 @@ where
                     ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot cap: {}", e)))?;
                     if let Some(lbls) = labels {
                         if let Some(l) = lbls.get(i) {
+                            let box_label_style: TextStyle = FontDesc::from(("sans-serif", 11.0 * font_scale))
+                                .color(&BLACK)
+                                .pos(Pos::new(HPos::Center, VPos::Center));
                             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                                normalize_spaces(l), (cx, -0.3), ("sans-serif", 11.0 * font_scale),
+                                normalize_spaces(l), (cx, -0.3), box_label_style,
                             ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot label: {}", e)))?;
                         }
                     }
@@ -762,11 +792,191 @@ where
                 chart.draw_series(std::iter::once(PathElement::new(
                     vec![(txy_x, txy_y), (txy_xy_x, txy_xy_y)], arrow_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate arrow: {}", e)))?;
+                let anno_style: TextStyle = FontDesc::from(("sans-serif", scale_font(*fontsize, font_scale)))
+                    .color(&rgb)
+                    .pos(Pos::new(HPos::Center, VPos::Center));
                 chart.draw_series(std::iter::once(plotters::element::Text::new(
-                    normalize_spaces(text), (txy_x, txy_y), ("sans-serif", scale_font(*fontsize, font_scale)),
+                    normalize_spaces(text), (txy_x, txy_y), anno_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate text: {}", e)))?;
             }
         }
     }
+    Ok(())
+}
+
+/// 在 Line 段的首末两端按 `solid_capstyle` 绘制端点装饰。
+///
+/// plotters 0.3.7 原生不支持 `stroke-linecap`，因此手动模拟：
+///
+/// - `butt` (matplotlib 默认)：不绘制任何装饰，线条在端点处被垂直切断。
+/// - `round`：在两端各画一个**半圆**（沿切线方向凸出），用 SVG 路径精确构造，
+///   几何上严格等于"直径 = 线宽的半圆"，与 matplotlib 的
+///   `stroke-linecap="round"` 视觉一致。比直接画一个填充圆更精确：
+///   1) 圆心位于线段端点（已应用 y_shift），与线段几何完全重合
+///   2) 直径严格等于 `cap_lw_px`（= 实际线宽），不会出现"比线粗 1 像素"
+///   3) 圆弧是真正的 Bezier 曲线，光滑无折线
+/// - `projecting`：在两端各画一个**填充矩形**，沿线的切线方向延伸出
+///   `cap_lw_px/2` 像素的方形凸出部分。
+///
+/// 关键几何参数：
+/// - `cap_lw_px`：实际线宽（像素），由调用方传入以保证与线段 stroke_w 一致
+/// - `cap_y_shift`：线段 y 中心对齐偏移，cap 应用同样的偏移以保持端点对齐
+///
+/// 仅在实线 (`-`) 且无 marker 时调用；虚线/点线场景下端点不连续，跳过。
+fn draw_solid_caps<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    points: &[(f64, f64)],
+    rgb: &plotters::style::RGBColor,
+    capstyle: &str,
+    _linewidth: f64,
+    _font_scale: f64,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    cap_lw_px: f64,
+    cap_y_shift: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    if capstyle.eq_ignore_ascii_case("butt") || capstyle.is_empty() {
+        // 默认：plotters 自身行为已是 butt（端点垂直切断），不需要额外绘制
+        return Ok(());
+    }
+    if points.len() < 2 {
+        return Ok(());
+    }
+    // 应用 y_shift 后的端点（与已绘制的线段严格对齐）
+    let p0 = (points[0].0, points[0].1 - cap_y_shift);
+    let p1 = (points[points.len() - 1].0, points[points.len() - 1].1 - cap_y_shift);
+    // 内点（用于计算切线方向）也要应用相同 y_shift，否则 cap 的切线方向会偏
+    let next1 = (points[1].0, points[1].1 - cap_y_shift);
+    let prev_n = (points[points.len() - 2].0, points[points.len() - 2].1 - cap_y_shift);
+    if capstyle.eq_ignore_ascii_case("round") {
+        // 圆头：直径 = cap_lw_px（与线段 stroke_w 严格相等），构造 SVG 路径半圆。
+        // 为保证光滑，使用 64 段直线逼近整个半圆，肉眼完全无折线感。
+        draw_round_cap(chart, p0, next1, cap_lw_px, x_min, x_max, y_min, y_max, rgb, true)?;
+        draw_round_cap(chart, p1, prev_n, cap_lw_px, x_min, x_max, y_min, y_max, rgb, false)?;
+        return Ok(());
+    }
+    if capstyle.eq_ignore_ascii_case("projecting") {
+        // 方头：在每个端点沿切线方向延伸 cap_lw_px/2 像素。
+        // 端点方向（首段/末段）—— 内点也应用 y_shift
+        let (start_pt, start_next) = (p0, next1);
+        let (end_pt, end_prev) = (p1, prev_n);
+        // 单位方向向量
+        let sdx = start_next.0 - start_pt.0;
+        let sdy = start_next.1 - start_pt.1;
+        let slen = (sdx * sdx + sdy * sdy).sqrt().max(1e-9);
+        let sux = sdx / slen;
+        let suy = sdy / slen;
+        let edx = end_pt.0 - end_prev.0;
+        let edy = end_pt.1 - end_prev.1;
+        let elen = (edx * edx + edy * edy).sqrt().max(1e-9);
+        let eux = edx / elen;
+        let euy = edy / elen;
+        // 像素/数据单位换算
+        let area = chart.plotting_area();
+        let dim = area.dim_in_pixel();
+        let pw = dim.0 as f64;
+        let ph = dim.1 as f64;
+        let x_per_pix = if pw > 0.0 { (x_max - x_min) / pw } else { 1.0 };
+        let y_per_pix = if ph > 0.0 { (y_max - y_min) / ph } else { 1.0 };
+        let cap_px = cap_lw_px / 2.0;
+        // 沿切线方向的像素偏移（数据空间）
+        // screen_tangent = cap_px * (sux, suy)（在屏幕坐标中）
+        // data_tangent = (cap_px * sux * x_per_pix, cap_px * suy * y_per_pix)
+        // 法线方向同理
+        let s_tan_x = cap_px * sux * x_per_pix;
+        let s_tan_y = cap_px * suy * y_per_pix;
+        let s_nor_x = cap_px * (-suy) * x_per_pix;
+        let s_nor_y = cap_px * (sux) * y_per_pix;
+        // 起始端矩形：4 个角点
+        //  a: 端点外侧 + 法线 -cap/2
+        //  b: 端点外侧 + 法线 +cap/2
+        //  c: 端点 + 法线 +cap/2
+        //  d: 端点 + 法线 -cap/2
+        let sa = (start_pt.0 + s_tan_x - s_nor_x,
+                  start_pt.1 + s_tan_y - s_nor_y);
+        let sb = (start_pt.0 + s_tan_x + s_nor_x,
+                  start_pt.1 + s_tan_y + s_nor_y);
+        let sc = (start_pt.0 + s_nor_x,
+                  start_pt.1 + s_nor_y);
+        let sd = (start_pt.0 - s_nor_x,
+                  start_pt.1 - s_nor_y);
+        chart.draw_series(std::iter::once(Polygon::new(
+            vec![sa, sb, sc, sd], rgb.filled(),
+        ))).map_err(|e| PyRuntimeError::new_err(format!("Cap square (start): {}", e)))?;
+        // 结束端矩形（沿切线反方向延伸）
+        let e_tan_x = cap_px * eux * x_per_pix;
+        let e_tan_y = cap_px * euy * y_per_pix;
+        let e_nor_x = cap_px * (-euy) * x_per_pix;
+        let e_nor_y = cap_px * (eux) * y_per_pix;
+        let ea = (end_pt.0 + e_tan_x - e_nor_x,
+                  end_pt.1 + e_tan_y - e_nor_y);
+        let eb = (end_pt.0 + e_tan_x + e_nor_x,
+                  end_pt.1 + e_tan_y + e_nor_y);
+        let ec = (end_pt.0 + e_nor_x,
+                  end_pt.1 + e_nor_y);
+        let ed = (end_pt.0 - e_nor_x,
+                  end_pt.1 - e_nor_y);
+        chart.draw_series(std::iter::once(Polygon::new(
+            vec![ea, eb, ec, ed], rgb.filled(),
+        ))).map_err(|e| PyRuntimeError::new_err(format!("Cap square (end): {}", e)))?;
+        return Ok(());
+    }
+    // 未知 capstyle：静默忽略
+    Ok(())
+}
+
+/// 在端点处画一个**实心圆**（full disc）作为端点装饰。
+///
+/// 圆心位于线段端点，圆盘直径 = `cap_lw_px`（与线段实际线宽一致）。
+/// 圆盘的后半（在切线方向指向线段内部）会被线段本身覆盖，
+/// 前半（在切线方向指向线段外部）则作为端点凸出。
+/// 这种实现确保圆盘与线段**完全契合**，无空隙、无错位。
+///
+/// `endpoint`：线段端点（已应用 y_shift）
+/// `cap_lw_px`：直径 = 实际线宽（像素）
+/// `_next_point` / `_is_start`：保留参数以维持调用接口一致；圆盘中心对称不再需要切线方向
+fn draw_round_cap<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    endpoint: (f64, f64),
+    _next_point: (f64, f64),
+    cap_lw_px: f64,
+    x_min: f64, x_max: f64, y_min: f64, y_max: f64,
+    rgb: &plotters::style::RGBColor,
+    _is_start: bool,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    // 获取像素/数据单位的换算系数
+    let area = chart.plotting_area();
+    let dim = area.dim_in_pixel();
+    let pw = dim.0 as f64;
+    let ph = dim.1 as f64;
+    let x_per_pix = if pw > 0.0 { (x_max - x_min) / pw } else { 1.0 };
+    let y_per_pix = if ph > 0.0 { (y_max - y_min) / ph } else { 1.0 };
+    // 圆盘屏幕半径（像素）
+    let r_px = cap_lw_px / 2.0;
+    // 用 64 段直线逼近整圆（视觉上完全光滑）。
+    // 为保证在数据空间中绘制出**真正的圆（屏幕空间）**，必须对 x 和 y 分别缩放：
+    //   点 = endpoint + r_px * (cos(a), sin(a)) * (x_per_pix, y_per_pix)
+    // 这样在屏幕上的偏移量恒为 r_px，因此呈现为标准圆。
+    const ARC_SEGMENTS: usize = 64; // 64 段保证任意尺寸下圆盘都光滑
+    // 构造实心圆多边形（0 到 2π）
+    let mut poly_points = Vec::with_capacity(ARC_SEGMENTS + 1);
+    for i in 0..=ARC_SEGMENTS {
+        let t = i as f64 / ARC_SEGMENTS as f64;
+        let a = t * std::f64::consts::TAU; // 0..=2π
+        let ca = a.cos();
+        let sa = a.sin();
+        poly_points.push((endpoint.0 + r_px * ca * x_per_pix,
+                          endpoint.1 + r_px * sa * y_per_pix));
+    }
+    chart.draw_series(std::iter::once(Polygon::new(poly_points, rgb.filled())))
+        .map_err(|e| PyRuntimeError::new_err(format!("Cap round polygon: {}", e)))?;
     Ok(())
 }

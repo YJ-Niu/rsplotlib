@@ -304,7 +304,7 @@ class Reportopp:
         plt_idix = 0
         lpdet_list = []
         for test_name in self.station_testlist:
-            ax_list = []
+            # ax_list = []
             print(" %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")), self.station, plt_idix, test_name)
             test_index = []
             test_name_list = []
@@ -359,7 +359,7 @@ class Reportopp:
                 gs = GridSpec(100, 100)
                 plt.axis('off')
                 self.ax1 = fig.add_subplot(gs[4:55, 4:75])
-                ax_list.append(self.ax1)
+                # ax_list.append(self.ax1)
                 fig = plt.gcf()
                 fig.set_facecolor('#FFFFFF')
                 self.ax1.patch.set_facecolor("#FFFFFF")
@@ -586,7 +586,7 @@ class Reportopp:
                 self.ax1.patch.set_facecolor("w")
                 plt.ylim(0, y_max * 1.2)
                 ax4 = fig.add_subplot(gs[10:90, 1:11])
-                ax_list.append(ax4)
+                # ax_list.append(ax4)
                 ax4.tick_params(bottom=False, top=False, left=False, right=False)
                 plt.xlim(0, 100)
                 plt.ylim(0, 100)
@@ -637,7 +637,7 @@ class Reportopp:
                     ymajorLocator = MultipleLocator(sdsd + 2)
                     self.ax1.yaxis.set_major_locator(ymajorLocator)
                 ax5 = fig.add_subplot(gs[8:94, 77:99])
-                ax_list.append(ax5)
+                # ax_list.append(ax5)
                 ax5.tick_params(bottom=False, top=False, left=False, right=False)
                 ax5.spines['right'].set_visible(False)
                 ax5.spines['top'].set_visible(False)
@@ -828,7 +828,6 @@ class Reportopp:
                 # （主刻度间隔为 x_xlim=sim_x*5，副刻度间隔为 sim_x，即主刻度 5 等分）
                 xminorLocator = MultipleLocator(sim_x)
                 self.ax1.xaxis.set_minor_locator(xminorLocator)
-                print(sim_x, x_xlim)
                 # 参考 Y 轴的定义方式：直接用 MultipleLocator 设置主刻度定位器。
                 # 这样：
                 # 1. 主刻度从 0 开始（X 列表的第一个值会显示出来）
@@ -844,20 +843,20 @@ class Reportopp:
                 plt.xticks(x_x)
                 plt.subplots_adjust(left=0, right=1, top=0.995, bottom=0)
                 ax11 = fig.add_subplot(gs[99:, :])
-                ax_list.append(ax11)
+                # ax_list.append(ax11)
                 ax11.axis("on")
                 ax11.spines['right'].set_visible(False)
                 ax11.spines['top'].set_visible(False)
                 ax11.spines['left'].set_visible(False)
                 ax11.spines['bottom'].set_visible(False)
                 self.ax2 = fig.add_subplot(gs[59:98, 2:78])
-                ax_list.append(self.ax2)
-                self.ax2.tick_params(bottom=False, top=False, left=False, right=False)
-                self.ax2.spines['right'].set_visible(False)
-                self.ax2.spines['top'].set_visible(False)
-                self.ax2.spines['left'].set_visible(False)
-                self.ax2.spines['bottom'].set_visible(False)
-                plt.axis("on")
+                # ax_list.append(self.ax2)
+                # self.ax2.tick_params(bottom=False, top=False, left=False, right=False)
+                # self.ax2.spines['right'].set_visible(False)
+                # self.ax2.spines['top'].set_visible(False)
+                # self.ax2.spines['left'].set_visible(False)
+                # self.ax2.spines['bottom'].set_visible(False)
+                plt.axis("off")
                 plt.xticks([])
                 plt.yticks([])
                 print_1 = "#   | Test Name" + " " * 275 + "| Average" + " " * 16 + "| Std. Est." + " " * 12 + "| Cpk"
@@ -877,7 +876,7 @@ class Reportopp:
                 axright.spines['bottom'].set_visible(False)
                 axright.patch.set_facecolor("#D2D3D3")
                 ax5 = fig.add_subplot(gs[1:55, 77:99])
-                ax_list.append(ax5)
+                # ax_list.append(ax5)
                 ax5.tick_params(bottom=False, top=False, left=False, right=False)
                 ax5.spines['right'].set_visible(False)
                 ax5.spines['top'].set_visible(False)
@@ -900,16 +899,18 @@ class Reportopp:
                 for i in dict_i:
                     ax5.text(18, 90.8 - dict_i.index(i) * 4.5, i, fontsize=8)
                     cc = color_[s.index(i)]
+                    # solid_capstyle='round' 让横线两端呈半圆形（rsplotlib 已支持：'butt' | 'round' | 'projecting'）
                     plt.plot([5, 14], [91.8 - dict_i.index(i) * 4.5, 91.8 - dict_i.index(i) * 4.5], c=cc, lw=11, solid_capstyle='round',
                              ls="-")
                     ax5.text(5, 90.8 - dict_i.index(i) * 4.5, self.dict_summary.count(i), fontsize=8, c=text_colar_[cc])
-                plt.grid(c='black', linestyle='--', lw=0.3)
+                # plt.grid(c='black', linestyle='--', lw=0.3)
                 plt.grid(True)
                 if lpdet_list == test_index:
                     test_name_list.sort(reverse=True)
                 ax9 = fig.add_subplot(gs[70:, 77:])
-                ax_list.append(ax9)
+                # ax_list.append(ax9)
                 plt.axis("off")
+                ax9.patch.set_facecolor("#FFFFFF")
                 plt.xticks([])
                 plt.yticks([])
                 plt.xlim(0, 100)

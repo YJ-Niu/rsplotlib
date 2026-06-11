@@ -4,8 +4,8 @@
 映射到本地字体文件路径。找不到时返回 None，由调用方决定回退到默认字体。
 """
 import os
-import platform
 from typing import Optional, List
+import sys
 
 
 # ====== 字体族名 → 候选文件路径映射（按平台分别维护）======
@@ -69,23 +69,30 @@ _FONT_NAME_TO_PATHS = {
 }
 
 
-# 跨平台按系统名归一化的额外兜底
+# 跨平台按系统名归一化的额外兜底字体路径
+
 def _system_fallback_paths() -> List[str]:
     """按当前操作系统返回一组"通用全功能字体"候选路径"""
-    system = platform.system()
-    if system == "Darwin":
+    system = sys.platform
+    if system == "darwin":
         return [
             "/Library/Fonts/Arial Unicode.ttf",
             "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         ]
-    elif system == "Linux":
+    elif system == "linux":
         return [
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         ]
-    elif system == "Windows":
+    elif system == "win32":
+        return [
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/msyh.ttf",
+            "C:/Windows/Fonts/msyhbd.ttc",
+        ]
+    elif system == "cygwin":
         return [
             "C:/Windows/Fonts/msyh.ttc",
             "C:/Windows/Fonts/arial.ttf",
