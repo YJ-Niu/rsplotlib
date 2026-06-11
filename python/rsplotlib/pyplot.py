@@ -256,13 +256,41 @@ def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=
 # ==================== 辅助元素 ====================
 
 def text(x, y, s, fontdict=None, **kwargs):
-    """添加文本"""
+    """添加文本
+
+    Parameters
+    ----------
+    x, y : float
+        文本位置（数据坐标）
+    s : str
+        文本内容
+    fontdict : dict, optional
+        字体属性字典（matplotlib 兼容）
+    **kwargs
+        fontsize, color/c, family 等 matplotlib 兼容参数
+    """
     fontsize = kwargs.get('fontsize', fontdict.get('fontsize', 12) if fontdict else 12)
     color = kwargs.get('color', fontdict.get('color', 'black') if fontdict else 'black')
     c = kwargs.get('c', None)
     family = kwargs.get('family', None)
     if not isinstance(s, str):
         s = str(s)
+
+    # family 处理：若用户显式指定了字体族名，解析为本地字体文件并注册到
+    # plotters 的字体数据库，这样真正驱动文本渲染（而不是被忽略）。
+    if family:
+        try:
+            import os
+            from ._font_resolver import resolve_font_path
+            path = resolve_font_path(family)
+            if path is None and os.path.isfile(family):
+                path = family  # 也允许直接传文件路径
+            if path is not None:
+                _rsplotlib.register_sans_serif_font(path)
+        except Exception:
+            # 字体注册失败不影响绘制（会回退到默认 sans-serif）
+            pass
+
     return _rsplotlib.text(x, y, s, fontsize, color, c, family)
 
 

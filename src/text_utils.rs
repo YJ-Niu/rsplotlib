@@ -88,7 +88,7 @@ pub fn contains_cjk(text: &str) -> bool {
 
 /// 将文本中的 ASCII 空格替换为更宽的 Unicode 空格，使排版视觉更协调。
 ///
-/// **上下文感知**：根据每个空格前后的字符选择合适的 Unicode 空格：
+/// **上下文感知**：根据每个空格前后的"非空格"字符选择合适的 Unicode 空格：
 ///
 /// | 前一个字符 | 后一个字符 | 替换为 | 宽度 |
 /// |-----------|-----------|--------|------|
@@ -102,47 +102,39 @@ pub fn contains_cjk(text: &str) -> bool {
 /// ASCII 空格的两倍），与 matplotlib / InDesign / Word 的"中英文混排空格"行为
 /// 一致。
 ///
-/// 连续多个 ASCII 空格会合并为一个替换后的空格。
+/// **连续空格不会被合并**——每个 ASCII 空格都按其上下文独立替换，
+/// 保留用户输入的间距。
 pub fn normalize_spaces(text: &str) -> String {
     if text.is_empty() {
         return text.to_string();
     }
     let mut out = String::with_capacity(text.len() + 4);
     let chars: Vec<char> = text.chars().collect();
-    let mut in_space_run = false;
-    let mut i = 0;
-    while i < chars.len() {
+    for i in 0..chars.len() {
         let c = chars[i];
         if c == ' ' {
-            if !in_space_run {
-                // 找到当前空格前一个"非空格"字符（向前跳过多余空格）
-                let prev = if i == 0 {
-                    None
-                } else {
-                    let mut j = i as isize - 1;
-                    while j >= 0 && chars[j as usize] == ' ' {
-                        j -= 1;
-                    }
-                    if j >= 0 { Some(chars[j as usize]) } else { None }
-                };
-                // 找到当前空格后一个"非空格"字符
-                let next = {
-                    let mut j = i + 1;
-                    while j < chars.len() && chars[j] == ' ' {
-                        j += 1;
-                    }
-                    if j < chars.len() { Some(chars[j]) } else { None }
-                };
-                let replacement = pick_space(prev, next);
-                out.push(replacement);
-                in_space_run = true;
-            }
-            // 连续 ASCII 空格只输出一次 replacement
+            // 找到当前空格前一个"非空格"字符（向前跳过多余空格）
+            let prev = if i == 0 {
+                None
+            } else {
+                let mut j = i as isize - 1;
+                while j >= 0 && chars[j as usize] == ' ' {
+                    j -= 1;
+                }
+                if j >= 0 { Some(chars[j as usize]) } else { None }
+            };
+            // 找到当前空格后一个"非空格"字符
+            let next = {
+                let mut j = i + 1;
+                while j < chars.len() && chars[j] == ' ' {
+                    j += 1;
+                }
+                if j < chars.len() { Some(chars[j]) } else { None }
+            };
+            out.push(pick_space(prev, next));
         } else {
             out.push(c);
-            in_space_run = false;
         }
-        i += 1;
     }
     out
 }
@@ -194,10 +186,10 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_spaces_collapse() {
-        // 多个连续空格合并为一个
+    fn test_normalize_spaces_preserve() {
+        // 连续空格不再合并——每个空格独立替换为 en 空格（拉丁上下文）
         let r = normalize_spaces("a    b");
-        assert_eq!(r, "a\u{2002}b");
+        assert_eq!(r, "a\u{2002}\u{2002}\u{2002}\u{2002}b");
     }
 
     #[test]
@@ -246,10 +238,12 @@ mod tests {
     }
 
     #[test]
-    fn test_context_aware_multiple_spaces_collapse() {
-        // 多个连续空格 → 一个
-        assert_eq!(normalize_spaces("a   b"), "a\u{2002}b");
-        assert_eq!(normalize_spaces("中   文"), "中\u{3000}文");
+    fn test_context_aware_multiple_spaces_preserve() {
+        // 多个连续空格不再合并——每个空格都按上下文独立替换
+        // 前后都是拉丁字符 → 全部用 en 空格
+        assert_eq!(normalize_spaces("a   b"), "a\u{2002}\u{2002}\u{2002}b");
+        // 前后都是 CJK → 全部用全角空格
+        assert_eq!(normalize_spaces("中   文"), "中\u{3000}\u{3000}\u{3000}文");
     }
 
     #[test]

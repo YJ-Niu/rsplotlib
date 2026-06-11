@@ -493,11 +493,11 @@ class Reportopp:
                 test_index = [1, 2]
                 upper_limit = [None, None]
                 lower_limit = [None, None]
-                # rsplotlib 的字体在 module 初始化时通过 plotters::register_font 注册
-                # （见 src/lib.rs），plt.rcParams 只是兼容 matplotlib 的配置字典，
-                # 不会真正切换 plotters 渲染字体。但保持设置以反映用户意图，并
-                # 提示后续若需中文渲染，请确保 src/lib.rs 的字体候选包含
-                # Arial Unicode.ttf（macOS 自带，支持中文）。
+                # rsplotlib 的 rcParams 设置 font.sans-serif 时会自动调用
+                # _font_resolver，把对应的字体文件（如 Arial Unicode.ttf）
+                # 注册到 plotters 的字体数据库中，从而真正影响文本渲染。
+                # 因此下面的两行设置是有实际效果的——渲染"请确认关键字是否正确"
+                # 时将使用 Arial Unicode MS。
                 plt.rcParams["font.sans-serif"] = ["Arial Unicode MS"]
                 plt.rcParams["axes.unicode_minus"] = False
                 self.ax1.text(1.3, 1.2, "请确认关键字是否正确", fontsize=35, family="Arial Unicode MS", c="r")

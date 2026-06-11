@@ -2,8 +2,34 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple, PyAny, PyInt};
 
+use plotters::style::{register_font, FontStyle};
+
 use crate::axes::Axes;
 use crate::figure::{get_current_figure, set_current_figure, Figure};
+
+/// 从文件路径注册一个字体到 "sans-serif" family。
+///
+/// 这样 Python 端 `plt.rcParams["font.sans-serif"] = ["Arial Unicode MS"]`
+/// 设置的字体可以真正驱动 plotters 的文本渲染。
+///
+/// # 参数
+/// - `path`: 字体文件路径（.ttf/.otf/.ttc）
+///
+/// # 返回
+/// - 成功返回 Ok(())
+/// - 文件不存在或字体解析失败返回 Err
+#[pyfunction]
+pub fn register_sans_serif_font(py: Python, path: String) -> PyResult<()> {
+    let font_data = std::fs::read(&path).map_err(|e| {
+        PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e))
+    })?;
+    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+    register_font("sans-serif", FontStyle::Normal, font_ref).map_err(|_| {
+        PyValueError::new_err(format!("Failed to register font from '{}'", path))
+    })?;
+    let _ = py; // suppress unused warning
+    Ok(())
+}
 
 pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
     let fig = get_current_figure(py)?;

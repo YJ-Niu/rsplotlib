@@ -207,6 +207,7 @@ fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyfuncs::box_, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::minorticks_on, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::minorticks_off, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::register_sans_serif_font, m)?)?;
     m.setattr("__version__", "0.1.3")?;
     Ok(())
 }

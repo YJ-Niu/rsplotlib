@@ -655,7 +655,7 @@ impl Axes {
         self.ylim = Some((bottom, top));
     }
 
-    #[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, _family=None))]
+    #[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None))]
     pub fn text(
         &mut self,
         _py: Python<'_>,
@@ -665,13 +665,16 @@ impl Axes {
         fontsize: Option<i32>,
         color: Option<String>,
         c: Option<String>,
-        _family: Option<String>,
+        family: Option<String>,
     ) {
         let color = c.or(color);
         let text_str: String = text.extract::<String>().unwrap_or_else(|_| {
             text.str().map(|s| s.to_string()).unwrap_or_default()
         });
         let col = parse_color(&color.unwrap_or_else(|| "black".to_string()), 0).unwrap_or(RgbColor(0, 0, 0));
+        // family 参数目前用于通过 Python 端的 _font_resolver 注册字体到 plotters。
+        // Rust 端不再做额外处理（因为 plotters 的 sans-serif family 已被全局注册）。
+        let _ = family;
         self.elements.push(PlotElement::Text {
             x,
             y,
