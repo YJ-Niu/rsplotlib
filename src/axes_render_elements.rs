@@ -240,7 +240,7 @@ where
                             }
                         } else {
                             // 实线：使用 plotters 原生 stroke_width
-                            // plotters BitMapBackend stroke_width(n) 实际渲染近似 2n-1 像素（带 AA 边框）。
+                            // plotters BitMapBackend stroke_width(n) 实际渲染近似 n-1 像素（带 AA 边框）。
                             // matplotlib 通过 AA 在 1pt 量级产生 2-3 像素宽线。
                             // 公式: stroke = max(1, lw_px - 1) 是最接近 mpl 的折中：
                             //   lw=0.5: lw_px=1, stroke=1 → 1px (mpl 1px) ✓
@@ -248,7 +248,7 @@ where
                             //   lw=1.5: lw_px=3, stroke=2 → 3-5px (mpl 4px) ✓
                             //   lw=2.0: lw_px=4, stroke=3 → 5-7px (mpl 5px) ✓
                             //   lw=3.0: lw_px=6, stroke=5 → 9-11px (mpl 8px) ✓
-                            let stroke_w = (lw_px as i32 - 1).max(1) as u32;
+                            let stroke_w = (lw_px as i32).max(1) as u32;
                             let style_native: ShapeStyle = rgb.stroke_width(stroke_w).into();
                             // 像素中心对齐修正：plotters 在渲染水平线时，线中心对应像素下边缘，
                             // 而 matplotlib 使用像素中心。这导致 rsp 的水平线比 mpl 偏高 1 像素。
@@ -274,7 +274,7 @@ where
                             // 虚线/点线场景下端点不连续，跳过以免破坏节奏。
                             //
                             // 重要：cap 端点必须与已绘制的线段几何对齐：
-                            //   1) 实际渲染线宽 = 2*stroke_w - 1 像素，cap 直径等于这个值
+                            //   1) 实际渲染线宽 = stroke_w - 1 像素，cap 直径等于这个值
                             //   2) 实线已经过 0.5 像素 y 中心对齐，cap 也要应用同样的 y_shift
                             //   3) cap 圆心 = 线段端点（与 shift 后的位置一致）
                             if linestyle == "-" && marker.as_ref().map_or(true, |m| m.is_empty()) {
@@ -282,7 +282,11 @@ where
                                 // （中间 w-1 像素实色 + 两侧各 0.5 像素 AA），所以端点圆盘的
                                 // 直径必须与线段**实际渲染宽度**严格相等，才能"完全契合"。
                                 // 端点圆心 = 像素中心对齐后的线段端点（与线段几何一致）。
-                                let cap_lw_px = (stroke_w as i32 - 1).max(1) as f64; // 与线段渲染宽度一致
+                                let cap_lw_px = (stroke_w as i32).max(1) as f64; // 与线段渲染宽度一致
+                                // **关键：cap_y_shift 必须与上面的 y_shift 严格相同**，
+                                // 这样 cap 圆心和线段端点经过 plotters coord.translate 时
+                                // 走完全相同的截断路径，得到的 (i32, i32) 屏幕像素完全一致。
+                                // 之前的 +0.2 是临时 hack，会让 cap 偏移 0.2/y_per_pix 像素。
                                 let cap_y_shift = {
                                     let area2 = chart.plotting_area();
                                     let dim2 = area2.dim_in_pixel();
@@ -769,7 +773,7 @@ where
                     ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot cap: {}", e)))?;
                     if let Some(lbls) = labels {
                         if let Some(l) = lbls.get(i) {
-                            let box_label_style: TextStyle = FontDesc::from(("sans-serif", 11.0 * font_scale))
+                            let box_label_style: TextStyle = FontDesc::from(("sans-serif", scale_font(11.0, font_scale)))
                                 .color(&BLACK)
                                 .pos(Pos::new(HPos::Center, VPos::Center));
                             chart.draw_series(std::iter::once(plotters::element::Text::new(
@@ -782,7 +786,7 @@ where
             PlotElement::Annotate { text, xy, xytext, fontsize, color } => {
                 let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(0, 0, 0));
                 let rgb = to_plotters_color(col);
-                let (txy_x, txy_y) = xytext.unwrap_or((xy.0 + 0.2, xy.1 + 0.2));
+                let (txy_x, txy_y) = xytext.unwrap_or((xy.0, xy.1));
                 let txy_x = tx(txy_x);
                 let txy_y = ty(txy_y);
                 let txy_xy_x = tx(xy.0);
@@ -937,6 +941,12 @@ where
 /// 前半（在切线方向指向线段外部）则作为端点凸出。
 /// 这种实现确保圆盘与线段**完全契合**，无空隙、无错位。
 ///
+/// **关键：为什么不用 Polygon 逼近？**
+/// plotters BitMapBackend 的 `fill_polygon` 是**无 AA 的硬边光栅化**
+/// （扫描线算法按"像素中心点是否在多边形内"判断），再多段数也改变不了锯齿本质。
+/// 而 `plotters::element::Circle` 走的是 **`draw_circle` + 自带 AA 的边缘像素混合**
+/// （`style.color().mix(v)` 做 alpha 渐变），无论多少段多边形都不如这一个调用光滑。
+///
 /// `endpoint`：线段端点（已应用 y_shift）
 /// `cap_lw_px`：直径 = 实际线宽（像素）
 /// `_next_point` / `_is_start`：保留参数以维持调用接口一致；圆盘中心对称不再需要切线方向
@@ -945,38 +955,23 @@ fn draw_round_cap<DB: DrawingBackend>(
     endpoint: (f64, f64),
     _next_point: (f64, f64),
     cap_lw_px: f64,
-    x_min: f64, x_max: f64, y_min: f64, y_max: f64,
+    _x_min: f64, _x_max: f64, _y_min: f64, _y_max: f64,
     rgb: &plotters::style::RGBColor,
     _is_start: bool,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
 {
-    // 获取像素/数据单位的换算系数
-    let area = chart.plotting_area();
-    let dim = area.dim_in_pixel();
-    let pw = dim.0 as f64;
-    let ph = dim.1 as f64;
-    let x_per_pix = if pw > 0.0 { (x_max - x_min) / pw } else { 1.0 };
-    let y_per_pix = if ph > 0.0 { (y_max - y_min) / ph } else { 1.0 };
-    // 圆盘屏幕半径（像素）
-    let r_px = cap_lw_px / 2.0;
-    // 用 64 段直线逼近整圆（视觉上完全光滑）。
-    // 为保证在数据空间中绘制出**真正的圆（屏幕空间）**，必须对 x 和 y 分别缩放：
-    //   点 = endpoint + r_px * (cos(a), sin(a)) * (x_per_pix, y_per_pix)
-    // 这样在屏幕上的偏移量恒为 r_px，因此呈现为标准圆。
-    const ARC_SEGMENTS: usize = 64; // 64 段保证任意尺寸下圆盘都光滑
-    // 构造实心圆多边形（0 到 2π）
-    let mut poly_points = Vec::with_capacity(ARC_SEGMENTS + 1);
-    for i in 0..=ARC_SEGMENTS {
-        let t = i as f64 / ARC_SEGMENTS as f64;
-        let a = t * std::f64::consts::TAU; // 0..=2π
-        let ca = a.cos();
-        let sa = a.sin();
-        poly_points.push((endpoint.0 + r_px * ca * x_per_pix,
-                          endpoint.1 + r_px * sa * y_per_pix));
-    }
-    chart.draw_series(std::iter::once(Polygon::new(poly_points, rgb.filled())))
-        .map_err(|e| PyRuntimeError::new_err(format!("Cap round polygon: {}", e)))?;
+    // plotters::element::Circle 接受 (中心坐标, 半径像素, 样式)
+    // 内部调用 backend.draw_circle，自带 AA 边缘像素混合（rasterizer::draw_circle）
+    // → 圆盘边缘完全光滑，无需任何多边形段数堆叠
+    let cx = endpoint.0;
+    let cy = endpoint.1;
+    // 注意：Circle::new 的 size 是**半径**（像素），不是直径
+    let radius_px = (cap_lw_px / 2.0).max(0.5);
+    let style: ShapeStyle = rgb.filled();
+    let circle_elem = Circle::new((cx, cy), radius_px, style);
+    chart.draw_series(std::iter::once(circle_elem))
+        .map_err(|e| PyRuntimeError::new_err(format!("Cap round circle: {}", e)))?;
     Ok(())
 }

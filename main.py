@@ -910,7 +910,7 @@ class Reportopp:
                 ax9 = fig.add_subplot(gs[70:, 77:])
                 # ax_list.append(ax9)
                 plt.axis("off")
-                ax9.patch.set_facecolor("#FFFFFF")
+                # ax9.patch.set_facecolor("#D2D3D3")
                 plt.xticks([])
                 plt.yticks([])
                 plt.xlim(0, 100)

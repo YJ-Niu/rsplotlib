@@ -76,8 +76,10 @@ fn py_to_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
 use crate::axis::{Axis, Patch, SpineDict};
 
 /// 字体大小缩放并四舍五入到1位小数
+/// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
+/// 通过 * 1.30 将字号放大到与 matplotlib 一致。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
-    (size * font_scale * 10.0).round() / 10.0
+    (size * font_scale * 11.0).round() / 10.0
 }
 
 #[pyclass(skip_from_py_object)]
@@ -124,6 +126,7 @@ pub struct Axes {
     pub tick_left: bool,
     pub tick_right: bool,
     pub tick_labelsize: f64,
+    pub axis_off: bool,
     pub self_py: Option<Py<PyAny>>,
     pub xaxis_major_locator: Option<Py<PyAny>>,
     pub xaxis_minor_locator: Option<Py<PyAny>>,
@@ -176,6 +179,7 @@ impl Clone for Axes {
             tick_left: self.tick_left,
             tick_right: self.tick_right,
             tick_labelsize: self.tick_labelsize,
+            axis_off: self.axis_off,
             self_py: None,
             xaxis_major_locator: None,
             xaxis_minor_locator: None,
@@ -305,6 +309,7 @@ impl Axes {
             tick_left: true,
             tick_right: true,
             tick_labelsize: 12.0,
+            axis_off: false,
             self_py: None,
             xaxis_major_locator: None,
             xaxis_minor_locator: None,
@@ -986,6 +991,7 @@ impl Axes {
         self.tick_top = false;
         self.tick_left = false;
         self.tick_right = false;
+        self.axis_off = true;
     }
 
     /// matplotlib 兼容：启用次刻度（major + minor）
@@ -1082,7 +1088,8 @@ impl Axes {
         DB::ErrorType: 'static,
     {
         // 仅主轴填充背景，twin axes 不填充以避免覆盖主轴数据
-        if fill_bg {
+        // 当 axis("off") 被调用时，子图背景设为透明（不填充）
+        if fill_bg && !self.axis_off {
             let bg_color = parse_color(&self.facecolor, 0).unwrap_or(RgbColor(255, 255, 255));
             chart.plotting_area().fill(&to_plotters_color(bg_color))
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to fill background: {}", e)))?;

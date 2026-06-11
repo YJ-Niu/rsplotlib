@@ -198,7 +198,7 @@ impl Figure {
         let _ncols = self.ncols;
 
         if !self.suptitle.is_empty() {
-            let _ = root.titled(&self.suptitle, ("sans-serif", 24));
+            let _ = root.titled(&self.suptitle, ("sans-serif", 21.0 * font_scale));
         }
 
         let total_w = actual_w as f64;
