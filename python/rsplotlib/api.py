@@ -428,7 +428,7 @@ def legend(loc='best'):
     """显示图例
     
     Args:
-        loc: 位置 (默认: 'best', 可选: 'upper right', 'upper left', 
+        loc: 位置 (默认: 'best', 可选: 'upper right', 'upper left',
               'lower right', 'lower left', 'upper center')
     """
     return _rsplotlib.legend(loc)
