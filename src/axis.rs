@@ -14,6 +14,10 @@ pub struct Axis {
     pub major_locator: String,
     #[allow(dead_code)]
     pub minor_locator: String,
+    /// 存储 set_major_locator 传入的 Python locator 对象（用于反射）
+    pub major_locator_py: Option<Py<PyAny>>,
+    /// 存储 set_minor_locator 传入的 Python locator 对象（用于反射）
+    pub minor_locator_py: Option<Py<PyAny>>,
     pub parent: Option<Py<PyAny>>,
     pub which: String,
 }
@@ -32,6 +36,8 @@ impl Axis {
             minor_grid_linestyle: None,
             major_locator: "auto".to_string(),
             minor_locator: "auto".to_string(),
+            major_locator_py: None,
+            minor_locator_py: None,
             parent: None,
             which: "x".to_string(),
         }
@@ -78,6 +84,8 @@ impl Axis {
     }
 
     fn set_major_locator(&mut self, py: Python<'_>, locator: &Bound<'_, PyAny>) {
+        // 保存 locator 引用（用于 Python 端反射以及 Axes 端 tick 计算）
+        self.major_locator_py = Some(locator.clone().unbind());
         if let Some(parent) = &self.parent {
             if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
                 let mut ax = ax_bound.borrow_mut();
@@ -91,6 +99,8 @@ impl Axis {
     }
 
     fn set_minor_locator(&mut self, py: Python<'_>, locator: &Bound<'_, PyAny>) {
+        // 保存 locator 引用
+        self.minor_locator_py = Some(locator.clone().unbind());
         if let Some(parent) = &self.parent {
             if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
                 let mut ax = ax_bound.borrow_mut();
@@ -101,6 +111,50 @@ impl Axis {
                 }
             }
         }
+    }
+
+    fn get_major_locator<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        // 优先使用本对象缓存的 locator
+        if let Some(loc) = self.major_locator_py.as_ref() {
+            return Some(loc.bind(py).clone());
+        }
+        // 回退到 parent Axes 上的 locator
+        if let Some(parent) = &self.parent {
+            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
+                let ax = ax_bound.borrow();
+                let stored = if self.which == "x" {
+                    ax.xaxis_major_locator.as_ref()
+                } else {
+                    ax.yaxis_major_locator.as_ref()
+                };
+                if let Some(loc) = stored {
+                    return Some(loc.bind(py).clone());
+                }
+            }
+        }
+        None
+    }
+
+    fn get_minor_locator<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        // 优先使用本对象缓存的 locator
+        if let Some(loc) = self.minor_locator_py.as_ref() {
+            return Some(loc.bind(py).clone());
+        }
+        // 回退到 parent Axes 上的 locator
+        if let Some(parent) = &self.parent {
+            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
+                let ax = ax_bound.borrow();
+                let stored = if self.which == "x" {
+                    ax.xaxis_minor_locator.as_ref()
+                } else {
+                    ax.yaxis_minor_locator.as_ref()
+                };
+                if let Some(loc) = stored {
+                    return Some(loc.bind(py).clone());
+                }
+            }
+        }
+        None
     }
 }
 

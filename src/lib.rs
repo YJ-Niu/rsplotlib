@@ -1,4 +1,10 @@
 pub mod axes;
+pub mod axes_bounds;
+pub mod axes_grid;
+pub mod axes_legend;
+pub mod axes_mesh;
+pub mod axes_render_elements;
+pub mod axes_title;
 pub mod axis;
 pub mod colormap;
 pub mod colors;
@@ -6,6 +12,7 @@ pub mod elements;
 pub mod figure;
 pub mod marker;
 pub mod pyfuncs;
+pub mod text_utils;
 
 use pyo3::prelude::*;
 use plotters::style::register_font;
@@ -16,43 +23,131 @@ use crate::figure::Figure;
 
 #[pymodule]
 fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // 字体注册策略说明：
+    //
+    // 用户反馈"字符宽度/字距视觉不一致 + 空格宽度窄"。
+    //
+    // 根因：plotters 内部用 `fontdb` 管理字体。若同一 family 名下注册了多个字体
+    // （例如 "sans-serif" 既注册了 Arial 又注册了 Arial Unicode），fontdb 在
+    // 排版一行文本时，可能：
+    //   - 拉丁字符用 Arial 渲染
+    //   - 中文用 Arial Unicode 渲染
+    //   - 空格 / 标点 / 数字 又可能用回某个字体
+    // 不同字体的 advance width（字宽）不同，混排后视觉上就是"间距忽大忽小、
+    // 空格比预期的窄"。
+    //
+    // 修复：仅注册 **一个** 覆盖范围最广的字体到 "sans-serif" family，
+    // 整行文本由同一个字形集排版，字符宽度/空格宽度都来自同一字体，视觉一致。
+    // 优先选择 Arial Unicode MS（macOS 自带，几乎覆盖所有 Unicode 字符，
+    // 中英文字形与 Arial 同一家族，混排视觉自然）。
+    //
+    // 同时在渲染端（axes_render_elements / axes_title / axes_legend）
+    // 给所有文字调用传入 `transform`, 修正 plotters 默认 baseline 偏移。
+
     #[cfg(target_os = "macos")]
     {
-        // 优先使用 matplotlib 自带的 DejaVu Sans（与 matplotlib 默认字体一致），
-        // 保证字符宽度、字形度量尽量匹配 matplotlib。
-        // 备选：系统 Arial / Helvetica 系，避免 monospace 字体导致文本过宽。
-        let mut font_candidates: Vec<String> = Vec::new();
-        // 1) DejaVu Sans（matplotlib 默认）—— 通过 site-packages/matplotlib 查找
-        for base in &[
-            std::env::var("VIRTUAL_ENV").ok(),
-            Some(std::env::current_dir()
-                .map(|p| p.join(".venv").to_string_lossy().to_string())
-                .unwrap_or_default())
-                .filter(|p| !p.is_empty()),
-        ] {
-            if let Some(prefix) = base {
-                let p = std::path::Path::new(&prefix)
-                    .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
-                if p.exists() {
-                    font_candidates.push(p.to_string_lossy().to_string());
-                }
-            }
-        }
-        // 2) 系统 Arial / Helvetica 备选
-        for sys in &[
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/Library/Fonts/Arial Unicode.ttf",
-            "/System/Library/Fonts/HelveticaNeue.ttc",
-            "/System/Library/Fonts/Helvetica.ttc",
-        ] {
-            font_candidates.push((*sys).to_string());
-        }
+        // macOS 优先 Arial Unicode（含 CJK + 拉丁 + 空格，宽度继承自 Arial，
+        // 与 matplotlib 默认字体外观接近）；若不存在再退回 DejaVu Sans
+        // （仅拉丁可读，CJK 会变方块，但至少保证拉丁字符宽度一致）。
+        let font_candidates: Vec<String> = vec![
+            "/Library/Fonts/Arial Unicode.ttf".to_string(),
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf".to_string(),
+        ];
+        let mut registered = false;
         for path in &font_candidates {
             if let Ok(font_data) = std::fs::read(path) {
                 let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
                 if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+                    registered = true;
+                    break; // 找到第一个能用的就停，保证只用单一字体
+                }
+            }
+        }
+        if !registered {
+            // 退回 matplotlib 自带 DejaVu Sans（仅英文可用）
+            for base in &[
+                std::env::var("VIRTUAL_ENV").ok(),
+                Some(std::env::current_dir()
+                    .map(|p| p.join(".venv").to_string_lossy().to_string())
+                    .unwrap_or_default())
+                    .filter(|p| !p.is_empty()),
+            ] {
+                if let Some(prefix) = base {
+                    let p = std::path::Path::new(&prefix)
+                        .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
+                    if let Ok(font_data) = std::fs::read(&p) {
+                        let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                        let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Linux: 优先注册 Noto Sans CJK（多数发行版自带，覆盖 CJK + 拉丁）
+        let font_candidates: Vec<String> = vec![
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc".to_string(),
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc".to_string(),
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc".to_string(),
+        ];
+        let mut registered = false;
+        for path in &font_candidates {
+            if let Ok(font_data) = std::fs::read(path) {
+                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+                    registered = true;
                     break;
                 }
+            }
+        }
+        if !registered {
+            // 退回 DejaVu Sans
+            for base in &[
+                std::env::var("VIRTUAL_ENV").ok(),
+                Some(std::env::current_dir()
+                    .map(|p| p.join(".venv").to_string_lossy().to_string())
+                    .unwrap_or_default())
+                    .filter(|p| !p.is_empty()),
+            ] {
+                if let Some(prefix) = base {
+                    let p = std::path::Path::new(&prefix)
+                        .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
+                    if let Ok(font_data) = std::fs::read(&p) {
+                        let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                        let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 优先 Microsoft YaHei（自带，CJK + 拉丁）
+        let font_candidates: Vec<String> = vec![
+            "C:/Windows/Fonts/msyh.ttc".to_string(),
+            "C:/Windows/Fonts/msyh.ttf".to_string(),
+        ];
+        let mut registered = false;
+        for path in &font_candidates {
+            if let Ok(font_data) = std::fs::read(path) {
+                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+                    registered = true;
+                    break;
+                }
+            }
+        }
+        if !registered {
+            // 退回 Arial
+            let p = "C:/Windows/Fonts/arial.ttf".to_string();
+            if let Ok(font_data) = std::fs::read(&p) {
+                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
             }
         }
     }

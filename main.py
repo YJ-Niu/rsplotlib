@@ -16,7 +16,9 @@ import json
 from rsplotlib.ticker import MaxNLocator, MultipleLocator
 import threading
 import math
-from pylab import mpl
+# 注：原 `from pylab import mpl` 已移除——本项目使用 rsplotlib（不是 matplotlib），
+# `mpl.rcParams` 设置对 plotters 字体注册无实际作用；如需字体切换请改用 plt.rcParams
+# 或在 src/lib.rs 中调整字体注册顺序。
 
 os.environ["MPLCONFIGDIR"] = "/Applications/plots/rsplotlib_cache"
 use("Agg")
@@ -361,10 +363,13 @@ class Reportopp:
                 fig = plt.gcf()
                 fig.set_facecolor('#FFFFFF')
                 self.ax1.patch.set_facecolor("#FFFFFF")
-                self.ax1.grid(c='grey', lw=0.8)
-                self.ax1.yaxis.grid(True, which='minor', ls='--', c='#787A78', lw=0.4)
-                self.ax1.xaxis.grid(True, which='minor', ls='--', c='#787A78', lw=0.4)
-                plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+                # 启用主网格（主网格线在主刻度值上）
+                self.ax1.grid(c='grey')
+                # 启用副网格（副网格线在副刻度值上）
+                self.ax1.yaxis.grid(True, which='minor', ls='--', c='#BFBFBF')
+                self.ax1.xaxis.grid(True, which='minor', ls='--', c='#BFBFBF')
+                # 显式在 self.ax1 上设置主刻度定位器，确保主网格线显示在坐标刻度值上
+                self.ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
                 plt.title(test_name, fontsize=17, fontweight='bold', style="normal")
             else:
                 fig = plt.figure(figsize=(14.819, 4.916), dpi=144)
@@ -488,8 +493,13 @@ class Reportopp:
                 test_index = [1, 2]
                 upper_limit = [None, None]
                 lower_limit = [None, None]
-                mpl.rcParams["font.sans-serif"] = ["Arial Unicode MS"]
-                mpl.rcParams["axes.unicode_minus"] = False
+                # rsplotlib 的字体在 module 初始化时通过 plotters::register_font 注册
+                # （见 src/lib.rs），plt.rcParams 只是兼容 matplotlib 的配置字典，
+                # 不会真正切换 plotters 渲染字体。但保持设置以反映用户意图，并
+                # 提示后续若需中文渲染，请确保 src/lib.rs 的字体候选包含
+                # Arial Unicode.ttf（macOS 自带，支持中文）。
+                plt.rcParams["font.sans-serif"] = ["Arial Unicode MS"]
+                plt.rcParams["axes.unicode_minus"] = False
                 self.ax1.text(1.3, 1.2, "请确认关键字是否正确", fontsize=35, family="Arial Unicode MS", c="r")
                 print(" 请确认关键字是否正确")
                 ng_flot += 1
@@ -818,7 +828,7 @@ class Reportopp:
                 # （主刻度间隔为 x_xlim=sim_x*5，副刻度间隔为 sim_x，即主刻度 5 等分）
                 xminorLocator = MultipleLocator(sim_x)
                 self.ax1.xaxis.set_minor_locator(xminorLocator)
-
+                print(sim_x, x_xlim)
                 # 参考 Y 轴的定义方式：直接用 MultipleLocator 设置主刻度定位器。
                 # 这样：
                 # 1. 主刻度从 0 开始（X 列表的第一个值会显示出来）
@@ -831,11 +841,7 @@ class Reportopp:
                 x_x = xmajorLocator.tick_values(x_min_val, x_max_val)
                 # 转为 Python int 列表
                 x_x = [int(round(v)) for v in x_x]
-                x_x.remove(0)
-                x_x = [1] + x_x
-                x_x_s = [str(v) for v in x_x]
-                plt.xticks(x_x, x_x_s)
-                print(111, x_x, x_x_s)
+                plt.xticks(x_x)
                 plt.subplots_adjust(left=0, right=1, top=0.995, bottom=0)
                 ax11 = fig.add_subplot(gs[99:, :])
                 ax_list.append(ax11)
