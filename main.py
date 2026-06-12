@@ -859,7 +859,7 @@ class Reportopp:
                 plt.axis("off")
                 plt.xticks([])
                 plt.yticks([])
-                print_1 = "#   | Test Name" + " " * 275 + "| Average" + " " * 16 + "| Std. Est." + " " * 12 + "| Cpk"
+                print_1 = "#   | Test Name" + " " * 245 + "| Average" + " " * 13 + "| Std. Est." + " " * 11 + "| Cpk"
                 self.ax2.text(1, 92, "-" * 313, fontsize=7, c="grey")
                 self.ax2.text(1, 95, print_1, fontsize=7, c="black")
                 plt.xlim(0, 100)
