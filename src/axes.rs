@@ -692,27 +692,29 @@ impl Axes {
             text.str().map(|s| s.to_string()).unwrap_or_default()
         });
         let col = parse_color(&color.unwrap_or_else(|| "black".to_string()), 0).unwrap_or(RgbColor(0, 0, 0));
-        // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters。
-        // 这样 ax.text(..., family="Arial Unicode MS") 调用（跳过 pyplot.text 包装器）
-        // 也能正确注册 CJK 字体，确保中文字符有对应字形渲染。
-        if let Some(family_name) = &family {
+        // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters，
+        // 使用实际字体家族名称（而非 "sans-serif"），确保只影响指定文字。
+        let font_family = family.and_then(|family_name| {
             if let Ok(resolver_mod) = py.import("rsplotlib._font_resolver") {
-                if let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (family_name,)) {
+                if let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,)) {
                     if let Ok(Some(path)) = path_obj.extract::<Option<String>>() {
                         if let Ok(font_data) = std::fs::read(&path) {
                             let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                            let _ = plotters::style::register_font("sans-serif", FontStyle::Normal, font_ref);
+                            let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
+                            return Some(family_name);
                         }
                     }
                 }
             }
-        }
+            None
+        });
         self.elements.push(PlotElement::Text {
             x,
             y,
             text: text_str,
             fontsize: fontsize.unwrap_or(12),
             color: col,
+            font_family,
         });
     }
 

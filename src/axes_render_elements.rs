@@ -470,12 +470,13 @@ where
                     }
                 }
             }
-            PlotElement::Text { x, y, text, fontsize, color } => {
+            PlotElement::Text { x, y, text, fontsize, color, font_family } => {
                 let txv = tx(*x);
                 let tyv = ty(*y);
                 if !txv.is_finite() || !tyv.is_finite() { continue; }
                 let fs = scale_font(*fontsize as f64, font_scale);
-                let font: FontDesc = ("sans-serif", fs).into();
+                let family_name = font_family.as_deref().unwrap_or("sans-serif");
+                let font: FontDesc = (family_name, fs).into();
                 let colored_font = font.color(&to_plotters_color(*color));
                 // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
                 // 与 axhline/axvline 在同一坐标时的视觉位置一致。

@@ -62,6 +62,7 @@ pub enum PlotElement {
         text: String,
         fontsize: i32,
         color: RgbColor,
+        font_family: Option<String>,
     },
     HLine {
         y: f64,
