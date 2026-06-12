@@ -7,6 +7,7 @@
 from . import rsplotlib as _rsplotlib
 # 导入原始类
 from .rsplotlib import Figure, Axes
+import warnings as _warnings
 
 
 # ==================== 内部辅助函数 ====================
@@ -69,7 +70,7 @@ def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=No
     )
 
 
-def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
+def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, color=None):
     """绘制散点图
 
     Args:
@@ -80,10 +81,11 @@ def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
         marker: 标记样式 (默认: 'o')
         label: 图例标签 (默认: None)
         alpha: 透明度 (默认: 1.0)
+        color: 颜色别名 (默认: None)
     """
     # 支持 color 作为 c 的别名
-    if c is None and 'color' in kwargs:
-        c = kwargs.pop('color')
+    if c is None and color is not None:
+        c = color
     return _rsplotlib.scatter(_to_list(x), _to_list(y), s, c, marker, label, alpha)
 
 
@@ -239,8 +241,7 @@ def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians
     try:
         return _rsplotlib.violinplot(dataset, positions, widths, showmeans, showmedians)
     except AttributeError:
-        import warnings
-        warnings.warn("violinplot is not yet implemented in rsplotlib, using boxplot instead")
+        _warnings.warn("violinplot is not yet implemented in rsplotlib, using boxplot instead")
         return boxplot(dataset)
 
 
@@ -258,8 +259,7 @@ def hexbin(x, y, gridsize=100, cmap='hot', bins='log', mincnt=1):
     try:
         return _rsplotlib.hexbin(x, y, gridsize, cmap, bins, mincnt)
     except AttributeError:
-        import warnings
-        warnings.warn("hexbin is not yet implemented in rsplotlib, using scatter instead")
+        _warnings.warn("hexbin is not yet implemented in rsplotlib, using scatter instead")
         return scatter(x, y, s=10, alpha=0.5)
 
 
@@ -277,8 +277,7 @@ def contour(X, Y, Z, levels=None, colors=None, linestyles=None):
     try:
         return _rsplotlib.contour(X, Y, Z, levels, colors, linestyles)
     except AttributeError:
-        import warnings
-        warnings.warn("contour is not yet implemented in rsplotlib")
+        _warnings.warn("contour is not yet implemented in rsplotlib")
         return None
 
 
@@ -296,8 +295,7 @@ def contourf(X, Y, Z, levels=None, cmap='coolwarm', alpha=1.0):
     try:
         return _rsplotlib.contourf(X, Y, Z, levels, cmap, alpha)
     except AttributeError:
-        import warnings
-        warnings.warn("contourf is not yet implemented in rsplotlib")
+        _warnings.warn("contourf is not yet implemented in rsplotlib")
         return None
 
 
@@ -314,8 +312,7 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
     try:
         return _rsplotlib.stackplot(x, args, labels, colors, alpha)
     except AttributeError:
-        import warnings
-        warnings.warn("stackplot is not yet implemented in rsplotlib")
+        _warnings.warn("stackplot is not yet implemented in rsplotlib")
         return None
 
 
@@ -360,7 +357,7 @@ def axvline(x=None, color=None, linestyle=None, linewidth=None):
 
 def hlines(y, xmin, xmax, color=None, linestyle=None, linewidth=None):
     """绘制水平线段
-    
+
     Args:
         y: y 位置
         xmin: 线段起点 x
@@ -369,12 +366,12 @@ def hlines(y, xmin, xmax, color=None, linestyle=None, linewidth=None):
         linestyle: 线型 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplotlib.axhline(y, color, linestyle, linewidth)
+    return _rsplotlib.hlines(y, xmin, xmax, color, linestyle, linewidth)
 
 
 def vlines(x, ymin, ymax, color=None, linestyle=None, linewidth=None):
     """绘制垂直线段
-    
+
     Args:
         x: x 位置
         ymin: 线段起点 y
@@ -383,12 +380,12 @@ def vlines(x, ymin, ymax, color=None, linestyle=None, linewidth=None):
         linestyle: 线型 (默认: None)
         linewidth: 线宽 (默认: None)
     """
-    return _rsplotlib.axvline(x, color, linestyle, linewidth)
+    return _rsplotlib.vlines(x, ymin, ymax, color, linestyle, linewidth)
 
 
 # ==================== 配置函数 ====================
 
-def xlabel(text, **kwargs):
+def xlabel(text):
     """设置 x 轴标签
 
     Args:
@@ -397,7 +394,7 @@ def xlabel(text, **kwargs):
     return _rsplotlib.xlabel(text)
 
 
-def ylabel(text, **kwargs):
+def ylabel(text):
     """设置 y 轴标签
 
     Args:
@@ -406,7 +403,7 @@ def ylabel(text, **kwargs):
     return _rsplotlib.ylabel(text)
 
 
-def title(text, **kwargs):
+def title(text):
     """设置图表标题
 
     Args:

@@ -6,6 +6,7 @@
 `_font_resolver.apply_rcparams_font()`，把对应的字体文件注册到 plotters 的
 字体数据库中，从而真正影响文本渲染（而不是像普通 dict 一样只更新值）。
 """
+import copy as _copy
 from typing import Any
 
 # 默认配置：与 matplotlib 保持一致的常用项
@@ -53,3 +54,5 @@ class RcParams(dict):
 
 # 全局单例
 rcParams = RcParams()
+# 原始默认配置副本（用于 rcParams.reset() 等恢复操作）
+rcParamsOrig = _copy.deepcopy(rcParams)

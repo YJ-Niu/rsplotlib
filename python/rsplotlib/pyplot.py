@@ -5,8 +5,14 @@
 """
 
 from . import rsplotlib as _rsplotlib
-from ._rcparams import rcParams
 from ._figure_defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
+
+
+# 延迟获取 mpl.rcParams，避免 pyplot <-> pylab 循环导入
+def _get_rcparams():
+    """从 pylab.mpl 获取 rcParams，统一配置入口"""
+    from .pylab import mpl
+    return mpl.rcParams
 
 
 # ==================== 内部辅助函数 ====================
@@ -119,17 +125,12 @@ def plot(*args, **kwargs):
     # 使用关键字参数转发到 Rust 端，避免遗漏 solid_capstyle 等参数
 
     plot_kwargs = dict(
-        label=kw.get('label'),
-        color=kw.get('color'),
-        linestyle=kw.get('linestyle', '-'),
-        marker=kw.get('marker'),
-        linewidth=kw.get('linewidth', 1.5),
-        lw=kw.get('lw'),
-        c=kw.get('c'),
-        ls=kw.get('ls'),
-        markersize=kw.get('markersize'),
-        markeredgewidth=kw.get('markeredgewidth'),
-        solid_capstyle=kw.get('solid_capstyle'),
+        label=kwargs.get('label'),
+        color=kwargs.get('color'),
+        linestyle=kwargs.get('linestyle', '-'),
+        marker=kwargs.get('marker'),
+        linewidth=kwargs.get('linewidth', 1.5),
+        solid_capstyle=kwargs.get('solid_capstyle'),
     )
 
     def _call(*a, **k):
@@ -472,7 +473,7 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
         w_inch, h_inch = figsize
         fig.set_size(round(w_inch * d), round(h_inch * d))
     else:
-        w, h = rcParams.get('figure.figsize', list(DEFAULT_FIGSIZE))
+        w, h = _get_rcparams().get('figure.figsize', list(DEFAULT_FIGSIZE))
         fig.set_size(round(w * d), round(h * d))
     return fig
 
@@ -537,11 +538,6 @@ def axis(arg=None, **kwargs):
 def colorbar(mappable=None, **kwargs):
     """添加颜色条 (占位)"""
     pass
-
-
-# ==================== rcParams 重新导出 ====================
-# rcParams / rcParamsOrig 从 _rcparams 模块导入，提供统一的配置访问
-# （保留此注释以便读者了解 rcParams 的来源）
 
 
 def get_cmap(name=None, lut=None):

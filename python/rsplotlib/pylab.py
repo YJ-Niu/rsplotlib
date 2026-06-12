@@ -1,6 +1,5 @@
 """rsplotlib.pylab - Matplotlib pylab 兼容接口"""
 
-from .pyplot import figure, gca, gcf
 from ._rcparams import rcParams, rcParamsOrig
 
 # mpl 模块可以从 pylab 导入

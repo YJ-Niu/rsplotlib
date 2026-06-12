@@ -133,11 +133,11 @@ def apply_rcparams_font() -> Optional[str]:
     try:
         # 延迟导入避免循环依赖
         from . import rsplotlib as _rsplotlib
-        from ._rcparams import rcParams
+        from .pylab import mpl
     except Exception:
         return None
 
-    sans_serif = rcParams.get("font.sans-serif")
+    sans_serif = mpl.rcParams.get("font.sans-serif")
     if not sans_serif:
         return None
 

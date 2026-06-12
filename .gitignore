@@ -27,20 +27,7 @@ uv.lock
 Thumbs.db
 
 # Data / plots
-N238B W1-plots/
-N238B W1.csv
-wheelhouse/
-diff_output/
-testing/
-test_out/
-main*.py
-analyze*.py
-side*.py
-check*.py
-compare*.py
-debug*.py
-test*.py
-*.svg
+
 # Environment
 .env
 .env.local
