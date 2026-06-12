@@ -1,0 +1,12 @@
+[package]
+name = "rsplotlib"
+version = "0.1.3"
+edition = "2024"
+
+[lib]
+name = "rsplotlib"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "0.28.3"
+plotters = { version = "0.3", default-features = false, features = ["svg_backend", "bitmap_backend", "bitmap_encoder", "ab_glyph", "line_series", "point_series"] }
