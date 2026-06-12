@@ -1,66 +1,168 @@
-项目简介
-本项目（rsplotlib）是一个 Rust 实现的 Python 绘图库，目标兼容部分 Matplotlib 的 API，并使用 Rust 的绘图库（如 plotters）提高性能与可移植性。
+# rsplotlib
 
-快速开始
+A high-performance Python plotting library implemented in Rust, designed to be compatible with Matplotlib's API while leveraging Rust's performance and portability.
 
-- 建议在虚拟环境中操作 uv创建python环境，如 `uv venv --python 3.13`。
-- 构建并安装库：
+## Features
 
-```bash
-./build_wheel.sh    # 构建 wheel 到 ./wheels 或 target 下
-```
+- **Matplotlib Compatible API**: Supports common plotting functions like `plot`, `scatter`, `bar`, `hist`, `pie`, etc.
+- **High Performance**: Core rendering engine written in Rust using the plotters library
+- **Cross-Platform**: Works on macOS, Linux, and Windows
+- **Custom Font Support**: Supports font customization via `mpl.rcParams`
+- **Multiple Backends**: Supports SVG and PNG output
 
-- 依赖：项目主要依赖 `matplotlib`（用于对比与测试），请在虚拟环境中安装：
+## Installation
 
-```bash
-uv pip install -r requirements.txt  # 如果存在 requirements.txt
-uv pip install matplotlib
-```
+### Prerequisites
 
-开发与调试流程（推荐循环）
+- Python 3.9+
+- Rust 1.70+ (for building from source)
+- uv (recommended for Python package management)
 
-1. 修复（Fix）: 根据测试用例或示例运行输出定位问题并修复。
-2. 重构（Refactor）: 将修复后的代码整理为更清晰的模块（优先修改 `python/rsplotlib` 下的代码）。
-3. 画图（Plot）: 使用 `main.py` 或 `python/examples.py` 生成对比图像，输出目录为 `plots/N238B W1-plots/`。
-4. 对比（Compare）: 将生成的 PNG 与使用 Matplotlib 原生生成的图片`N238B W1-plots/`下的图像逐一比较，记录差异（布局、字体、间距、图例、刻度等）。
-5. 再修复（Iterate）: 基于差异继续修复并自动进入下一轮。
-
-主要关注点
-
-- 目标并非逐字复刻 Matplotlib 的实现，而是在兼容其常用 API 的前提下尽量匹配输出效果。
-- 保持代码简洁：优先实现常用、稳定的接口，避免过度复杂化。
-
-重要文件
-
-- `main.py`：项目示例/测试入口，负责批量生成测试图像（查看并运行以生成 `plots/` 下的图像）。
-- `python/rsplotlib/`：Python 封装实现，主要工作区。
-- `testing/`：测试脚本集合。
-- `python/rsplotlib/`: python库接口
-- `src/'`：Rust 实现的绘图库，主要工作区。
-
-如何执行第一轮（快速验证）
+### Building from Source
 
 ```bash
-# 1. 激活虚拟环境
+# Create a virtual environment
+uv venv --python 3.13
+
+# Activate the virtual environment
 source .venv/bin/activate
 
-# 2. 安装依赖并安装本包（如未安装）
-uv pip install -r requirements.txt || true
+# Build the Rust extension and install the package
 ./build_wheel.sh
 
-# 3. 运行示例脚本以生成图像
-uv run python main.py
-
-# 生成的图像位于 plots/ 或 N238B W1-plots/，与 Matplotlib 输出进行对比。
+# Install dependencies
+uv pip install matplotlib numpy
 ```
 
-循环迭代目标
+## Quick Start
 
-- 每次修改后，提交最小可复现的变更并运行 `main.py` 生成对比图像。
-- 使用差异化检查（手动或脚本化）记录明显的不一致项，优先修复影响视觉结果与坐标系的错误。
+```python
+from rsplotlib import pyplot as plt
+from rsplotlib.pylab import mpl
 
-贡献
+# Configure font (optional)
+mpl.rcParams['font.sans-serif'] = ['Arial']
 
-- 提交 PR 时请附带生成的示例图像以及说明本次改动修复/改进了哪些问题。
+# Create a figure
+fig, ax = plt.subplots()
 
-顺序循环原则：修复一部分问题后 → 重构 → 画图 → 对比 → 再修复（自动重复迭代）
+# Plot data
+ax.plot([0, 1, 2, 3], [1, 4, 2, 3], label='Line')
+ax.scatter([0, 1, 2, 3], [2, 3, 1, 4], color='red', label='Points')
+
+# Add labels and title
+ax.set_xlabel('X Axis')
+ax.set_ylabel('Y Axis')
+ax.set_title('Sample Plot')
+ax.legend()
+
+# Save the figure
+fig.savefig('output.png')
+```
+
+## Supported Functions
+
+### Plotting Functions
+
+- `plot()` - Line plot
+- `scatter()` - Scatter plot
+- `bar()` - Bar chart
+- `barh()` - Horizontal bar chart
+- `hist()` - Histogram
+- `pie()` - Pie chart
+- `boxplot()` - Box plot
+- `fill_between()` - Fill between lines
+- `errorbar()` - Error bar plot
+- `stem()` - Stem plot
+- `step()` - Step plot
+- `imshow()` - Image display
+
+### Text Functions
+
+- `text()` - Add text
+- `title()` - Add title
+- `xlabel()` - Add X axis label
+- `ylabel()` - Add Y axis label
+
+### Configuration Functions
+
+- `grid()` - Toggle grid
+- `legend()` - Show legend
+- `xlim()` / `ylim()` - Set axis limits
+- `xticks()` / `yticks()` - Set tick positions
+- `xscale()` / `yscale()` - Set axis scale (linear/log)
+- `use()` - Set backend
+
+### Subplot Functions
+
+- `subplots()` - Create subplot grid
+- `subplot()` - Create single subplot
+- `twinx()` / `twiny()` - Create twin axes
+- `tight_layout()` - Adjust layout
+
+## Font Configuration
+
+rsplotlib supports font customization through `mpl.rcParams`:
+
+```python
+from rsplotlib.pylab import mpl
+
+# Set font family
+mpl.rcParams['font.sans-serif'] = ['PingFang SC', 'Microsoft YaHei', 'DejaVu Sans']
+
+# Set font size
+mpl.rcParams['font.size'] = 12
+```
+
+### Supported Fonts
+
+- **macOS**: Arial, Helvetica, PingFang SC, STHeiti, Hiragino Sans GB
+- **Linux**: DejaVu Sans, Liberation Sans, Noto Sans CJK SC, WenQuanYi Micro Hei
+- **Windows**: Microsoft YaHei, SimHei, SimSun
+
+## Project Structure
+
+```
+rsplotlib/
+├── python/
+│   └── rsplotlib/          # Python wrapper implementation
+│       ├── __init__.py      # Package exports
+│       ├── api.py           # Public API definitions
+│       ├── pyplot.py        # pyplot module (Matplotlib compatible)
+│       ├── pylab.py         # pylab module with mpl.rcParams
+│       ├── _rcparams.py     # rcParams configuration management
+│       └── _font_resolver.py # Font path resolution
+├── src/                     # Rust implementation
+│   ├── lib.rs              # Rust library entry
+│   ├── pyfuncs.rs          # Python-exposed functions
+│   ├── figure.rs           # Figure implementation
+│   ├── axes.rs             # Axes implementation
+│   └── axes_render_elements.rs # Rendering elements
+├── Cargo.toml              # Rust dependencies
+├── pyproject.toml          # Python package configuration
+└── build_wheel.sh          # Build script
+```
+
+## Development Workflow
+
+1. **Fix**: Identify and fix issues based on test cases
+2. **Refactor**: Clean up code, prioritize changes in `python/rsplotlib/`
+3. **Plot**: Generate comparison images using `main.py` or `python/examples.py`
+4. **Compare**: Compare generated PNGs with Matplotlib reference images
+5. **Iterate**: Repeat the cycle based on differences
+
+## Contributing
+
+When submitting a PR, please include:
+
+- Generated example images
+- Description of the issues fixed or improvements made
+
+## License
+
+MIT License
+
+## Acknowledgments
+
+- [plotters](https://github.com/plotters-rs/plotters) - Rust plotting library
+- [Matplotlib](https://matplotlib.org/) - Python plotting library for API reference
