@@ -1,5 +1,6 @@
 """rsplotlib 包顶层导出。建议通过导入自 `rsplotlib.api` 使用公开 API。"""
 
+from .api import *
 from .api import __all__ as _api_all
 from .rsplotlib import register_sans_serif_font
 from . import pyplot, style, gridspec, ticker

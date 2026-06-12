@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyTuple, PyAny, PyInt};
+use pyo3::types::{PyList, PyTuple, PyAny};
 
 use plotters::style::{register_font, FontStyle};
 
@@ -143,11 +143,11 @@ pub fn bar<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, bins=10, density=false, label=None, alpha=0.7, color=None, facecolor=None))]
+#[pyo3(signature = (x, bins=None, density=false, label=None, alpha=0.7, color=None, facecolor=None))]
 pub fn hist<'py>(
     py: Python<'py>,
     x: Bound<'py, PyAny>,
-    bins: usize,
+    bins: Option<Bound<'py, PyAny>>,
     density: bool,
     label: Option<String>,
     alpha: f64,
@@ -155,8 +155,7 @@ pub fn hist<'py>(
     facecolor: Option<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let mut ax = Axes::new();
-    let bins_any = PyInt::new(py, bins as i64).as_any().clone();
-    ax.hist(py, x, Some(bins_any), density, label, alpha, color, facecolor, None, None)?;
+    ax.hist(py, x, bins, density, label, alpha, color, facecolor, None, None)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();

@@ -515,11 +515,26 @@ impl Axes {
         let bins = bins.unwrap_or_else(|| pyo3::types::PyInt::new(py, 10).as_any().clone());
         let (num_bins, custom_edges): (usize, Option<Vec<f64>>) = if let Ok(n) = bins.extract::<usize>() {
             (n, None)
-        } else if let Ok(edges) = bins.extract::<Vec<f64>>() {
+        } else if let Ok(n) = bins.extract::<i64>() {
+            if n <= 0 {
+                return Err(PyValueError::new_err("bins must be positive"));
+            }
+            (n as usize, None)
+        } else if let Ok(edges) = py_to_vec_f64(&bins) {
             if edges.len() < 2 {
                 return Err(PyValueError::new_err("bin_edges must have at least 2 elements"));
             }
             (edges.len() - 1, Some(edges))
+        } else if let Ok(edges) = bins.extract::<Vec<i64>>() {
+            if edges.len() < 2 {
+                return Err(PyValueError::new_err("bin_edges must have at least 2 elements"));
+            }
+            (edges.len() - 1, Some(edges.iter().map(|&x| x as f64).collect()))
+        } else if let Ok(edges) = bins.extract::<Vec<usize>>() {
+            if edges.len() < 2 {
+                return Err(PyValueError::new_err("bin_edges must have at least 2 elements"));
+            }
+            (edges.len() - 1, Some(edges.iter().map(|&x| x as f64).collect()))
         } else {
             return Err(PyValueError::new_err("bins must be an integer or a list of bin edges"));
         };
@@ -663,7 +678,7 @@ impl Axes {
     #[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None))]
     pub fn text(
         &mut self,
-        _py: Python<'_>,
+        py: Python<'_>,
         x: f64,
         y: f64,
         text: Bound<'_, PyAny>,
@@ -677,9 +692,21 @@ impl Axes {
             text.str().map(|s| s.to_string()).unwrap_or_default()
         });
         let col = parse_color(&color.unwrap_or_else(|| "black".to_string()), 0).unwrap_or(RgbColor(0, 0, 0));
-        // family 参数目前用于通过 Python 端的 _font_resolver 注册字体到 plotters。
-        // Rust 端不再做额外处理（因为 plotters 的 sans-serif family 已被全局注册）。
-        let _ = family;
+        // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters。
+        // 这样 ax.text(..., family="Arial Unicode MS") 调用（跳过 pyplot.text 包装器）
+        // 也能正确注册 CJK 字体，确保中文字符有对应字形渲染。
+        if let Some(family_name) = &family {
+            if let Ok(resolver_mod) = py.import("rsplotlib._font_resolver") {
+                if let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (family_name,)) {
+                    if let Ok(Some(path)) = path_obj.extract::<Option<String>>() {
+                        if let Ok(font_data) = std::fs::read(&path) {
+                            let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                            let _ = plotters::style::register_font("sans-serif", FontStyle::Normal, font_ref);
+                        }
+                    }
+                }
+            }
+        }
         self.elements.push(PlotElement::Text {
             x,
             y,
