@@ -29,5 +29,6 @@ Thumbs.db
 # Data / plots
 
 # Environment
+.venv
 .env
 .env.local
