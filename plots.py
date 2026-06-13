@@ -14,7 +14,7 @@ import re
 import time
 import json
 from rsplotlib.ticker import MaxNLocator, MultipleLocator
-# import threading
+import threading
 import math
 from rsplotlib.pylab import mpl
 
@@ -390,7 +390,7 @@ class Reportopp:
             s_upper_limit = [float(i) for i in upper_limit if i or ret_number(i) is not None]
             s_lower_limit = [float(i) for i in lower_limit if i or ret_number(i) is not None]
             test_value_total = []
-            # plot_list = []
+            plot_list = []
             for test_i in self.test_date_list:
                 try:
                     sad = self.data_csv[test_i]
@@ -460,11 +460,10 @@ class Reportopp:
                     if plot_qty == plot_qq and plot_qty >= 2:
                         if lpdet_list == test_index:
                             s = [i for i in reversed(s)]
-                        self.plot_run(x, s, 1.3, self.colar_list[dict_i.index(byshow_value)], '-', '.')
-                        # st = threading.Thread(target=self.plot_run,
-                        #                       args=(x, s, 1.3, self.colar_list[dict_i.index(byshow_value)], '-', '.'))
-                        # st.start()
-                        # plot_list.append(st)
+                        st = threading.Thread(target=self.plot_run,
+                                              args=(x, s, 1.3, self.colar_list[dict_i.index(byshow_value)], '-', '.'))
+                        st.start()
+                        plot_list.append(st)
                     elif plot_qty != plot_qq and plot_qty >= 2:
                         y = []
                         if true_index:
@@ -477,11 +476,10 @@ class Reportopp:
                             true_index.sort()
                             true_index.append(max(true_index) + 1)
                             true_index.remove(0)
-                            self.plot_run(true_index, y, 1.3, self.colar_list[dict_i.index(byshow_value)], '-', '.')
-                            # st = threading.Thread(target=self.plot_run, args=(
-                            #     true_index, y, 1.3, self.colar_list[dict_i.index(byshow_value)], '-', '.'))
-                            # st.start()
-                            # plot_list.append(st)
+                            st = threading.Thread(target=self.plot_run, args=(
+                                true_index, y, 1.3, self.colar_list[dict_i.index(byshow_value)], '-', '.'))
+                            st.start()
+                            plot_list.append(st)
                 else:
                     if s:
                         dis_onliny.setdefault(byshow_value, []).append(s)
@@ -512,6 +510,7 @@ class Reportopp:
                     test_name_list.remove(2)
             max_, min_ = 1, 0
             show_i_1 = []
+
             if len(x) == 1:
                 ss = lower_limit + test_only1 + upper_limit
                 test_only1 = [float(i) for i in ss if is_number(i)]
@@ -660,8 +659,6 @@ class Reportopp:
                 plt.ylim(0, 100)
                 ax5.patch.set_facecolor("#FFFFFF")
                 ax5.text(2, 95, byshow, fontsize=10)
-                if not show_i_1:
-                    show_i_1 = dict_i
                 if len(show_i_1) > 15:
                     show_i_1 = show_i_1[:15]
                 s = []
@@ -997,8 +994,8 @@ class Reportopp:
                 if len(test_name_list) <= 14:
                     for y in range(len(test_name_list), 14):
                         self.ax2.text(1, 85.8 - y * 6.4, "-" * 275, fontsize=8, c="grey")
-            # for thread in plot_list:
-            #     thread.join()
+            for thread in plot_list:
+                thread.join()
             plt.savefig(os.path.join(path_p, f'{plt_idix} {test_name}.png'))
             fig.clf()
             fig.clear()
@@ -1012,14 +1009,14 @@ class Reportopp:
 
 if __name__ == "__main__":
     # freeze_support()
-    versions = "3.1.1(20260613)"
+    versions = "3.0.1(20250107)"
     version(versions)
     select_chart()
     opp2 = Reportopp()
     read_by_chart = read_by_chart()
     while True:
-        # bychart_ = input(f" 第一步、请选择show类型, 输入对应的数字, 并回车 ({read_by_chart[1][1]})\n ")
-        bychart_ = "1"
+        bychart_ = input(f" 第一步、请选择show类型, 输入对应的数字, 并回车 ({read_by_chart[1][1]})\n ")
+        # bychart_ = "1"
         try:
             if 0 < int(bychart_) < 6:
                 by_ = read_by_chart[0][int(bychart_)]
@@ -1039,10 +1036,8 @@ if __name__ == "__main__":
                 print(" %s 输入错误, 请输入对应数字" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 continue
     print(" 第二步、请拉入文件夹或 csv 文件")
-    # while True:
-    if 1:
-        # path_s = input(" =>").rstrip()
-        path_s = "/Users/user/Desktop/N237S/N237S NB.csv"
+    while True:
+        path_s = input(" =>").rstrip()
         if "\\" in path_s:
             path_ = path_s.replace("\\", "")
         elif path_s:
