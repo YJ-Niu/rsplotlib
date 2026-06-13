@@ -31,7 +31,7 @@ main*.py
 out/
 wheelhouse/
 N237S NB.csv
-plots.py
+plots*.py
 # Environment
 .venv
 .env
