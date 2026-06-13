@@ -73,17 +73,35 @@ where
                 let col = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
                 let rgb = to_plotters_color(col);
                 if x.len() >= 1 && x.len() == y.len() {
-                    let points: Vec<(f64, f64)> = x.iter().zip(y.iter())
-                        .filter_map(|(xv, yv)| match (xv, yv) {
-                            (Some(xv), Some(yv)) => {
-                                let txv = tx(*xv);
-                                let tyv = ty(*yv);
-                                if txv.is_finite() && tyv.is_finite() { Some((txv, tyv)) } else { None }
+                    // 构建连续有效数据段（被 None 分隔）
+                    let mut segments: Vec<Vec<(f64, f64)>> = Vec::new();
+                    {
+                        let mut current: Vec<(f64, f64)> = Vec::new();
+                        for (xv, yv) in x.iter().zip(y.iter()) {
+                            match (xv, yv) {
+                                (Some(xv), Some(yv)) => {
+                                    let txv = tx(*xv);
+                                    let tyv = ty(*yv);
+                                    if txv.is_finite() && tyv.is_finite() {
+                                        current.push((txv, tyv));
+                                        continue;
+                                    }
+                                }
+                                _ => {}
                             }
-                            _ => None,
-                        })
-                        .collect();
-                    if points.len() >= 2 && linestyle != " " {
+                            // 遇到 None 或不合法值，结束当前段
+                            if current.len() >= 2 {
+                                segments.push(std::mem::take(&mut current));
+                            } else {
+                                current.clear();
+                            }
+                        }
+                        if current.len() >= 2 {
+                            segments.push(current);
+                        }
+                    }
+                    if linestyle != " " {
+                        for points in &segments {
                         // 将 linewidth 从 points 转换为像素：1pt = dpi/72 px，dpi = 72 * font_scale
                         // matplotlib 通过 AA 在 0.5-1.5pt 量级产生柔和的 1-3 像素宽线。
                         // plotters 无 AA，使用四舍五入以获得接近 mpl 的视觉粗细。
@@ -296,6 +314,7 @@ where
                                 draw_solid_caps(chart, &points, &rgb, solid_capstyle, *linewidth, font_scale,
                                                 x_min, x_max, y_min, y_max, cap_lw_px, cap_y_shift)?;
                             }
+                        }
                         }
                     }
                 }

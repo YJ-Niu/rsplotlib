@@ -26,7 +26,7 @@ fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
 }
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<Option<f64>>
-/// 支持 None 值
+/// 支持 None 值和空字符串 ""（均视为无值）
 fn py_to_vec_option_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Option<f64>>> {
     // 先尝试直接 extract
     if let Ok(v) = obj.extract::<Vec<Option<f64>>>() {
@@ -45,6 +45,18 @@ fn py_to_vec_option_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Option<f64>>> {
             result.push(None);
         } else if let Ok(v) = item.extract::<f64>() {
             result.push(Some(v));
+        } else if let Ok(s) = item.extract::<String>() {
+            // 空字符串 "" 视为无值
+            if s.is_empty() {
+                result.push(None);
+            } else {
+                // 尝试将字符串解析为浮点数
+                if let Ok(v) = s.parse::<f64>() {
+                    result.push(Some(v));
+                } else {
+                    result.push(None);
+                }
+            }
         } else {
             return Err(PyValueError::new_err("Cannot convert element to f64"));
         }
