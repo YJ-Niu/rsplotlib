@@ -1,4 +1,6 @@
 use std::sync::Mutex;
+use std::io::BufWriter;
+use std::fs::File;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -134,7 +136,40 @@ impl Figure {
 
     fn savefig(&self, py: Python, filename: &str) -> PyResult<()> {
         let font_scale = self.dpi / 72.0;
-        if filename.ends_with(".png") || filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
+        if filename.ends_with(".png") {
+            // 渲染到 RGB 缓冲区
+            let buf_size = (self.width as usize) * (self.height as usize) * 3;
+            let mut buffer = vec![0u8; buf_size];
+            let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(
+                &mut buffer,
+                (self.width, self.height),
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
+            self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
+
+            // 写入 PNG 并嵌入 DPI 信息（pHYs chunk）
+            let file = File::create(filename)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
+            let ref mut w = BufWriter::new(file);
+            let mut encoder = png::Encoder::new(w, self.width, self.height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            // 最高压缩级别 + 自适应滤波，使文件大小与 matplotlib 一致
+            encoder.set_compression(png::Compression::Best);
+            encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
+            // 设置 DPI：png 使用 像素/米（1 英寸 = 0.0254 米）
+            let ppm = (self.dpi / 0.0254).round() as u32;
+            encoder.set_pixel_dims(Some(png::PixelDimensions {
+                xppu: ppm,
+                yppu: ppm,
+                unit: png::Unit::Meter,
+            }));
+            let mut writer = encoder.write_header()
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
+            writer.write_image_data(&buffer)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+            Ok(())
+        } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
             let backend = BitMapBackend::new(filename, (self.width, self.height));
             self.render_to_backend(py, backend, self.width, self.height, true, font_scale)
         } else {
