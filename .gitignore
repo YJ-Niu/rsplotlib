@@ -28,7 +28,8 @@ Thumbs.db
 
 # Data / plots
 main*.py
-
+out/
+plots.py
 # Environment
 .venv
 .env
