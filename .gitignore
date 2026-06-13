@@ -29,6 +29,7 @@ Thumbs.db
 # Data / plots
 main*.py
 out/
+wheelhouse/
 N237S NB.csv
 # Environment
 .venv
