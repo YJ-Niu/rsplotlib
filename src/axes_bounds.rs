@@ -297,5 +297,13 @@ pub fn compute_bounds(
         y_max += y_pad;
     }
 
+    // 安全防护：确保 min <= max，避免 plotters 因反转范围而卡死
+    if x_min > x_max {
+        std::mem::swap(&mut x_min, &mut x_max);
+    }
+    if y_min > y_max {
+        std::mem::swap(&mut y_min, &mut y_max);
+    }
+
     ((x_min, x_max), (y_min, y_max))
 }

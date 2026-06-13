@@ -1,7 +1,6 @@
 use std::sync::Mutex;
 use std::io::BufWriter;
 use std::fs::File;
-
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
