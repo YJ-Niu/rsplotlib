@@ -585,13 +585,35 @@ impl Axes {
                 return vec![0.0; num_bins];
             }
             let mut counts = vec![0usize; num_bins];
-            for &val in dataset {
-                let mut bin = ((val - global_min) / bin_width).floor() as usize;
-                if bin >= num_bins { bin = num_bins - 1; }
-                counts[bin] += 1;
+            if let Some(ref edges) = custom_edges {
+                // 使用自定义 edges 进行分箱，与渲染代码（axes_render_elements.rs）一致
+                let edge_min = edges[0];
+                let edge_max = edges[edges.len() - 1];
+                for &val in dataset {
+                    if val < edge_min || val > edge_max { continue; }
+                    let bin = edges.partition_point(|&e| e <= val).saturating_sub(1);
+                    if bin < num_bins {
+                        counts[bin] += 1;
+                    }
+                }
+                let total = dataset.len() as f64;
+                if density {
+                    counts.iter().enumerate().map(|(i, &c)| {
+                        let bw = edges[i + 1] - edges[i];
+                        if bw > 0.0 { c as f64 / (total * bw) } else { 0.0 }
+                    }).collect()
+                } else {
+                    counts.iter().map(|&c| c as f64).collect()
+                }
+            } else {
+                for &val in dataset {
+                    let mut bin = ((val - global_min) / bin_width).floor() as usize;
+                    if bin >= num_bins { bin = num_bins - 1; }
+                    counts[bin] += 1;
+                }
+                let total = dataset.len() as f64;
+                counts.iter().map(|&c| if density { c as f64 / (total * bin_width) } else { c as f64 }).collect()
             }
-            let total = dataset.len() as f64;
-            counts.iter().map(|&c| if density { c as f64 / (total * bin_width) } else { c as f64 }).collect()
         }).collect();
         let bin_edges: Vec<f64> = if let Some(ref edges) = custom_edges {
             edges.clone()
