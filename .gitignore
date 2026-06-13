@@ -29,7 +29,7 @@ Thumbs.db
 # Data / plots
 main*.py
 out/
-plots.py
+N237S NB.csv
 # Environment
 .venv
 .env

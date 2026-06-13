@@ -124,7 +124,12 @@ pub fn compute_bounds(
                     let d_min = dataset.iter().cloned().fold(f64::INFINITY, f64::min);
                     let d_max = dataset.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                     let d_range = d_max - d_min;
-                    if d_range < 1e-10 { continue; }
+                    if d_range < 1e-10 {
+                        // 所有值相同 -> 算一个单柱，计数为 dataset 长度
+                        let dc = if *density { dataset.len() as f64 / total } else { dataset.len() as f64 };
+                        if dc > max_count { max_count = dc; }
+                        continue;
+                    }
                     let bw = d_range / *bins as f64;
                     let mut counts = vec![0usize; *bins];
                     for &val in dataset {

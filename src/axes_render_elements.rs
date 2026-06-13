@@ -398,7 +398,7 @@ where
                     ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw barh: {}", e)))?;
                 }
             }
-            PlotElement::Hist { data_all, bins, density, histtype, alpha, colors, color_idx, bin_edges, label: _ } => {
+            PlotElement::Hist { data_all, bins: num_bins_user, density, histtype, alpha, colors, color_idx, bin_edges, label: _ } => {
                 if data_all.is_empty() { continue; }
                 let all_data: Vec<f64> = data_all.iter().flatten().cloned().collect();
                 if all_data.is_empty() { continue; }
@@ -410,13 +410,16 @@ where
                     (mn, mx)
                 };
                 let global_range = global_max - global_min;
-                if global_range < 1e-10 { continue; }
-                let bin_edges_list: Vec<f64> = if let Some(edges) = bin_edges {
+                let bin_edges_list: Vec<f64> = if global_range < 1e-10 {
+                    // 所有值相同 -> 在值两侧各扩 0.5 形成一个单柱
+                    vec![global_min - 0.5, global_min + 0.5]
+                } else if let Some(edges) = bin_edges {
                     edges.clone()
                 } else {
-                    let bw = global_range / *bins as f64;
-                    (0..=*bins).map(|i| global_min + i as f64 * bw).collect()
+                    let bw = global_range / *num_bins_user as f64;
+                    (0..=*num_bins_user).map(|i| global_min + i as f64 * bw).collect()
                 };
+                let effective_bins = bin_edges_list.len() - 1;
                 let total_all = all_data.len() as f64;
                 for (di, dataset) in data_all.iter().enumerate() {
                     if dataset.is_empty() { continue; }
@@ -425,11 +428,11 @@ where
                     let rgb = to_plotters_color(col);
                     let fill_style: ShapeStyle = rgb.mix(*alpha).filled().into();
                     let outline_style: ShapeStyle = rgb.mix(*alpha).stroke_width(1).into();
-                    let mut counts = vec![0usize; *bins];
+                    let mut counts = vec![0usize; effective_bins];
                     for &val in dataset {
                         if val < global_min || val > global_max { continue; }
                         let bin = bin_edges_list.partition_point(|&e| e <= val) - 1;
-                        if bin < *bins {
+                        if bin < effective_bins {
                             counts[bin] += 1;
                         }
                     }
