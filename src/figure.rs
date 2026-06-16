@@ -69,11 +69,13 @@ impl Figure {
         }
     }
 
+    #[doc = "设置图形像素尺寸"]
     fn set_size(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
     }
 
+    #[doc = "设置图形分辨率 (每英寸点数)"]
     fn set_dpi(&mut self, dpi: f64) {
         self.dpi = dpi;
     }
@@ -82,31 +84,39 @@ impl Figure {
         self.suptitle = text;
     }
 
-    #[pyo3(signature = (left=None, right=None, bottom=None, top=None, _wspace=None, _hspace=None))]
-    fn subplots_adjust(&mut self, left: Option<f64>, right: Option<f64>, bottom: Option<f64>, top: Option<f64>, _wspace: Option<f64>, _hspace: Option<f64>) {
+    #[allow(unused_variables)]
+    #[pyo3(signature = (left=None, right=None, bottom=None, top=None, wspace=None, hspace=None))]
+    fn subplots_adjust(&mut self, left: Option<f64>, right: Option<f64>, bottom: Option<f64>, top: Option<f64>, wspace: Option<f64>, hspace: Option<f64>) {
         if let Some(v) = left { self.subplot_left = v; }
         if let Some(v) = right { self.subplot_right = v; }
         if let Some(v) = bottom { self.subplot_bottom = v; }
         if let Some(v) = top { self.subplot_top = v; }
     }
 
+    #[doc = "调整子图间距"]
     fn tight_layout(&mut self) {
     }
 
+    #[doc = "设置图形背景颜色"]
     fn set_facecolor(&mut self, color: &str) {
         self.facecolor = color.to_string();
     }
 
+    #[doc = "清除所有子图"]
     fn clear(&mut self) {
         self.axes_list.clear();
         self.axes_positions.clear();
     }
 
+    #[doc = "清除所有子图"]
     fn clf(&mut self) {
         self.axes_list.clear();
         self.axes_positions.clear();
     }
 
+    #[doc = "添加子图"]
+    #[pyo3(signature = (spec))]
+    #[allow(unused_variables)]
     fn add_subplot(&mut self, py: Python, spec: &Bound<'_, PyAny>) -> PyResult<Py<Axes>> {
         let (left, right, bottom, top) = if let Ok(_) = spec.getattr("rowStart") {
             let num_rows: f64 = spec.getattr("numRows")?.extract::<i32>().map(|v| v as f64).unwrap_or(100.0);
@@ -133,10 +143,12 @@ impl Figure {
         Ok(ax_py)
     }
 
-    fn savefig(&self, py: Python, filename: &str) -> PyResult<()> {
-        let font_scale = self.dpi / 72.0;
+    #[doc = "保存图形到文件\n\n参数:\n    filename: 文件名, 支持 .png/.jpg/.svg\n    dpi: 可选分辨率, 默认与创建时一致"]
+    #[pyo3(signature = (filename, dpi=None))]
+    fn savefig(&self, py: Python, filename: &str, dpi: Option<f64>) -> PyResult<()> {
+        let used_dpi = dpi.unwrap_or(self.dpi);
+        let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            // 渲染到 RGB 缓冲区
             let buf_size = (self.width as usize) * (self.height as usize) * 3;
             let mut buffer = vec![0u8; buf_size];
             let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(
@@ -146,18 +158,16 @@ impl Figure {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
             self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
 
-            // 写入 PNG 并嵌入 DPI 信息（pHYs chunk）
+            // 写入 PNG 并嵌入 DPI 信息
             let file = File::create(filename)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
             let ref mut w = BufWriter::new(file);
             let mut encoder = png::Encoder::new(w, self.width, self.height);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
-            // 最高压缩级别 + 自适应滤波，使文件大小与 matplotlib 一致
             encoder.set_compression(png::Compression::Best);
             encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
-            // 设置 DPI：png 使用 像素/米（1 英寸 = 0.0254 米）
-            let ppm = (self.dpi / 0.0254).round() as u32;
+            let ppm = (used_dpi / 0.0254).round() as u32;
             encoder.set_pixel_dims(Some(png::PixelDimensions {
                 xppu: ppm,
                 yppu: ppm,
@@ -177,8 +187,8 @@ impl Figure {
             self.render_to_backend(py, backend, self.width, self.height, false, font_scale)?;
             // 后处理：设置SVG物理尺寸为英寸单位，与matplotlib一致
             if let Ok(content) = std::fs::read_to_string(filename) {
-                let width_in = self.width as f64 / self.dpi;
-                let height_in = self.height as f64 / self.dpi;
+                let width_in = self.width as f64 / used_dpi;
+                let height_in = self.height as f64 / used_dpi;
                 // plotters SVGBackend 输出 width="pixel_width" height="pixel_height"
                 // 替换为英寸单位
                 let content = content

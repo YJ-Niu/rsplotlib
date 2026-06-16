@@ -93,14 +93,20 @@ pub fn legend(py: Python, loc: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
-pub fn xlim(py: Python, left: f64, right: f64) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_xlim(left, right);
+#[pyo3(signature = (left=None, right=None))]
+pub fn xlim(py: Python, left: Option<f64>, right: Option<f64>) -> PyResult<()> {
+    if let (Some(lo), Some(hi)) = (left, right) {
+        get_current_axes(py)?.borrow_mut(py).set_xlim(Some(lo), Some(hi), None, None, None, true, None);
+    }
     Ok(())
 }
 
 #[pyfunction]
-pub fn ylim(py: Python, bottom: f64, top: f64) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_ylim(bottom, top);
+#[pyo3(signature = (bottom=None, top=None))]
+pub fn ylim(py: Python, bottom: Option<f64>, top: Option<f64>) -> PyResult<()> {
+    if let (Some(lo), Some(hi)) = (bottom, top) {
+        get_current_axes(py)?.borrow_mut(py).set_ylim(Some(lo), Some(hi), true, None);
+    }
     Ok(())
 }
 
@@ -118,6 +124,27 @@ pub fn scatter<'a>(
 ) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
     ax.scatter(py, x, y, s, c, marker, label, alpha)?;
+    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
+    let fig_obj = fig_py.bind(py).as_any().clone();
+    let ax_obj = ax_py.bind(py).as_any().clone();
+    PyTuple::new(py, [fig_obj, ax_obj])
+}
+
+#[pyfunction]
+#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0))]
+#[allow(clippy::too_many_arguments)]
+pub fn scatter_multi<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    y: Bound<'a, PyAny>,
+    s: Option<Bound<'a, PyAny>>,
+    c: Option<Bound<'a, PyAny>>,
+    marker: &'a str,
+    label: Option<String>,
+    alpha: f64,
+) -> PyResult<Bound<'a, PyTuple>> {
+    let mut ax = Axes::new();
+    ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -143,7 +170,7 @@ pub fn bar<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, bins=None, density=false, label=None, alpha=0.7, color=None, facecolor=None))]
+#[pyo3(signature = (x, bins=None, density=false, label=None, alpha=0.7, color=None, facecolor=None, align=None, histtype=None))]
 pub fn hist<'py>(
     py: Python<'py>,
     x: Bound<'py, PyAny>,
@@ -153,9 +180,11 @@ pub fn hist<'py>(
     alpha: f64,
     color: Option<Bound<'py, PyAny>>,
     facecolor: Option<Bound<'py, PyAny>>,
+    align: Option<String>,
+    histtype: Option<String>,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let mut ax = Axes::new();
-    ax.hist(py, x, bins, density, label, alpha, color, facecolor, None, None)?;
+    ax.hist(py, x, bins, density, label, alpha, color, facecolor, align, histtype)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -175,6 +204,24 @@ pub fn fill_between<'a>(
 ) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
     ax.fill_between(py, x, y1, y2, color, alpha, label)?;
+    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
+    let fig_obj = fig_py.bind(py).as_any().clone();
+    let ax_obj = ax_py.bind(py).as_any().clone();
+    PyTuple::new(py, [fig_obj, ax_obj])
+}
+
+#[pyfunction]
+#[pyo3(signature = (x, *args, labels=None, colors=None, alpha=1.0))]
+pub fn stackplot<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    args: &Bound<'a, PyTuple>,
+    labels: Option<Vec<String>>,
+    colors: Option<Vec<String>>,
+    alpha: f64,
+) -> PyResult<Bound<'a, PyTuple>> {
+    let mut ax = Axes::new();
+    ax.stackplot(py, x, args, labels, colors, alpha)?;
     let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
     let fig_obj = fig_py.bind(py).as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
@@ -322,7 +369,7 @@ pub fn text(
 }
 
 #[pyfunction]
-#[pyo3(signature = (y=None, color=None, linestyle=None, linewidth=None))]
+#[pyo3(signature = (y, color=None, linestyle=None, linewidth=None))]
 pub fn axhline(
     py: Python,
     y: Option<f64>,
@@ -335,7 +382,7 @@ pub fn axhline(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x=None, color=None, linestyle=None, linewidth=None))]
+#[pyo3(signature = (x, color=None, linestyle=None, linewidth=None))]
 pub fn axvline(
     py: Python,
     x: Option<f64>,
@@ -344,6 +391,32 @@ pub fn axvline(
     linewidth: Option<f64>,
 ) -> PyResult<()> {
     get_current_axes(py)?.borrow_mut(py).axvline(x, color, linestyle, linewidth);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (y, color=None, linestyle=None, linewidth=None))]
+pub fn hlines(
+    py: Python,
+    y: Bound<'_, PyAny>,
+    color: Option<String>,
+    linestyle: Option<String>,
+    linewidth: Option<f64>,
+) -> PyResult<()> {
+    get_current_axes(py)?.borrow_mut(py).hlines(py, y, color, linestyle, linewidth)?;
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (x, color=None, linestyle=None, linewidth=None))]
+pub fn vlines(
+    py: Python,
+    x: Bound<'_, PyAny>,
+    color: Option<String>,
+    linestyle: Option<String>,
+    linewidth: Option<f64>,
+) -> PyResult<()> {
+    get_current_axes(py)?.borrow_mut(py).vlines(py, x, color, linestyle, linewidth)?;
     Ok(())
 }
 
@@ -490,7 +563,7 @@ pub fn subplots(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None))]
+#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, solid_capstyle=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn plot<'a>(
     py: Python<'a>,
@@ -501,9 +574,15 @@ pub fn plot<'a>(
     linestyle: Option<String>,
     marker: Option<String>,
     linewidth: Option<f64>,
+    lw: Option<f64>,
+    c: Option<String>,
+    ls: Option<String>,
+    markersize: Option<f64>,
+    markeredgewidth: Option<f64>,
+    solid_capstyle: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     let mut ax = Axes::new();
-    ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), None, None, None, None, None, None)?;
+    ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
 
     let mut fig = Figure::new();
     fig.axes_list.clear();
@@ -525,9 +604,13 @@ pub fn plot<'a>(
 }
 
 #[pyfunction]
-pub fn savefig(py: Python, filename: &str) -> PyResult<()> {
+#[pyo3(signature = (filename, dpi=None))]
+pub fn savefig(py: Python, filename: &str, dpi: Option<f64>) -> PyResult<()> {
     let fig = get_current_figure(py)?;
-    fig.call_method1("savefig", (filename,))?;
+    match dpi {
+        Some(d) => fig.call_method1("savefig", (filename, d))?,
+        None => fig.call_method1("savefig", (filename,))?,
+    };
     Ok(())
 }
 
@@ -751,5 +834,26 @@ pub fn minorticks_off(py: Python<'_>) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
     ax_ref.minor_grid_visible = false;
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (y1, y2, color=None, alpha=0.3))]
+pub fn axhspan(py: Python<'_>, y1: f64, y2: f64, color: Option<String>, alpha: f64) -> PyResult<()> {
+    get_current_axes(py)?.borrow_mut(py).axhspan(y1, y2, color, alpha);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (x1, x2, color=None, alpha=0.3))]
+pub fn axvspan(py: Python<'_>, x1: f64, x2: f64, color: Option<String>, alpha: f64) -> PyResult<()> {
+    get_current_axes(py)?.borrow_mut(py).axvspan(x1, x2, color, alpha);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (xy1, xy2, color=None, linestyle=None, linewidth=None))]
+pub fn axline(py: Python<'_>, xy1: (f64, f64), xy2: (f64, f64), color: Option<String>, linestyle: Option<String>, linewidth: Option<f64>) -> PyResult<()> {
+    get_current_axes(py)?.borrow_mut(py).axline(xy1, xy2, color, linestyle, linewidth);
     Ok(())
 }

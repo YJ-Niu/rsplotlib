@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyAny};
+use pyo3::types::{PyList, PyAny, PyTuple};
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
@@ -144,6 +144,8 @@ pub struct Axes {
     pub xaxis_minor_locator: Option<Py<PyAny>>,
     pub yaxis_major_locator: Option<Py<PyAny>>,
     pub yaxis_minor_locator: Option<Py<PyAny>>,
+    pub x_axis_inverted: bool,
+    pub y_axis_inverted: bool,
 }
 
 impl Clone for Axes {
@@ -197,6 +199,8 @@ impl Clone for Axes {
             xaxis_minor_locator: None,
             yaxis_major_locator: None,
             yaxis_minor_locator: None,
+            x_axis_inverted: self.x_axis_inverted,
+            y_axis_inverted: self.y_axis_inverted,
         }
     }
 }
@@ -327,6 +331,8 @@ impl Axes {
             xaxis_minor_locator: None,
             yaxis_major_locator: None,
             yaxis_minor_locator: None,
+            x_axis_inverted: false,
+            y_axis_inverted: false,
         }
     }
 
@@ -701,12 +707,69 @@ impl Axes {
         }
     }
 
-    pub fn set_xlim(&mut self, left: f64, right: f64) {
-        self.xlim = Some((left, right));
+    #[pyo3(signature = (left=None, right=None, _auto=None, xmin=None, xmax=None, emit=true, auto=None))]
+    pub fn set_xlim(
+        &mut self,
+        left: Option<f64>,
+        right: Option<f64>,
+        _auto: Option<bool>,
+        xmin: Option<f64>,
+        xmax: Option<f64>,
+        emit: bool,
+        auto: Option<bool>,
+    ) {
+        let lo = left.or(xmin);
+        let hi = right.or(xmax);
+        if let (Some(lo), Some(hi)) = (lo, hi) {
+            self.xlim = Some((lo, hi));
+        }
+        let _ = (emit, auto);
     }
 
-    pub fn set_ylim(&mut self, bottom: f64, top: f64) {
-        self.ylim = Some((bottom, top));
+    /// 反转 x 轴方向（matplotlib 兼容）
+    pub fn invert_xaxis(&mut self) {
+        self.x_axis_inverted = !self.x_axis_inverted;
+    }
+
+    /// 反转 y 轴方向（matplotlib 兼容）
+    pub fn invert_yaxis(&mut self) {
+        self.y_axis_inverted = !self.y_axis_inverted;
+    }
+
+    /// 获取 x 轴范围
+    pub fn get_xlim(&self) -> PyResult<(f64, f64)> {
+        match self.xlim {
+            Some((lo, hi)) => Ok((lo, hi)),
+            None => {
+                let ((x_min, x_max), _) = self.compute_bounds();
+                Ok((x_min, x_max))
+            }
+        }
+    }
+
+    /// 获取 y 轴范围
+    pub fn get_ylim(&self) -> PyResult<(f64, f64)> {
+        match self.ylim {
+            Some((lo, hi)) => Ok((lo, hi)),
+            None => {
+                let (_, (y_min, y_max)) = self.compute_bounds();
+                Ok((y_min, y_max))
+            }
+        }
+    }
+
+    #[pyo3(signature = (bottom=None, top=None, emit=true, auto=None))]
+    pub fn set_ylim(
+        &mut self,
+        bottom: Option<f64>,
+        top: Option<f64>,
+        emit: bool,
+        auto: Option<bool>,
+    ) {
+        if let (Some(lo), Some(hi)) = (bottom, top) {
+            self.ylim = Some((lo, hi));
+        }
+        let _ = (emit, auto);
     }
 
     #[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None))]
@@ -752,6 +815,8 @@ impl Axes {
         });
     }
 
+    #[doc = "绘制水平参考线\n\n参数:\n    y: y 坐标\n    color: 颜色 (可选)\n    linestyle: 线型 ('-', '--', ':', '-.', 可选)\n    linewidth: 线宽 (可选)"]
+    #[pyo3(signature = (y=None, color=None, linestyle=None, linewidth=None))]
     pub fn axhline(
         &mut self,
         y: Option<f64>,
@@ -770,6 +835,8 @@ impl Axes {
         });
     }
 
+    #[doc = "绘制垂直参考线\n\n参数:\n    x: x 坐标\n    color: 颜色 (可选)\n    linestyle: 线型 (可选)\n    linewidth: 线宽 (可选)"]
+    #[pyo3(signature = (x=None, color=None, linestyle=None, linewidth=None))]
     pub fn axvline(
         &mut self,
         x: Option<f64>,
@@ -786,6 +853,64 @@ impl Axes {
             linewidth: linewidth.unwrap_or(1.0),
             color_idx: idx,
         });
+    }
+
+    #[doc = "在指定 y 位置绘制多条水平线段 (Rust 层批量实现)"]
+    #[pyo3(signature = (y, color=None, linestyle=None, linewidth=None))]
+    pub fn hlines(
+        &mut self,
+        py: Python<'_>,
+        y: Bound<'_, PyAny>,
+        color: Option<String>,
+        linestyle: Option<String>,
+        linewidth: Option<f64>,
+    ) -> PyResult<()> {
+        let ys = py_to_vec_f64(&y)?;
+        let color_s = color.unwrap_or_default();
+        let ls_s = linestyle.unwrap_or_else(|| "-".to_string());
+        let lw = linewidth.unwrap_or(1.0);
+        for &yv in &ys {
+            let idx = self.element_count;
+            self.element_count += 1;
+            self.elements.push(PlotElement::HLine {
+                y: yv,
+                color: color_s.clone(),
+                linestyle: ls_s.clone(),
+                linewidth: lw,
+                color_idx: idx,
+            });
+        }
+        let _ = py;
+        Ok(())
+    }
+
+    #[doc = "在指定 x 位置绘制多条垂直线段 (Rust 层批量实现)"]
+    #[pyo3(signature = (x, color=None, linestyle=None, linewidth=None))]
+    pub fn vlines(
+        &mut self,
+        py: Python<'_>,
+        x: Bound<'_, PyAny>,
+        color: Option<String>,
+        linestyle: Option<String>,
+        linewidth: Option<f64>,
+    ) -> PyResult<()> {
+        let xs = py_to_vec_f64(&x)?;
+        let color_s = color.unwrap_or_default();
+        let ls_s = linestyle.unwrap_or_else(|| "-".to_string());
+        let lw = linewidth.unwrap_or(1.0);
+        for &xv in &xs {
+            let idx = self.element_count;
+            self.element_count += 1;
+            self.elements.push(PlotElement::VLine {
+                x: xv,
+                color: color_s.clone(),
+                linestyle: ls_s.clone(),
+                linewidth: lw,
+                color_idx: idx,
+            });
+        }
+        let _ = py;
+        Ok(())
     }
 
     #[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0))]
@@ -845,6 +970,49 @@ impl Axes {
         if let Some(lbl) = label {
             let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
             self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+        }
+        Ok(())
+    }
+
+    #[pyo3(signature = (x, *args, labels=None, colors=None, alpha=1.0))]
+    pub fn stackplot(
+        &mut self,
+        _py: Python<'_>,
+        x: Bound<'_, PyAny>,
+        args: &Bound<'_, PyTuple>,
+        labels: Option<Vec<String>>,
+        colors: Option<Vec<String>>,
+        alpha: f64,
+    ) -> PyResult<()> {
+        let x_vec = py_to_vec_f64(&x)?;
+        // 从 *args 收集 y 数据：每个 arg 应该是 Vec<f64>
+        let mut y_series: Vec<Vec<f64>> = Vec::new();
+        for arg in args.iter() {
+            if let Ok(single) = arg.extract::<Vec<f64>>() {
+                y_series.push(single);
+            } else if let Ok(list_of_lists) = arg.extract::<Vec<Vec<f64>>>() {
+                y_series.extend(list_of_lists);
+            }
+        }
+
+        let idx = self.element_count;
+        self.element_count += 1;
+        self.elements.push(PlotElement::Stack {
+            x: x_vec,
+            y_series,
+            labels: labels.clone(),
+            colors: colors.clone(),
+            alpha,
+        });
+        if let Some(lbls) = labels {
+            for (i, lbl) in lbls.into_iter().enumerate() {
+                let col = parse_color(
+                    colors.as_ref().and_then(|c| c.get(i)).map(|s| s.as_str()).unwrap_or(""),
+                    idx,
+                )
+                .unwrap_or_else(|_| default_color(idx + i));
+                self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+            }
         }
         Ok(())
     }
@@ -974,7 +1142,8 @@ impl Axes {
         Ok(())
     }
 
-    #[pyo3(signature = (text, xy, xytext=None, fontsize=12.0, color="black"))]
+    #[doc = "添加带箭头的文本标注 (由 Rust 层实现)\n\n参数:\n    text: 标注文本\n    xy: 被标注点的坐标 (x, y)\n    xytext: 文本放置位置, 若提供则自动绘制箭头到 xy\n    fontsize: 字体大小 (默认 12.0)\n    color: 颜色\n    arrowprops: 箭头属性字典 (可选)\n    arrowstyle: 箭头样式 (可选)\n    arrowsize: 箭头大小 (默认 1.0)"]
+    #[pyo3(signature = (text, xy, xytext=None, fontsize=12.0, color="black", arrowprops=None, arrowstyle=None, arrowsize=1.0))]
     pub fn annotate(
         &mut self,
         text: &str,
@@ -982,13 +1151,114 @@ impl Axes {
         xytext: Option<(f64, f64)>,
         fontsize: f64,
         color: &str,
+        arrowprops: Option<Bound<'_, PyAny>>,
+        arrowstyle: Option<String>,
+        arrowsize: f64,
     ) {
+        // 判断是否需要绘制箭头
+        let needs_arrow = xytext.is_some();
         self.elements.push(PlotElement::Annotate {
             text: text.to_string(),
             xy,
             xytext,
             fontsize,
             color: color.to_string(),
+        });
+        // 如果有 xytext，绘制一条箭头线从 xy 指向 xytext
+        if needs_arrow {
+            let text_pos = xytext.unwrap();
+            self.elements.push(PlotElement::Arrow {
+                x1: text_pos.0,
+                y1: text_pos.1,
+                x2: xy.0,
+                y2: xy.1,
+                color: color.to_string(),
+                linewidth: 1.0 * arrowsize,
+                head_size: 8.0 * arrowsize,
+            });
+            // 忽略 arrowprops dict（简单实现即可）
+            let _ = arrowprops;
+            let _ = arrowstyle;
+        }
+    }
+
+    #[doc = "散点图 (支持每个点独立颜色和大小, Rust 层批量实现)\n\n参数:\n    x: x 坐标列表\n    y: y 坐标列表\n    s: 每个点的大小 (列表), 或 None 用默认\n    c: 每个点的颜色 (列表), 或 None 用默认\n    marker: 标记形状 ('o', 's', '^', 'D', '*', 'x', '+', 'v', '<', '>')\n    label: 图例标签\n    alpha: 透明度 (0.0-1.0)"]
+    #[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn scatter_multi(
+        &mut self,
+        _py: Python<'_>,
+        x: Bound<'_, PyAny>,
+        y: Bound<'_, PyAny>,
+        s: Option<Bound<'_, PyAny>>,
+        c: Option<Bound<'_, PyAny>>,
+        marker: &str,
+        label: Option<String>,
+        alpha: f64,
+    ) -> PyResult<()> {
+        let x_vec = py_to_vec_f64(&x)?;
+        let y_vec = py_to_vec_f64(&y)?;
+        let idx = self.element_count;
+        self.element_count += 1;
+
+        let s_list: Option<Vec<f64>> = match s {
+            Some(v) => Some(py_to_vec_f64(&v)?),
+            None => None,
+        };
+        let c_list: Option<Vec<String>> = match c {
+            Some(v) => {
+                if let Ok(list) = v.extract::<Vec<String>>() {
+                    Some(list)
+                } else if let Ok(single) = v.extract::<String>() {
+                    Some(vec![single])
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+
+        self.elements.push(PlotElement::ScatterMulti {
+            x: x_vec,
+            y: y_vec,
+            s_list,
+            c_list,
+            marker: marker.to_string(),
+            label,
+            alpha,
+            color_idx: idx,
+        });
+        Ok(())
+    }
+
+    #[doc = "绘制水平区间填充 (在 y 方向高亮 y1 到 y2 的水平带)\n\n参数:\n    y1: y 轴下限\n    y2: y 轴上限\n    color: 填充颜色\n    alpha: 透明度 (0.0-1.0, 默认 0.3)"]
+    #[pyo3(signature = (y1, y2, color=None, alpha=0.3))]
+    pub fn axhspan(&mut self, y1: f64, y2: f64, color: Option<String>, alpha: f64) {
+        self.elements.push(PlotElement::HSpan {
+            y1, y2,
+            color: color.unwrap_or_default(),
+            alpha,
+        });
+    }
+
+    #[doc = "绘制垂直区间填充 (在 x 方向高亮 x1 到 x2 的垂直带)\n\n参数:\n    x1: x 轴下限\n    x2: x 轴上限\n    color: 填充颜色\n    alpha: 透明度 (0.0-1.0, 默认 0.3)"]
+    #[pyo3(signature = (x1, x2, color=None, alpha=0.3))]
+    pub fn axvspan(&mut self, x1: f64, x2: f64, color: Option<String>, alpha: f64) {
+        self.elements.push(PlotElement::VSpan {
+            x1, x2,
+            color: color.unwrap_or_default(),
+            alpha,
+        });
+    }
+
+    #[doc = "通过两点绘制任意斜率的直线 (贯穿整张图)\n\n参数:\n    xy1: 起点坐标 (x1, y1)\n    xy2: 终点坐标 (x2, y2)\n    color: 线颜色\n    linestyle: 线型\n    linewidth: 线宽"]
+    #[pyo3(signature = (xy1, xy2, color=None, linestyle=None, linewidth=None))]
+    pub fn axline(&mut self, xy1: (f64, f64), xy2: (f64, f64), color: Option<String>, linestyle: Option<String>, linewidth: Option<f64>) {
+        self.elements.push(PlotElement::AxLine {
+            xy1, xy2,
+            color: color.unwrap_or_default(),
+            linestyle: linestyle.unwrap_or_else(|| "-".to_string()),
+            linewidth: linewidth.unwrap_or(1.5),
         });
     }
 
@@ -1007,7 +1277,19 @@ impl Axes {
     }
 
     #[pyo3(signature = (ticks=None, labels=None))]
+    pub fn set_xticks(&mut self, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) {
+        self.xticks_val = ticks;
+        self.xtick_labels = labels;
+    }
+
+    #[pyo3(signature = (ticks=None, labels=None))]
     pub fn yticks(&mut self, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) {
+        self.yticks_val = ticks;
+        self.ytick_labels = labels;
+    }
+
+    #[pyo3(signature = (ticks=None, labels=None))]
+    pub fn set_yticks(&mut self, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) {
         self.yticks_val = ticks;
         self.ytick_labels = labels;
     }
@@ -1062,6 +1344,13 @@ impl Axes {
         self.minor_grid_visible = true;
         self.minor_grid_x_visible = true;
         self.minor_grid_y_visible = true;
+    }
+
+    /// matplotlib 兼容：禁用次刻度
+    pub fn minorticks_off(&mut self) {
+        self.minor_grid_visible = false;
+        self.minor_grid_x_visible = false;
+        self.minor_grid_y_visible = false;
     }
 
     pub fn set_aspect(&mut self, _aspect: &str) {
@@ -1132,9 +1421,17 @@ impl Axes {
     pub fn compute_bounds(&self) -> ((f64, f64), (f64, f64)) {
         let xlog = self.xscale == "log";
         let ylog = self.yscale == "log";
-        crate::axes_bounds::compute_bounds(
+        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) = crate::axes_bounds::compute_bounds(
             &self.elements, self.xlim, self.ylim, xlog, ylog,
-        )
+        );
+        // 应用轴反转
+        if self.x_axis_inverted {
+            std::mem::swap(&mut x_min, &mut x_max);
+        }
+        if self.y_axis_inverted {
+            std::mem::swap(&mut y_min, &mut y_max);
+        }
+        ((x_min, x_max), (y_min, y_max))
     }
 
     pub fn render<DB: DrawingBackend>(

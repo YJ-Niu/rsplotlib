@@ -78,8 +78,13 @@ class SubplotSpec:
         self.row_end = row_end
         self.col_start = col_start
         self.col_end = col_end
-        self.numRows = gridspec.nrows
-        self.numCols = gridspec.ncols
+        if gridspec is not None:
+            self.numRows = gridspec.nrows
+            self.numCols = gridspec.ncols
+        else:
+            # 用于模式 (nrows, ncols, index) 调用 add_subplot
+            self.numRows = max(row_end, 1)
+            self.numCols = max(col_end, 1)
         self.rowStart = row_start
         self.rowStop = row_end
         self.colStart = col_start
@@ -87,6 +92,12 @@ class SubplotSpec:
 
     def get_position(self, figure):
         """返回子图位置 (left, bottom, width, height)"""
+        if self.gridspec is None:
+            # 没有 gridspec 时使用均匀划分
+            return (self.colStart / self.numCols,
+                    1.0 - self.rowEnd / self.numRows,
+                    (self.colEnd - self.colStart) / self.numCols,
+                    (self.rowEnd - self.rowStart) / self.numRows)
         row_heights = self.gridspec.height_ratios
         col_widths = self.gridspec.width_ratios
 

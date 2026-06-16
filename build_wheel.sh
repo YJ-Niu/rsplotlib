@@ -6,10 +6,16 @@ set -euo pipefail
 
 RELEASE=true
 OUT_DIR="wheelhouse"
+cache_file="/Users/user/Desktop/rust_project/rsplotlib/python/rsplotlib/rsplotlib.cpython-313-darwin.so"
 # 如果 wheelhouse 目录存在, 则删除
 if [[ -d "$OUT_DIR" ]]; then
   rm -rf "$OUT_DIR"
 fi
+# 如果 cache_file 目录存在, 则删除
+if [[ -f "$cache_file" ]]; then
+  rm "$cache_file"
+fi
+
 # Default python executable; may be overridden by --python or positional arg
 PYTHON_EXEC="python"
 # Flag set when the user explicitly provided a Python executable

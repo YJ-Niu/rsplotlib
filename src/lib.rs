@@ -178,9 +178,11 @@ fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyfuncs::xlim, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::ylim, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::scatter, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::scatter_multi, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::bar, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::hist, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::fill_between, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::stackplot, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::errorbar, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::stem, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::step, m)?)?;
@@ -190,6 +192,8 @@ fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyfuncs::text, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::axhline, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::axvline, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::hlines, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::vlines, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::xticks, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::yticks, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::cla, m)?)?;
@@ -207,6 +211,9 @@ fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyfuncs::box_, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::minorticks_on, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::minorticks_off, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::axhspan, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::axvspan, m)?)?;
+    m.add_function(wrap_pyfunction!(pyfuncs::axline, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::register_sans_serif_font, m)?)?;
     Ok(())
 }

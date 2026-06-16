@@ -367,6 +367,27 @@ where
                     }
                 }
             }
+            PlotElement::ScatterMulti { x, y, s_list, c_list, marker, color_idx, .. } => {
+                if x.is_empty() || y.is_empty() { continue; }
+                for (i, (&xv, &yv)) in x.iter().zip(y.iter()).enumerate() {
+                    let txv = tx(xv);
+                    let tyv = ty(yv);
+                    if !txv.is_finite() || !tyv.is_finite() { continue; }
+                    let c_str = c_list.as_ref().and_then(|c| c.get(i).cloned()).unwrap_or_default();
+                    let col = if c_str.is_empty() {
+                        parse_color("", *color_idx).unwrap_or_else(|_| default_color(*color_idx + i))
+                    } else {
+                        parse_color(&c_str, *color_idx + i).unwrap_or_else(|_| default_color(*color_idx + i))
+                    };
+                    let rgb = to_plotters_color(col);
+                    let size = s_list.as_ref()
+                        .and_then(|s| s.get(i).cloned())
+                        .unwrap_or(20.0)
+                        .sqrt() * 0.4;
+                    draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb)
+                        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e)))?;
+                }
+            }
             PlotElement::Bar { x, height, width, color, color_idx, .. } => {
                 let col = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
                 let rgb = to_plotters_color(col);
@@ -524,6 +545,68 @@ where
                 let col = parse_color(color, *color_idx).unwrap_or_else(|_| RgbColor(0, 0, 0));
                 draw_single_line(chart, txv, y_min, txv, y_max, col, *linewidth, font_scale)?;
             }
+            PlotElement::HSpan { y1, y2, color, alpha } => {
+                let ty1 = ty(*y1);
+                let ty2 = ty(*y2);
+                if !ty1.is_finite() || !ty2.is_finite() { continue; }
+                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(128, 128, 128));
+                let rgb = to_plotters_color(col);
+                let top = ty1.max(ty2);
+                let bottom = ty1.min(ty2);
+                chart.draw_series(std::iter::once(Rectangle::new(
+                    [(x_min, bottom), (x_max, top)],
+                    rgb.mix(*alpha).filled(),
+                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw axhspan: {}", e)))?;
+            }
+            PlotElement::VSpan { x1, x2, color, alpha } => {
+                let tx1 = tx(*x1);
+                let tx2 = tx(*x2);
+                if !tx1.is_finite() || !tx2.is_finite() { continue; }
+                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(128, 128, 128));
+                let rgb = to_plotters_color(col);
+                let left = tx1.min(tx2);
+                let right = tx1.max(tx2);
+                chart.draw_series(std::iter::once(Rectangle::new(
+                    [(left, y_min), (right, y_max)],
+                    rgb.mix(*alpha).filled(),
+                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw axvspan: {}", e)))?;
+            }
+            PlotElement::AxLine { xy1, xy2, color, linestyle, linewidth } => {
+                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(0, 0, 0));
+                let tx1 = tx(xy1.0);
+                let ty1 = ty(xy1.1);
+                let tx2 = tx(xy2.0);
+                let ty2 = ty(xy2.1);
+                if tx1.is_finite() && ty1.is_finite() && tx2.is_finite() && ty2.is_finite() {
+                    draw_single_line(chart, tx1, ty1, tx2, ty2, col, *linewidth, font_scale)?;
+                    let _ = linestyle;
+                }
+            }
+            PlotElement::Arrow { x1, y1, x2, y2, color, linewidth, head_size } => {
+                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(0, 0, 0));
+                let tx1 = tx(*x1);
+                let ty1 = ty(*y1);
+                let tx2 = tx(*x2);
+                let ty2 = ty(*y2);
+                if !(tx1.is_finite() && ty1.is_finite() && tx2.is_finite() && ty2.is_finite()) { continue; }
+                draw_single_line(chart, tx1, ty1, tx2, ty2, col, *linewidth, font_scale)?;
+                // 箭头头部：简单三角形
+                let dx = tx2 - tx1;
+                let dy = ty2 - ty1;
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 1e-10 { continue; }
+                let nx = dx / len;
+                let ny = dy / len;
+                let head = *head_size;
+                let p1 = (tx2, ty2);
+                let p2 = (tx2 - head * nx - head * 0.5 * ny, ty2 - head * ny + head * 0.5 * nx);
+                let p3 = (tx2 - head * nx + head * 0.5 * ny, ty2 - head * ny - head * 0.5 * nx);
+                let rgb = to_plotters_color(col);
+                chart.draw_series(std::iter::once(Polygon::new(
+                    vec![p1, p2, p3],
+                    rgb.filled(),
+                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw arrow: {}", e)))?;
+            }
             PlotElement::Pie { x, labels, colors, autopct, startangle } => {
                 let total: f64 = x.iter().sum();
                 if total <= 0.0 { continue; }
@@ -606,6 +689,40 @@ where
                 chart.draw_series(std::iter::once(Polygon::new(
                     points, rgb.mix(*alpha).filled(),
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw fill_between: {}", e)))?;
+            }
+            PlotElement::Stack { x, y_series, colors, alpha, .. } => {
+                if x.is_empty() || y_series.is_empty() { continue; }
+                // 计算累加值：从最底层开始绘制
+                let mut cumulative: Vec<f64> = vec![0.0; x.len()];
+                for (si, series) in y_series.iter().enumerate() {
+                    let color_str = colors.as_ref()
+                        .and_then(|c| c.get(si).cloned())
+                        .unwrap_or_default();
+                    let col = parse_color(&color_str, 0)
+                        .unwrap_or_else(|_| default_color(si));
+                    let rgb = to_plotters_color(col);
+                    // 构造当前层的上下边界点
+                    let mut points: Vec<(f64, f64)> = Vec::with_capacity(x.len() * 2);
+                    for (i, &xv) in x.iter().enumerate() {
+                        let upper = if i < series.len() { cumulative[i] + series[i] } else { cumulative[i] };
+                        let txv = tx(xv);
+                        let tyv = ty(upper);
+                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                    }
+                    for i in (0..x.len()).rev() {
+                        let txv = tx(x[i]);
+                        let tyv = ty(cumulative[i]);
+                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                    }
+                    // 累加
+                    for (i, v) in series.iter().enumerate() {
+                        if i < cumulative.len() { cumulative[i] += v; }
+                    }
+                    if points.len() < 3 { continue; }
+                    chart.draw_series(std::iter::once(Polygon::new(
+                        points, rgb.mix(*alpha).filled(),
+                    ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw stack: {}", e)))?;
+                }
             }
             PlotElement::ErrorBar { x, y, yerr, xerr, fmt, color, capsize, .. } => {
                 let idx = 0;

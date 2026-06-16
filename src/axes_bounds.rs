@@ -195,6 +195,26 @@ pub fn compute_bounds(
                     if tv > y_max { y_max = tv; }
                 }
             }
+            PlotElement::Stack { x, y_series, .. } => {
+                for &v in x {
+                    let tv = tx(v);
+                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
+                    if tv > x_max { x_max = tv; }
+                }
+                // 累加 y 以考虑堆叠后的最大值
+                let n = x.len();
+                let mut cumulative = vec![0.0; n];
+                for series in y_series {
+                    for (i, &v) in series.iter().enumerate() {
+                        if i < n { cumulative[i] += v; }
+                    }
+                }
+                for &v in &cumulative {
+                    let tv = ty(v);
+                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
+                    if tv > y_max { y_max = tv; }
+                }
+            }
             PlotElement::ErrorBar { x, y, yerr, .. } => {
                 for &v in x {
                     let tv = tx(v);
@@ -269,6 +289,54 @@ pub fn compute_bounds(
                     if tvxt > x_max { x_max = tvxt; }
                     if tvyt > f64::NEG_INFINITY && tvyt < y_min { y_min = tvyt; }
                     if tvyt > y_max { y_max = tvyt; }
+                }
+            }
+            PlotElement::HSpan { y1, y2, .. } => {
+                let tv1 = ty(*y1);
+                let tv2 = ty(*y2);
+                if tv1.min(tv2) > f64::NEG_INFINITY && tv1.min(tv2) < y_min { y_min = tv1.min(tv2); }
+                if tv1.max(tv2) > y_max { y_max = tv1.max(tv2); }
+                if x_min == f64::INFINITY { x_min = -1.0; x_max = 1.0; }
+            }
+            PlotElement::VSpan { x1, x2, .. } => {
+                let tv1 = tx(*x1);
+                let tv2 = tx(*x2);
+                if tv1.min(tv2) > f64::NEG_INFINITY && tv1.min(tv2) < x_min { x_min = tv1.min(tv2); }
+                if tv1.max(tv2) > x_max { x_max = tv1.max(tv2); }
+                if y_min == f64::INFINITY { y_min = -1.0; y_max = 1.0; }
+            }
+            PlotElement::AxLine { xy1, xy2, .. } => {
+                let (xv1, yv1) = *xy1;
+                let (xv2, yv2) = *xy2;
+                for (xv, yv) in [(xv1, yv1), (xv2, yv2)] {
+                    let tvx = tx(xv);
+                    let tvy = ty(yv);
+                    if tvx > f64::NEG_INFINITY && tvx < x_min { x_min = tvx; }
+                    if tvx > x_max { x_max = tvx; }
+                    if tvy > f64::NEG_INFINITY && tvy < y_min { y_min = tvy; }
+                    if tvy > y_max { y_max = tvy; }
+                }
+            }
+            PlotElement::ScatterMulti { x, y, .. } => {
+                for &v in x {
+                    let tv = tx(v);
+                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
+                    if tv > x_max { x_max = tv; }
+                }
+                for &v in y {
+                    let tv = ty(v);
+                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
+                    if tv > y_max { y_max = tv; }
+                }
+            }
+            PlotElement::Arrow { x1, y1, x2, y2, .. } => {
+                for (xv, yv) in [(*x1, *y1), (*x2, *y2)] {
+                    let tvx = tx(xv);
+                    let tvy = ty(yv);
+                    if tvx > f64::NEG_INFINITY && tvx < x_min { x_min = tvx; }
+                    if tvx > x_max { x_max = tvx; }
+                    if tvy > f64::NEG_INFINITY && tvy < y_min { y_min = tvy; }
+                    if tvy > y_max { y_max = tvy; }
                 }
             }
         }

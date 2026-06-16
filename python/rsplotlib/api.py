@@ -301,7 +301,7 @@ def contourf(X, Y, Z, levels=None, cmap='coolwarm', alpha=1.0):
 
 def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
     """绘制堆叠面积图
-    
+
     Args:
         x: x 轴数据
         *args: 多个 y 数据数组
@@ -309,11 +309,10 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
         colors: 颜色列表 (默认: None)
         alpha: 透明度 (默认: 1.0)
     """
-    try:
-        return _rsplotlib.stackplot(x, args, labels, colors, alpha)
-    except AttributeError:
-        _warnings.warn("stackplot is not yet implemented in rsplotlib")
-        return None
+    y_data = list(args) if args else []
+    if len(y_data) == 1 and isinstance(y_data[0], (list, tuple)) and y_data[0] and isinstance(y_data[0][0], (list, tuple)):
+        y_data = list(y_data[0])
+    return _rsplotlib.stackplot(_to_list(x), y_data, labels, colors, alpha)
 
 
 # ==================== 辅助元素 ====================
