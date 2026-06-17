@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rsplotlib"
-version = "0.1.5"
+version = "0.1.6"
 description = "A high-performance matplotlib-compatible plotting library powered by Rust"
 readme = "README_zh.md"
 license = { text = "MIT" }
@@ -31,18 +31,6 @@ classifiers = [
 ]
 keywords = ["plotting", "matplotlib", "visualization", "rust", "scientific"]
 dependencies = []
-
-[project.optional-dependencies]
-test = [
-    "pytest>=7.0",
-    "pillow>=9.0",
-    "numpy>=1.20",
-]
-dev = [
-    "pytest>=7.0",
-    "pillow>=9.0",
-    "numpy>=1.20",
-]
 
 [tool.maturin]
 python-source = "python"

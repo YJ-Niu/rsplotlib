@@ -1,0 +1,2398 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="rsplotlib — 基于 Rust 高性能核心的 Matplotlib 兼容 Python 绘图库完整教程"
+    />
+    <title>rsplotlib 教程 · Rust + Python 高性能数据可视化</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@400;500;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="tutorial.css" />
+  </head>
+  <body>
+    <!-- 顶部工具栏 -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button
+          class="icon-btn sidebar-toggle"
+          id="sidebarToggle"
+          aria-label="切换侧边栏"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <a href="#" class="brand">
+          <span class="brand-badge">Rust</span>
+          <span class="brand-name">rsplotlib</span>
+          <span class="brand-sep">×</span>
+          <span class="brand-sub">教程</span>
+        </a>
+      </div>
+      <div class="topbar-right">
+        <div class="search-box" id="searchBox">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="搜索章节、函数、参数…"
+          />
+          <kbd>⌘K</kbd>
+        </div>
+        <button
+          class="icon-btn theme-toggle"
+          id="themeToggle"
+          aria-label="切换主题"
+        >
+          <svg
+            class="icon-sun"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="4" />
+            <path
+              d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+            />
+          </svg>
+          <svg
+            class="icon-moon"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        </button>
+        <a
+          class="gh-link"
+          href="https://github.com/"
+          target="_blank"
+          rel="noopener"
+          aria-label="GitHub 仓库"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path
+              d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.58v-2.22c-3.34.72-4.04-1.42-4.04-1.42-.55-1.38-1.33-1.75-1.33-1.75-1.08-.74.08-.72.08-.72 1.2.08 1.83 1.23 1.83 1.23 1.07 1.82 2.8 1.3 3.48.99.1-.77.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.23-3.22-.12-.3-.53-1.52.12-3.17 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.3-1.55 3.3-1.23 3.3-1.23.65 1.65.25 2.87.12 3.17.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .3"
+            />
+          </svg>
+        </a>
+      </div>
+    </header>
+
+    <!-- 主体布局 -->
+    <div class="layout">
+      <!-- 侧边栏 -->
+      <aside class="sidebar" id="sidebar">
+        <nav class="toc" id="toc">
+          <div class="toc-group">
+            <div class="toc-group-title">入门</div>
+            <a href="#ch1" class="toc-link" data-ch="ch1"
+              ><span class="toc-num">01</span
+              ><span class="toc-text">快速入门</span></a
+            >
+            <a href="#ch2" class="toc-link" data-ch="ch2"
+              ><span class="toc-num">02</span
+              ><span class="toc-text">核心概念</span></a
+            >
+          </div>
+          <div class="toc-group">
+            <div class="toc-group-title">图表类型</div>
+            <a href="#ch3" class="toc-link" data-ch="ch3"
+              ><span class="toc-num">03</span
+              ><span class="toc-text">基础图表</span></a
+            >
+            <a href="#ch4" class="toc-link" data-ch="ch4"
+              ><span class="toc-num">04</span
+              ><span class="toc-text">辅助元素与标注</span></a
+            >
+            <a href="#ch5" class="toc-link" data-ch="ch5"
+              ><span class="toc-num">05</span
+              ><span class="toc-text">子图与布局</span></a
+            >
+          </div>
+          <div class="toc-group">
+            <div class="toc-group-title">进阶主题</div>
+            <a href="#ch6" class="toc-link" data-ch="ch6"
+              ><span class="toc-num">06</span
+              ><span class="toc-text">样式与配置</span></a
+            >
+            <a href="#ch7" class="toc-link" data-ch="ch7"
+              ><span class="toc-num">07</span
+              ><span class="toc-text">输出与分辨率</span></a
+            >
+            <a href="#ch7b" class="toc-link" data-ch="ch7b"
+              ><span class="toc-num">07.5</span
+              ><span class="toc-text">颜色系统深入</span></a
+            >
+            <a href="#ch5b" class="toc-link" data-ch="ch5b"
+              ><span class="toc-num">05.5</span
+              ><span class="toc-text">刻度与精调</span></a
+            >
+            <a href="#ch8" class="toc-link" data-ch="ch8"
+              ><span class="toc-num">08</span
+              ><span class="toc-text">API 速览</span></a
+            >
+            <a href="#ch9" class="toc-link" data-ch="ch9"
+              ><span class="toc-num">09</span
+              ><span class="toc-text">性能与架构</span></a
+            >
+          </div>
+          <div class="toc-group">
+            <div class="toc-group-title">实战与参考</div>
+            <a href="#ch10" class="toc-link" data-ch="ch10"
+              ><span class="toc-num">10</span
+              ><span class="toc-text">综合实战</span></a
+            >
+            <a href="#ch11" class="toc-link" data-ch="ch11"
+              ><span class="toc-num">11</span
+              ><span class="toc-text">最佳实践与 FAQ</span></a
+            >
+            <a href="#ch12" class="toc-link" data-ch="ch12"
+              ><span class="toc-num">12</span
+              ><span class="toc-text">功能速查表</span></a
+            >
+          </div>
+        </nav>
+        <div class="sidebar-footer">
+          <span class="version-pill">v0.1.5</span>
+          <span class="sep-dot">·</span>
+          <span>2026-06-17</span>
+        </div>
+      </aside>
+
+      <!-- 主要内容 -->
+      <main class="content">
+        <!-- Hero 区域 -->
+        <section class="hero">
+          <div class="hero-grid"></div>
+          <div class="hero-gradient"></div>
+          <div class="hero-inner">
+            <div class="hero-eyebrow">
+              <span class="dot"></span>
+              <span>Rust × Python · 高性能数据可视化</span>
+            </div>
+            <h1 class="hero-title">
+              <span class="title-line"
+                >用 <span class="hl-rust">Rust</span> 加速你的</span
+              >
+              <span class="title-line"
+                ><span class="hl-python">Python</span> 数据可视化</span
+              >
+            </h1>
+            <p class="hero-sub">
+              rsplotlib 是一款核心渲染引擎由 Rust 编写的高性能 Python
+              绘图库，提供与 Matplotlib 高度兼容的
+              API，在散点数组、批量参考线等场景下展现显著的性能优势。
+            </p>
+            <div class="hero-cta">
+              <a href="#ch1" class="btn btn-primary">
+                <span>开始阅读</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
+                </svg>
+              </a>
+              <a href="#ch3" class="btn btn-ghost">查看图表类型 →</a>
+            </div>
+            <div class="hero-stats">
+              <div class="stat">
+                <div class="stat-num">12<span class="stat-unit">章</span></div>
+                <div class="stat-label">完整教程</div>
+              </div>
+              <div class="stat">
+                <div class="stat-num">40<span class="stat-unit">+</span></div>
+                <div class="stat-label">代码示例</div>
+              </div>
+              <div class="stat">
+                <div class="stat-num">3~10<span class="stat-unit">x</span></div>
+                <div class="stat-label">性能提升</div>
+              </div>
+              <div class="stat">
+                <div class="stat-num">100<span class="stat-unit">%</span></div>
+                <div class="stat-label">API 兼容</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 第一章：快速入门 ============ -->
+        <article class="chapter" id="ch1">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 01</span>
+            <h2 class="chapter-title">快速入门</h2>
+            <p class="chapter-desc">
+              了解 rsplotlib 的设计理念，完成环境配置并绘制你的第一张图表。
+            </p>
+          </header>
+
+          <section class="section" id="sec-1-1">
+            <h3 class="section-title">
+              <span class="title-num">1.1</span>项目简介
+            </h3>
+            <p>
+              rsplotlib 是一款由 Rust 强力驱动的高性能 Python 绘图库，通过 PyO3
+              提供 Matplotlib 兼容的 Python API。其核心渲染引擎完全由 Rust
+              编写，在保持 Matplotlib 兼容接口的同时，利用 Rust
+              的内存安全和零成本抽象带来显著的性能提升。
+            </p>
+            <div class="info-grid">
+              <div class="info-card">
+                <div class="info-icon">⚙️</div>
+                <div class="info-title">API 优先</div>
+                <p>保持与 Matplotlib 的高度兼容，降低迁移成本。</p>
+              </div>
+              <div class="info-card">
+                <div class="info-icon">⚡</div>
+                <div class="info-title">性能优先</div>
+                <p>将渲染、批量操作等关键路径下沉到 Rust 层。</p>
+              </div>
+              <div class="info-card">
+                <div class="info-icon">○</div>
+                <div class="info-title">零依赖</div>
+                <p>无需安装原生 Matplotlib，仅需 Python 解释器。</p>
+              </div>
+              <div class="info-card">
+                <div class="info-icon">▣</div>
+                <div class="info-title">跨平台一致</div>
+                <p>在 macOS、Linux、Windows 上渲染质量完全一致。</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="sec-1-2">
+            <h3 class="section-title">
+              <span class="title-num">1.2</span>环境准备
+            </h3>
+            <h4>系统要求</h4>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>依赖</th>
+                  <th>版本</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Python</td>
+                  <td>3.8+</td>
+                  <td>CPython 实现</td>
+                </tr>
+                <tr>
+                  <td>Rust</td>
+                  <td>1.70+</td>
+                  <td>从源码构建时需要</td>
+                </tr>
+                <tr>
+                  <td>maturin</td>
+                  <td>1.13+</td>
+                  <td>Rust-Python 包构建工具</td>
+                </tr>
+              </tbody>
+            </table>
+            <h4>安装步骤</h4>
+            <div class="tabs" id="install-tabs">
+              <div class="tab-buttons">
+                <button class="tab-btn active" data-tab="t-maturin">
+                  maturin 源码构建
+                </button>
+                <button class="tab-btn" data-tab="t-wheel">
+                  构建 wheel 包
+                </button>
+                <button class="tab-btn" data-tab="t-rust">仅编译 Rust</button>
+              </div>
+              <div class="tab-panel active" data-tab="t-maturin">
+                <pre><code><span class="c"># 1. 克隆仓库</span>
+git clone https://github.com/YJ-Niu/rsplotlib.git
+cd rsplotlib
+
+<span class="c"># 2. 安装 maturin 并构建</span>
+pip install maturin
+maturin develop --release</code></pre>
+              </div>
+              <div class="tab-panel" data-tab="t-wheel">
+                <pre><code><span class="c"># 使用项目构建脚本</span>
+./build_wheel.sh
+
+<span class="c"># 安装生成的 wheel 包</span>
+pip install target/wheels/rsplotlib-*.whl</code></pre>
+              </div>
+              <div class="tab-panel" data-tab="t-rust">
+                <pre><code><span class="c"># 仅编译 Rust cdylib</span>
+cargo build --release
+
+<span class="c"># macOS: 复制为 Python 扩展模块</span>
+cp target/release/librsplotlib.dylib \
+   python/rsplotlib/rsplotlib.cpython-39-darwin.so
+
+<span class="c"># 设置 PYTHONPATH</span>
+export PYTHONPATH="$PWD/python:$PYTHONPATH"</code></pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="sec-1-3">
+            <h3 class="section-title">
+              <span class="title-num">1.3</span>第一个图表
+            </h3>
+            <p>让我们从最基础的折线图开始，体验 rsplotlib 的基本工作流程。</p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">hello_rsplotlib.py</span>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <pre><code><span class="k">from</span> rsplotlib <span class="k">import</span> pyplot <span class="k">as</span> plt
+<span class="k">from</span> rsplotlib.pylab <span class="k">import</span> mpl
+
+<span class="c"># 可选：配置中文显示字体</span>
+mpl.rcParams[<span class="s">'font.sans-serif'</span>] = [<span class="s">'PingFang SC'</span>, <span class="s">'Microsoft YaHei'</span>]
+
+<span class="c"># 创建 Figure 和 Axes</span>
+fig, ax = plt.subplots(figsize=(<span class="n">8</span>, <span class="n">6</span>))
+
+<span class="c"># 准备数据</span>
+x = [<span class="n">0</span>, <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>]
+y = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">4</span>, <span class="n">8</span>, <span class="n">16</span>, <span class="n">32</span>]
+
+<span class="c"># 绘制线条</span>
+ax.plot(x, y, label=<span class="s">'指数增长'</span>, linewidth=<span class="n">2.0</span>, color=<span class="s">'steelblue'</span>)
+
+<span class="c"># 装饰图表</span>
+ax.set_title(<span class="s">'我的第一个 rsplotlib 图表'</span>)
+ax.set_xlabel(<span class="s">'时间 (秒)'</span>)
+ax.set_ylabel(<span class="s">'数值'</span>)
+ax.legend()
+ax.grid(<span class="k">True</span>)
+
+<span class="c"># 保存图表</span>
+fig.savefig(<span class="s">'my_first_chart.png'</span>, dpi=<span class="n">300</span>)</code></pre>
+            </div>
+            <div class="note">
+              <strong>关键点：</strong>参数
+              <code>figsize</code> 控制图像英寸尺寸，<code>dpi</code>
+              控制每英寸点数。两者相乘决定最终像素分辨率。屏幕显示推荐
+              <span class="mono">dpi=150</span>，出版打印推荐
+              <span class="mono">dpi=300</span>。
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第二章：核心概念 ============ -->
+        <article class="chapter" id="ch2">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 02</span>
+            <h2 class="chapter-title">核心概念</h2>
+            <p class="chapter-desc">
+              掌握 Figure 与 Axes 的对象模型，理解面向对象与模块级两种调用风格。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">2.1</span>Figure 与 Axes 对象
+            </h3>
+            <p>
+              在 rsplotlib 中，绘图围绕两个核心对象组织：<strong>Figure</strong>
+              代表整个画布容器，<strong>Axes</strong>
+              代表包含坐标轴的具体绘图区域。一个 Figure 可以包含多个 Axes。
+            </p>
+            <div class="arch-diagram">
+              <div class="arch-figure">
+                <div class="arch-figure-label">Figure · 画布</div>
+                <div class="arch-axes-row">
+                  <div class="arch-axes">
+                    <div class="arch-axes-inner">
+                      <svg viewBox="0 0 100 60" class="mini-svg">
+                        <polyline
+                          points="5,55 25,40 45,25 65,15 85,5"
+                          fill="none"
+                          stroke="#7aa2f7"
+                          stroke-width="2"
+                        />
+                        <line
+                          x1="0"
+                          y1="55"
+                          x2="100"
+                          y2="55"
+                          stroke="#565f73"
+                          stroke-width="0.5"
+                        />
+                        <line
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="60"
+                          stroke="#565f73"
+                          stroke-width="0.5"
+                        />
+                      </svg>
+                    </div>
+                    <div class="arch-axes-label">Axes 1 · 折线图</div>
+                  </div>
+                  <div class="arch-axes">
+                    <div class="arch-axes-inner">
+                      <svg viewBox="0 0 100 60" class="mini-svg">
+                        <rect
+                          x="10"
+                          y="35"
+                          width="14"
+                          height="20"
+                          fill="#f7768e"
+                        />
+                        <rect
+                          x="32"
+                          y="20"
+                          width="14"
+                          height="35"
+                          fill="#f7768e"
+                        />
+                        <rect
+                          x="54"
+                          y="28"
+                          width="14"
+                          height="27"
+                          fill="#f7768e"
+                        />
+                        <rect
+                          x="76"
+                          y="10"
+                          width="14"
+                          height="45"
+                          fill="#f7768e"
+                        />
+                        <line
+                          x1="0"
+                          y1="55"
+                          x2="100"
+                          y2="55"
+                          stroke="#565f73"
+                          stroke-width="0.5"
+                        />
+                      </svg>
+                    </div>
+                    <div class="arch-axes-label">Axes 2 · 柱状图</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">2.2</span>两种调用方式
+            </h3>
+            <div class="two-col">
+              <div>
+                <h4>面向对象方式（推荐）</h4>
+                <p>
+                  显式创建 Figure 和 Axes
+                  对象，所有操作通过对象方法调用。适用于大多数场景，尤其是复杂的多子图布局。
+                </p>
+                <div class="code-card compact">
+                  <pre><code>fig, ax = plt.subplots()
+ax.plot([1, 2, 3], [1, 4, 9])
+ax.set_title(<span class="s">'面向对象'</span>)
+fig.savefig(<span class="s">'oo.png'</span>)</code></pre>
+                </div>
+              </div>
+              <div>
+                <h4>模块级方式（简洁）</h4>
+                <p>
+                  通过 <code>plt.*</code> 直接调用，内部自动管理
+                  Figure/Axes。适用于快速脚本和简单绘图。
+                </p>
+                <div class="code-card compact">
+                  <pre><code>plt.figure()
+plt.plot([1, 2, 3], [1, 4, 9])
+plt.title(<span class="s">'模块级'</span>)
+plt.savefig(<span class="s">'ml.png'</span>)</code></pre>
+                </div>
+              </div>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第三章：基础图表类型 ============ -->
+        <article class="chapter" id="ch3">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 03</span>
+            <h2 class="chapter-title">基础图表类型</h2>
+            <p class="chapter-desc">
+              从折线到热力图，逐一掌握 rsplotlib 支持的全部基础图表。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">3.1</span>折线图 plot()
+            </h3>
+            <div class="api-ref">
+              <span class="api-sig"
+                ><code
+                  >ax.plot(x, y, color=None, linewidth=None, linestyle=None,
+                  marker=None, label=None)</code
+                ></span
+              >
+            </div>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">multi_lines.py</span>
+              </div>
+              <pre><code>fig, ax = plt.subplots()
+x = list(range(<span class="n">10</span>))
+ax.plot(x, [i <span class="k">for</span> i <span class="k">in</span> x], label=<span class="s">'线性'</span>, color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>)
+ax.plot(x, [i**<span class="n">2</span> <span class="k">for</span> i <span class="k">in</span> x], label=<span class="s">'平方'</span>, color=<span class="s">'darkorange'</span>, lw=<span class="n">2</span>, ls=<span class="s">'--'</span>)
+ax.legend()
+fig.savefig(<span class="s">'lines.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">3.2</span>散点图 scatter() — Rust
+              层数组支持
+            </h3>
+            <div class="feature-banner rust">
+              <div class="fb-icon">⚡</div>
+              <div>
+                <div class="fb-title">Rust 层统一渲染 · 零 Python 循环</div>
+                <div class="fb-desc">
+                  当传入颜色数组或大小时，rsplotlib 在 Rust 层统一处理
+                  ScatterMulti。Matplotlib 会退化为 Python 循环，效率较低。
+                </div>
+              </div>
+            </div>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">scatter_multi.py</span>
+              </div>
+              <pre><code><span class="k">import</span> random
+<span class="k">from</span> rsplotlib <span class="k">import</span> pyplot <span class="k">as</span> plt
+
+random.seed(<span class="n">42</span>)
+n = <span class="n">100</span>
+x = [random.gauss(<span class="n">0</span>, <span class="n">1</span>) <span class="k">for</span> _ <span class="k">in</span> range(n)]
+y = [random.gauss(<span class="n">0</span>, <span class="n">1</span>) <span class="k">for</span> _ <span class="k">in</span> range(n)]
+
+<span class="c"># 每点独立颜色 + 每点独立大小（Rust 层处理）</span>
+colors = [<span class="s">'crimson'</span> <span class="k">if</span> xi > <span class="n">0</span> <span class="k">else</span> <span class="s">'steelblue'</span> <span class="k">for</span> xi <span class="k">in</span> x]
+sizes = [max(<span class="n">10</span>, abs(xi * yi * <span class="n">50</span>)) <span class="k">for</span> xi, yi <span class="k">in</span> zip(x, y)]
+
+fig, ax = plt.subplots()
+ax.scatter(x, y, c=colors, s=sizes, alpha=<span class="n">0.7</span>, marker=<span class="s">'o'</span>)
+ax.set_title(<span class="s">'每点独立颜色和大小（Rust 层批量渲染）'</span>)
+fig.savefig(<span class="s">'scatter_multi.png'</span>)</code></pre>
+            </div>
+            <h4>支持的标记形状</h4>
+            <div class="marker-grid">
+              <div class="marker-item">
+                <span class="m m-circle"></span><code>o</code><span>圆形</span>
+              </div>
+              <div class="marker-item">
+                <span class="m m-square"></span><code>s</code
+                ><span>正方形</span>
+              </div>
+              <div class="marker-item">
+                <span class="m m-tri-up"></span><code>^</code
+                ><span>上三角</span>
+              </div>
+              <div class="marker-item">
+                <span class="m m-tri-down"></span><code>v</code
+                ><span>下三角</span>
+              </div>
+              <div class="marker-item">
+                <span class="m m-diamond"></span><code>D</code><span>菱形</span>
+              </div>
+              <div class="marker-item">
+                <span class="m m-star"></span><code>*</code><span>星形</span>
+              </div>
+              <div class="marker-item">
+                <span class="m m-cross"></span><code>+</code><span>十字</span>
+              </div>
+              <div class="marker-item">
+                <span class="m m-x"></span><code>x</code><span>叉号</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">3.3</span>柱状图、直方图与饼图
+            </h3>
+            <div class="two-col">
+              <div>
+                <h4>柱状图 bar()</h4>
+                <div class="code-card compact">
+                  <pre><code>categories = [<span class="s">'A'</span>, <span class="s">'B'</span>, <span class="s">'C'</span>]
+values = [<span class="n">23</span>, <span class="n">45</span>, <span class="n">17</span>]
+fig, ax = plt.subplots()
+ax.bar(categories, values, color=<span class="s">'steelblue'</span>)
+fig.savefig(<span class="s">'bar.png'</span>)</code></pre>
+                </div>
+              </div>
+              <div>
+                <h4>直方图 hist()</h4>
+                <div class="code-card compact">
+                  <pre><code>data = [random.gauss(<span class="n">0</span>, <span class="n">1</span>)
+        <span class="k">for</span> _ <span class="k">in</span> range(<span class="n">1000</span>)]
+fig, ax = plt.subplots()
+ax.hist(data, bins=<span class="n">30</span>,
+        color=<span class="s">'steelblue'</span>, alpha=<span class="n">0.7</span>)
+fig.savefig(<span class="s">'hist.png'</span>)</code></pre>
+                </div>
+              </div>
+            </div>
+            <h4>饼图 pie()</h4>
+            <div class="code-card compact">
+              <pre><code>labels = [<span class="s">'苹果'</span>, <span class="s">'香蕉'</span>, <span class="s">'橙子'</span>]
+sizes = [<span class="n">30</span>, <span class="n">20</span>, <span class="n">50</span>]
+colors = [<span class="s">'#FF6B6B'</span>, <span class="s">'#FFD93D'</span>, <span class="s">'#6BCB77'</span>]
+fig, ax = plt.subplots()
+ax.pie(sizes, labels=labels, colors=colors)
+fig.savefig(<span class="s">'pie.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">3.4</span>更多图表
+            </h3>
+            <div class="api-list">
+              <div class="api-item">
+                <code class="api-name">barh</code
+                ><code class="api-sig-inline">(categories, values, ...)</code>
+                <p>水平柱状图。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">boxplot</code
+                ><code class="api-sig-inline">(data_list, ...)</code>
+                <p>箱线图，展示分布与异常点。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">fill_between</code
+                ><code class="api-sig-inline">(x, y1, y2, color, alpha)</code>
+                <p>填充两条曲线之间的区域。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">errorbar</code
+                ><code class="api-sig-inline">(x, y, yerr=None, fmt='-o')</code>
+                <p>带误差棒的折线/散点图。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">stem</code
+                ><code class="api-sig-inline">(x, y)</code>
+                <p>茎图（信号处理常用）。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">step</code
+                ><code class="api-sig-inline">(x, y, where='post')</code>
+                <p>阶梯图（离散过程）。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">imshow</code
+                ><code class="api-sig-inline">(data, cmap='viridis')</code>
+                <p>热力图 / 图像显示。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">stackplot</code
+                ><code class="api-sig-inline">(x, *series, labels=...)</code>
+                <p>堆叠面积图。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">semilogx / semilogy / loglog</code
+                ><code class="api-sig-inline">(x, y, ...)</code>
+                <p>对数坐标图。</p>
+              </div>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第四章：辅助元素与标注 ============ -->
+        <article class="chapter" id="ch4">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 04</span>
+            <h2 class="chapter-title">辅助元素与标注</h2>
+            <p class="chapter-desc">
+              参考线、高亮区域、箭头标注 — 让图表讲述完整的故事。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">4.1</span>参考线 axhline / axvline
+            </h3>
+            <div class="code-card compact">
+              <pre><code>fig, ax = plt.subplots()
+ax.plot(list(range(-<span class="n">10</span>, <span class="n">11</span>)),
+        [xi**<span class="n">2</span> <span class="k">for</span> xi <span class="k">in</span> range(-<span class="n">10</span>, <span class="n">11</span>)], <span class="s">'b-'</span>, lw=<span class="n">2</span>)
+ax.axhline(y=<span class="n">25</span>, color=<span class="s">'red'</span>, ls=<span class="s">'--'</span>, lw=<span class="n">1.5</span>)
+ax.axvline(x=<span class="n">0</span>, color=<span class="s">'green'</span>, ls=<span class="s">':'</span>, lw=<span class="n">1.5</span>)
+fig.savefig(<span class="s">'ref_lines.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">4.2</span>区间高亮 axhspan / axvspan
+            </h3>
+            <div class="feature-banner feature">
+              <div class="fb-icon">🎯</div>
+              <div>
+                <div class="fb-title">新增功能 · 区间高亮</div>
+                <div class="fb-desc">
+                  使用 axhspan / axvspan
+                  在图表中填充水平或垂直带，常用于强调特定数值范围或极值区域。
+                </div>
+              </div>
+            </div>
+            <div class="code-card compact">
+              <pre><code>fig, ax = plt.subplots()
+x = list(range(-<span class="n">5</span>, <span class="n">6</span>))
+ax.plot(x, [xi**<span class="n">2</span> <span class="k">for</span> xi <span class="k">in</span> x], <span class="s">'b-'</span>, lw=<span class="n">2</span>)
+
+<span class="c"># 垂直区间：高亮 x ∈ [-1, 1] 的最小值区域</span>
+ax.axvspan(-<span class="n">1</span>, <span class="n">1</span>, color=<span class="s">'gold'</span>, alpha=<span class="n">0.3</span>)
+
+<span class="c"># 水平区间：高亮 y ∈ [0, 5] 的低值区域</span>
+ax.axhspan(<span class="n">0</span>, <span class="n">5</span>, color=<span class="s">'lightgreen'</span>, alpha=<span class="n">0.2</span>)
+fig.savefig(<span class="s">'spans.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">4.3</span>任意斜率参考线 axline
+            </h3>
+            <p>
+              通过两点确定一条直线并延伸至整个图表边界，适合标注线性趋势或对角线。
+            </p>
+            <div class="code-card compact">
+              <pre><code>fig, ax = plt.subplots()
+ax.plot([-<span class="n">5</span>, <span class="n">5</span>], [-<span class="n">5</span>, <span class="n">5</span>], <span class="s">'b-'</span>)
+
+<span class="c"># 对角线：从 (0,0) 到 (1,1)，自动延伸至整张图</span>
+ax.axline((<span class="n">0</span>, <span class="n">0</span>), (<span class="n">1</span>, <span class="n">1</span>), color=<span class="s">'red'</span>, ls=<span class="s">'--'</span>)
+
+<span class="c"># 另一条：从 (0, 5) 到 (1, 3)，斜率为 -2</span>
+ax.axline((<span class="n">0</span>, <span class="n">5</span>), (<span class="n">1</span>, <span class="n">3</span>), color=<span class="s">'green'</span>, ls=<span class="s">':'</span>)
+fig.savefig(<span class="s">'axline.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">4.4</span>批量参考线 hlines / vlines
+            </h3>
+            <div class="feature-banner rust">
+              <div class="fb-icon">⚙️</div>
+              <div>
+                <div class="fb-title">Rust 层批量实现 · 性能优化</div>
+                <div class="fb-desc">
+                  内部循环在 Rust 层一次性完成，避免 N 次 Python→Rust
+                  跨语言调用，大数据量场景下优势尤为明显。
+                </div>
+              </div>
+            </div>
+            <div class="two-col">
+              <div>
+                <h5>传统方式（不推荐）</h5>
+                <div class="code-card compact warn">
+                  <pre><code><span class="k">for</span> y_pos <span class="k">in</span> [<span class="n">2</span>, <span class="n">4</span>, <span class="n">6</span>, <span class="n">8</span>]:
+    ax.axhline(y_pos)  <span class="c"># N 次调用</span></code></pre>
+                </div>
+              </div>
+              <div>
+                <h5>rsplotlib 方式</h5>
+                <div class="code-card compact ok">
+                  <pre><code>ax.hlines([<span class="n">2</span>, <span class="n">4</span>, <span class="n">6</span>, <span class="n">8</span>],
+          color=<span class="s">'steelblue'</span>, ls=<span class="s">'--'</span>)  <span class="c"># 1 次调用</span>
+ax.vlines([<span class="n">2</span>, <span class="n">4</span>, <span class="n">6</span>, <span class="n">8</span>],
+          color=<span class="s">'darkorange'</span>, ls=<span class="s">':'</span>)</code></pre>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">4.5</span>箭头标注 annotate
+            </h3>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">annotations.py</span>
+              </div>
+              <pre><code>fig, ax = plt.subplots()
+x = list(range(-<span class="n">10</span>, <span class="n">11</span>))
+ax.plot(x, [xi**<span class="n">3</span> - <span class="n">3</span>*xi <span class="k">for</span> xi <span class="k">in</span> x], <span class="s">'b-'</span>, lw=<span class="n">2</span>)
+
+<span class="c"># 从文本位置绘制箭头指向目标点</span>
+ax.annotate(<span class="s">'局部极大值'</span>, xy=(-<span class="n">1</span>, <span class="n">2</span>), xytext=(-<span class="n">8</span>, <span class="n">500</span>),
+            fontsize=<span class="n">11</span>, color=<span class="s">'red'</span>,
+            arrowprops={<span class="s">'arrowstyle'</span>: <span class="s">'->'</span>, <span class="s">'arrowsize'</span>: <span class="n">1.0</span>})
+
+ax.annotate(<span class="s">'原点'</span>, xy=(<span class="n">0</span>, <span class="n">0</span>), xytext=(<span class="n">5</span>, <span class="n">200</span>),
+            fontsize=<span class="n">11</span>, color=<span class="s">'darkgreen'</span>)
+fig.savefig(<span class="s">'annotations.png'</span>)</code></pre>
+            </div>
+            <div class="tip">
+              <strong>提示：</strong><code>xy</code> 是被标注点的坐标，<code
+                >xytext</code
+              >
+              是文本放置位置。提供
+              <code>xytext</code> 时会自动从文本位置绘制箭头到 <code>xy</code>。
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第五章：子图与布局 ============ -->
+        <article class="chapter" id="ch5">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 05</span>
+            <h2 class="chapter-title">子图与布局</h2>
+            <p class="chapter-desc">
+              在同一张画布上组织多个绘图区域，从网格布局到双坐标轴。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.1</span>创建子图 subplots()
+            </h3>
+            <p>
+              <code>plt.subplots(nrows, ncols)</code>
+              是创建子图网格的常用方式。返回的
+              <code>axes</code>
+              是一个扁平化列表，按行优先顺序排列。当
+              <code>nrows=ncols=1</code> 时返回单个 Axes 对象（不是列表）。
+            </p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">subplots_grid.py</span>
+              </div>
+              <pre><code><span class="c"># 创建 2x2 子图网格</span>
+fig, axes = plt.subplots(<span class="n">2</span>, <span class="n">2</span>, figsize=(<span class="n">12</span>, <span class="n">8</span>))
+
+<span class="c"># axes 按行优先顺序扁平化为列表</span>
+<span class="c"># axes[0] 左上, axes[1] 右上, axes[2] 左下, axes[3] 右下</span>
+axes[<span class="n">0</span>].plot([<span class="n">1</span>,<span class="n">2</span>,<span class="n">3</span>], [<span class="n">1</span>,<span class="n">4</span>,<span class="n">9</span>], color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>)
+axes[<span class="n">0</span>].set_title(<span class="s">'1) 折线图'</span>)
+axes[<span class="n">0</span>].grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+axes[<span class="n">1</span>].bar([<span class="s">'A'</span>,<span class="s">'B'</span>,<span class="s">'C'</span>,<span class="s">'D'</span>], [<span class="n">3</span>,<span class="n">7</span>,<span class="n">2</span>,<span class="n">5</span>], color=<span class="s">'darkorange'</span>)
+axes[<span class="n">1</span>].set_title(<span class="s">'2) 柱状图'</span>)
+
+<span class="c"># 使用 Rust 加速的散点图（每点独立颜色/大小）</span>
+xs = [random.gauss(<span class="n">0</span>, <span class="n">1</span>) <span class="k">for</span> _ <span class="k">in</span> range(<span class="n">150</span>)]
+ys = [random.gauss(<span class="n">0</span>, <span class="n">1</span>) <span class="k">for</span> _ <span class="k">in</span> range(<span class="n">150</span>)]
+cs = [<span class="s">'crimson'</span> <span class="k">if</span> x > <span class="n">0</span> <span class="k">else</span> <span class="s">'steelblue'</span> <span class="k">for</span> x <span class="k">in</span> xs]
+axes[<span class="n">2</span>].scatter(xs, ys, c=cs, s=<span class="n">25</span>, alpha=<span class="n">0.7</span>)
+axes[<span class="n">2</span>].set_title(<span class="s">'3) 散点图（Rust 批量渲染）'</span>)
+
+axes[<span class="n">3</span>].hist([random.gauss(<span class="n">0</span>,<span class="n">1</span>) <span class="k">for</span> _ <span class="k">in</span> range(<span class="n">500</span>)],
+             bins=<span class="n">25</span>, color=<span class="s">'forestgreen'</span>, alpha=<span class="n">0.7</span>)
+axes[<span class="n">3</span>].set_title(<span class="s">'4) 直方图'</span>)
+
+fig.tight_layout()  <span class="c"># 自动调整间距避免标签重叠</span>
+fig.savefig(<span class="s">'subplots_2x2.png'</span>, dpi=<span class="n">200</span>)</code></pre>
+            </div>
+            <div class="note">
+              <strong>注意：</strong>当 <code>subplots(1, 1)</code> 时返回单个
+              Axes；当 <code>subplots(2, 2)</code>
+              时返回长度为 4 的列表。可以使用
+              <code>axes.ravel()</code> 将多维数组展平。
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.2</span>不规则子图布局
+            </h3>
+            <p>
+              使用 <code>fig.subplot(nrows, ncols, index)</code>
+              可以创建跨多行多列的子图，类似 Matplotlib 的
+              <code>add_subplot</code>。当 index 为元组时表示占据连续位置。
+            </p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">irregular_layout.py</span>
+              </div>
+              <pre><code>fig = plt.figure(figsize=(<span class="n">10</span>, <span class="n">6</span>))
+
+<span class="c"># 顶部跨两列的大图（占据第 1 行）</span>
+ax_top = fig.subplot(<span class="n">2</span>, <span class="n">2</span>, (<span class="n">1</span>, <span class="n">2</span>))
+ax_top.plot([<span class="n">1</span>,<span class="n">2</span>,<span class="n">3</span>,<span class="n">4</span>], [<span class="n">10</span>,<span class="n">20</span>,<span class="n">15</span>,<span class="n">25</span>], color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>)
+ax_top.set_title(<span class="s">'主图：跨整行的趋势'</span>)
+ax_top.grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+<span class="c"># 左下角的小图</span>
+ax_bl = fig.subplot(<span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+ax_bl.bar([<span class="s">'A'</span>,<span class="s">'B'</span>], [<span class="n">3</span>,<span class="n">7</span>], color=<span class="s">'darkorange'</span>)
+ax_bl.set_title(<span class="s">'子图 A'</span>)
+
+<span class="c"># 右下角的小图</span>
+ax_br = fig.subplot(<span class="n">2</span>, <span class="n">2</span>, <span class="n">4</span>)
+ax_br.scatter([<span class="n">1</span>,<span class="n">2</span>,<span class="n">3</span>], [<span class="n">3</span>,<span class="n">1</span>,<span class="n">2</span>], c=[<span class="s">'red'</span>,<span class="s">'green'</span>,<span class="s">'blue'</span>], s=<span class="n">50</span>)
+ax_br.set_title(<span class="s">'子图 B'</span>)
+
+fig.tight_layout()
+fig.savefig(<span class="s">'irregular.png'</span>, dpi=<span class="n">200</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.3</span>双坐标轴 twinx / twiny
+            </h3>
+            <p>
+              在同一 Axes
+              上绘制量纲不同的两组数据（例如温度与湿度、销量与销售额），但共享一个
+              X 轴。
+            </p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">twinx_demo.py</span>
+              </div>
+              <pre><code>fig, ax1 = plt.subplots()
+
+<span class="c"># 主坐标轴（左 Y）：温度</span>
+ax1.plot([<span class="n">1</span>,<span class="n">2</span>,<span class="n">3</span>,<span class="n">4</span>,<span class="n">5</span>], [<span class="n">10</span>,<span class="n">15</span>,<span class="n">13</span>,<span class="n">17</span>,<span class="n">20</span>],
+         <span class="s">'b-o'</span>, lw=<span class="n">2</span>, label=<span class="s">'温度'</span>)
+ax1.set_ylabel(<span class="s">'温度 (°C)'</span>, color=<span class="s">'blue'</span>)
+ax1.tick_params(axis=<span class="s">'y'</span>, labelcolor=<span class="s">'blue'</span>)
+
+<span class="c"># 共享 X 轴，创建独立的右侧 Y 轴</span>
+ax2 = ax1.twinx()
+ax2.plot([<span class="n">1</span>,<span class="n">2</span>,<span class="n">3</span>,<span class="n">4</span>,<span class="n">5</span>], [<span class="n">100</span>,<span class="n">120</span>,<span class="n">110</span>,<span class="n">130</span>,<span class="n">150</span>],
+         <span class="s">'r-s'</span>, lw=<span class="n">2</span>, label=<span class="s">'湿度'</span>)
+ax2.set_ylabel(<span class="s">'湿度 (%)'</span>, color=<span class="s">'red'</span>)
+ax2.tick_params(axis=<span class="s">'y'</span>, labelcolor=<span class="s">'red'</span>)
+
+<span class="c"># 合并两轴的图例</span>
+lines1, labels1 = ax1.get_legend_handles_labels()
+lines2, labels2 = ax2.get_legend_handles_labels()
+ax1.legend(lines1 + lines2, labels1 + labels2, loc=<span class="s">'upper left'</span>)
+
+ax1.set_title(<span class="s">'温湿度联合监测'</span>)
+fig.tight_layout()
+fig.savefig(<span class="s">'twinx.png'</span>)</code></pre>
+            </div>
+            <div class="tip">
+              <strong>提示：</strong
+              >双坐标轴在物理量纲差异巨大时尤其有用，但应谨慎使用 —
+              如果两轴数据可以归一化到同一尺度，建议使用单坐标轴加归一化数据。
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.4</span>边距与子图间距
+            </h3>
+            <div class="code-card compact">
+              <pre><code>fig, axes = plt.subplots(<span class="n">2</span>, <span class="n">2</span>)
+
+<span class="c"># 自动调整子图间距，避免标签重叠</span>
+fig.tight_layout()
+
+<span class="c"># 手动精细控制边距</span>
+fig.subplots_adjust(left=<span class="n">0.1</span>, right=<span class="n">0.95</span>, top=<span class="n">0.9</span>, bottom=<span class="n">0.1</span>,
+                    wspace=<span class="n">0.3</span>, hspace=<span class="n">0.4</span>)
+
+<span class="c"># 单个 Axes 的边距（在数据范围外留 10% / 15% 空白）</span>
+axes[<span class="n">0</span>, <span class="n">0</span>].margins(x=<span class="n">0.1</span>, y=<span class="n">0.15</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.5</span>Figure 尺寸控制
+            </h3>
+            <div class="code-card compact">
+              <pre><code><span class="c"># 创建时指定英寸尺寸</span>
+fig, ax = plt.subplots(figsize=(<span class="n">10</span>, <span class="n">6</span>))
+
+<span class="c"># 动态调整尺寸（像素）</span>
+fig2, ax2 = plt.subplots()
+fig2.set_size(<span class="n">1200</span>, <span class="n">800</span>)
+
+<span class="c"># 调整宽高比</span>
+fig3, ax3 = plt.subplots(figsize=(<span class="n">8</span>, <span class="n">4</span>))  <span class="c"># 宽 2:1</span></code></pre>
+            </div>
+            <div class="note">
+              <strong>常用尺寸参考：</strong>单栏论文图 3.5 英寸、双栏 7
+              英寸、海报 16 英寸、PPT 16:9 推荐 13.33×7.5 英寸。
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.6</span>自定义刻度位置与标签
+            </h3>
+            <p>
+              通过 <code>set_xticks</code> /
+              <code>set_xticklabels</code> 精确控制刻度位置和显示文本。
+            </p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">custom_ticks.py</span>
+              </div>
+              <pre><code>fig, ax = plt.subplots()
+x = list(range(<span class="n">0</span>, <span class="n">11</span>))
+y = [xi**<span class="n">2</span> <span class="k">for</span> xi <span class="k">in</span> x]
+ax.plot(x, y, <span class="s">'b-o'</span>, lw=<span class="n">2</span>)
+
+<span class="c"># 自定义 X 轴刻度位置</span>
+ax.set_xticks([<span class="n">0</span>, <span class="n">2</span>, <span class="n">4</span>, <span class="n">6</span>, <span class="n">8</span>, <span class="n">10</span>])
+
+<span class="c"># 自定义 X 轴刻度标签</span>
+ax.set_xticklabels([<span class="s">'零'</span>, <span class="s">'贰'</span>, <span class="s">'肆'</span>, <span class="s">'陆'</span>, <span class="s">'捌'</span>, <span class="s">'拾'</span>],
+                  fontsize=<span class="n">12</span>)
+
+<span class="c"># 旋转 X 轴标签以避免重叠</span>
+<span class="c"># ax.set_xticklabels(labels, rotation=45, ha='right')</span>
+
+<span class="c"># 设置 Y 轴刻度</span>
+ax.set_yticks([<span class="n">0</span>, <span class="n">25</span>, <span class="n">50</span>, <span class="n">75</span>, <span class="n">100</span>])
+ax.grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+fig.savefig(<span class="s">'custom_ticks.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.7</span>对数与线性坐标
+            </h3>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">log_scales.py</span>
+              </div>
+              <pre><code>fig, axes = plt.subplots(<span class="n">1</span>, <span class="n">3</span>, figsize=(<span class="n">15</span>, <span class="n">4</span>))
+x = list(range(<span class="n">1</span>, <span class="n">100</span>))
+y = [xi**<span class="n">2.5</span> <span class="k">for</span> xi <span class="k">in</span> x]
+
+<span class="c"># 线性坐标（默认）</span>
+axes[<span class="n">0</span>].plot(x, y, color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>)
+axes[<span class="n">0</span>].set_title(<span class="s">'线性 - linear'</span>)
+axes[<span class="n">0</span>].grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+<span class="c"># 半对数：X 线性、Y 对数</span>
+axes[<span class="n">1</span>].semilogy(x, y, color=<span class="s">'darkorange'</span>, lw=<span class="n">2</span>)
+axes[<span class="n">1</span>].set_title(<span class="s">'半对数 - semilogy'</span>)
+axes[<span class="n">1</span>].grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+<span class="c"># 双对数</span>
+axes[<span class="n">2</span>].loglog(x, y, color=<span class="s">'forestgreen'</span>, lw=<span class="n">2</span>)
+axes[<span class="n">2</span>].set_title(<span class="s">'双对数 - loglog'</span>)
+axes[<span class="n">2</span>].grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+fig.tight_layout()
+fig.savefig(<span class="s">'log_scales.png'</span>)</code></pre>
+            </div>
+            <div class="tip">
+              <strong>使用场景：</strong
+              >线性用于直观比较；半对数用于指数增长数据（如疫情传播、金融收益）；双对数用于幂律分布（如城市人口、地震强度）。
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.8</span>次刻度与边框
+            </h3>
+            <div class="code-card compact">
+              <pre><code>fig, ax = plt.subplots()
+x = list(range(<span class="n">10</span>))
+y = [xi**<span class="n">2</span> <span class="k">for</span> xi <span class="k">in</span> x]
+ax.plot(x, y, <span class="s">'b-o'</span>, lw=<span class="n">2</span>)
+
+<span class="c"># 启用次刻度</span>
+ax.minorticks_on()
+
+<span class="c"># 主刻度网格（粗）</span>
+ax.grid(<span class="k">True</span>, which=<span class="s">'major'</span>, linewidth=<span class="n">0.8</span>, color=<span class="s">'#999999'</span>)
+
+<span class="c"># 次刻度网格（细）</span>
+ax.grid(<span class="k">True</span>, which=<span class="s">'minor'</span>, linewidth=<span class="n">0.4</span>,
+        color=<span class="s">'#cccccc'</span>, linestyle=<span class="s">':'</span>)
+
+fig.savefig(<span class="s">'ticks_box.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">5.9</span>网格定制
+            </h3>
+            <div class="code-card compact">
+              <pre><code>fig, ax = plt.subplots()
+ax.plot([<span class="n">0</span>, <span class="n">10</span>], [<span class="n">0</span>, <span class="n">10</span>], <span class="s">'b-o'</span>, lw=<span class="n">2</span>)
+
+<span class="c"># 基础网格</span>
+ax.grid(<span class="k">True</span>, linestyle=<span class="s">'--'</span>, alpha=<span class="n">0.5</span>)
+
+<span class="c"># 主/次刻度网格</span>
+ax.grid(<span class="k">True</span>, which=<span class="s">'major'</span>, linewidth=<span class="n">0.8</span>, color=<span class="s">'#999999'</span>)
+ax.grid(<span class="k">True</span>, which=<span class="s">'minor'</span>, linewidth=<span class="n">0.4</span>,
+        color=<span class="s">'#cccccc'</span>, linestyle=<span class="s">':'</span>)
+
+fig.savefig(<span class="s">'grid.png'</span>)</code></pre>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第六章：样式与配置 ============ -->
+        <article class="chapter" id="ch6">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 06</span>
+            <h2 class="chapter-title">样式与配置</h2>
+            <p class="chapter-desc">
+              通过 rcParams 定制全局样式、字体与颜色系统。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">6.1</span>rcParams 全局配置
+            </h3>
+            <div class="code-card compact">
+              <pre><code><span class="k">from</span> rsplotlib.pylab <span class="k">import</span> mpl
+
+<span class="c"># 设置 sans-serif 字体族优先级列表</span>
+mpl.rcParams[<span class="s">'font.sans-serif'</span>] = [<span class="s">'PingFang SC'</span>, <span class="s">'Microsoft YaHei'</span>, <span class="s">'Arial'</span>]
+
+<span class="c"># 设置默认字体大小</span>
+mpl.rcParams[<span class="s">'font.size'</span>] = <span class="n">12</span>
+
+<span class="c"># 设置线条默认宽度</span>
+mpl.rcParams[<span class="s">'lines.linewidth'</span>] = <span class="n">2.0</span></code></pre>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>配置项</th>
+                  <th>默认值</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>font.sans-serif</td>
+                  <td>系统默认</td>
+                  <td>无衬线字体列表</td>
+                </tr>
+                <tr>
+                  <td>font.size</td>
+                  <td>10</td>
+                  <td>默认字体大小</td>
+                </tr>
+                <tr>
+                  <td>lines.linewidth</td>
+                  <td>1.5</td>
+                  <td>默认线宽</td>
+                </tr>
+                <tr>
+                  <td>figure.dpi</td>
+                  <td>100</td>
+                  <td>Figure 默认 DPI</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">6.2</span>字体与国际化
+            </h3>
+            <p>
+              rsplotlib
+              自动跨平台检测系统字体，优先选择覆盖范围最广的字体，确保整行文本由同一字体渲染，保持视觉一致性。
+            </p>
+            <div class="info-grid two">
+              <div class="info-card">
+                <div class="info-title">macOS 推荐</div>
+                <p>Arial Unicode MS、PingFang SC、Helvetica、Arial</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title">Linux 推荐</div>
+                <p>DejaVu Sans、Noto Sans CJK SC、WenQuanYi Micro Hei</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title">Windows 推荐</div>
+                <p>Microsoft YaHei、SimHei、SimSun、Arial</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title">自定义字体</div>
+                <p>
+                  通过 <code>_rs.register_sans_serif_font(path)</code> 注册任意
+                  .ttf / .otf
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">6.3</span>plt.style 模块
+            </h3>
+            <p>
+              与 Matplotlib 兼容的样式系统，通过
+              <code>plt.style</code> 模块管理全局样式。
+            </p>
+            <div class="code-card compact">
+              <pre><code><span class="k">from</span> rsplotlib <span class="k">import</span> pyplot <span class="k">as</span> plt
+
+<span class="c"># 查看可用样式</span>
+print(plt.style.available)
+
+<span class="c"># 应用预设样式</span>
+plt.style.use(<span class="s">'default'</span>)</code></pre>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第七章：输出与分辨率 ============ -->
+        <article class="chapter" id="ch7">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 07</span>
+            <h2 class="chapter-title">输出与分辨率</h2>
+            <p class="chapter-desc">
+              掌握 savefig、dpi 参数，精准控制图像输出质量与文件大小。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">7.1</span>savefig 保存图像
+            </h3>
+            <div class="code-card compact">
+              <pre><code>fig.savefig(<span class="s">'default.png'</span>)                 <span class="c"># 使用 Figure 默认 DPI</span>
+fig.savefig(<span class="s">'screen.png'</span>, dpi=<span class="n">150</span>)         <span class="c"># 屏幕显示</span>
+fig.savefig(<span class="s">'print.png'</span>, dpi=<span class="n">300</span>)          <span class="c"># 出版级</span>
+fig.savefig(<span class="s">'vector.svg'</span>)                 <span class="c"># 矢量格式</span></code></pre>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>格式</th>
+                  <th>扩展名</th>
+                  <th>DPI 建议</th>
+                  <th>特点</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>PNG（低）</td>
+                  <td>.png</td>
+                  <td>72-100</td>
+                  <td>文件小、位图</td>
+                </tr>
+                <tr>
+                  <td>PNG（屏幕）</td>
+                  <td>.png</td>
+                  <td>150</td>
+                  <td>中等、网页/文档</td>
+                </tr>
+                <tr>
+                  <td>PNG（出版）</td>
+                  <td>.png</td>
+                  <td>300</td>
+                  <td>高分辨率、打印</td>
+                </tr>
+                <tr>
+                  <td>SVG</td>
+                  <td>.svg</td>
+                  <td>不适用</td>
+                  <td>矢量、无限缩放</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">7.2</span>像素尺寸计算公式
+            </h3>
+            <div class="formula">
+              <div class="formula-main">
+                像素宽度 = <span class="var">figsize 宽度</span> (英寸) ×
+                <span class="var">dpi</span>
+              </div>
+              <div class="formula-example">
+                例如：figsize=(8, 6) × dpi=300 → <strong>2400 × 1800 px</strong>
+              </div>
+              <div class="formula-example">
+                例如：figsize=(8, 6) × dpi=150 → <strong>1200 × 900 px</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">7.3</span>批量保存多张图
+            </h3>
+            <p>
+              实际项目经常需要批量生成图表（例如生成报告中的所有图、批量处理实验结果）。以下是常见的批量保存模式。
+            </p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">batch_save.py</span>
+              </div>
+              <pre><code><span class="k">import</span> os
+<span class="k">from</span> rsplotlib <span class="k">import</span> pyplot <span class="k">as</span> plt
+
+os.makedirs(<span class="s">'output'</span>, exist_ok=<span class="k">True</span>)
+
+<span class="c"># 方式一：循环生成并保存</span>
+<span class="k">for</span> i, (x, y, title) <span class="k">in</span> <span class="k">enumerate</span>(datasets):
+    fig, ax = plt.subplots(figsize=(<span class="n">8</span>, <span class="n">6</span>))
+    ax.plot(x, y, lw=<span class="n">2</span>)
+    ax.set_title(title)
+    fig.savefig(<span class="s">f'output/chart_{i:03d}.png'</span>, dpi=<span class="n">150</span>)
+
+<span class="c"># 方式二：固定数据生成多视角</span>
+fig, axes = plt.subplots(<span class="n">1</span>, <span class="n">3</span>, figsize=(<span class="n">15</span>, <span class="n">4</span>))
+<span class="k">for</span> ax, style <span class="k">in</span> zip(axes, [<span class="s">'default'</span>, <span class="s">'dark'</span>, <span class="s">'minimal'</span>]):
+    plt.style.use(style)
+    ax.plot(x, y)
+    ax.set_title(style)
+fig.savefig(<span class="s">'output/styles.png'</span>, dpi=<span class="n">200</span>)
+
+<span class="c"># 方式三：保存为 SVG 便于后期编辑</span>
+fig.savefig(<span class="s">'output/chart.svg'</span>)</code></pre>
+            </div>
+            <div class="tip">
+              <strong>性能建议：</strong>批量保存时尽量复用 Figure
+              对象，或者使用 <code>fig.clf()</code> 清空再绘制。避免反复调用
+              <code>plt.subplots()</code> 创建新
+              Figure，频繁的内存分配会影响性能。
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">7.4</span>内存与文件大小优化
+            </h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>场景</th>
+                  <th>建议</th>
+                  <th>理由</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>大量小图（图标、缩略图）</td>
+                  <td>dpi=72-100 + PNG</td>
+                  <td>文件小、足够清晰</td>
+                </tr>
+                <tr>
+                  <td>网页展示</td>
+                  <td>dpi=150 + PNG</td>
+                  <td>Retina 屏最佳</td>
+                </tr>
+                <tr>
+                  <td>学术论文 / 印刷</td>
+                  <td>dpi=300 + PNG</td>
+                  <td>出版标准</td>
+                </tr>
+                <tr>
+                  <td>需要后期编辑</td>
+                  <td>SVG 矢量</td>
+                  <td>无损缩放</td>
+                </tr>
+                <tr>
+                  <td>超大数据点</td>
+                  <td>降低 dpi 或缩小 figsize</td>
+                  <td>避免文件过大</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </article>
+
+        <!-- ============ 第七章半：颜色与样式深入 ============ -->
+        <article class="chapter" id="ch7b">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 07.5</span>
+            <h2 class="chapter-title">颜色系统深入</h2>
+            <p class="chapter-desc">
+              掌握命名颜色、十六进制、RGB
+              元组，以及如何在图表中组合出和谐的色彩。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">7.5</span>颜色格式与命名
+            </h3>
+            <p>rsplotlib 支持以下颜色格式：</p>
+            <ul
+              style="
+                margin: 0 0 16px 24px;
+                color: var(--fg-secondary);
+                line-height: 1.8;
+              "
+            >
+              <li>
+                <strong>命名颜色</strong
+                >：<code>'red'</code>、<code>'steelblue'</code>、<code
+                  >'darkorange'</code
+                >
+                等 CSS 颜色名
+              </li>
+              <li>
+                <strong>十六进制</strong>：<code>'#FF6B6B'</code>、<code
+                  >'#4ECDC4'</code
+                >
+                等
+              </li>
+              <li>
+                <strong>简写十六进制</strong>：<code>'#F6B'</code> 等同于
+                <code>'#FF66BB'</code>
+              </li>
+            </ul>
+
+            <h4>常用命名颜色速查</h4>
+            <div
+              class="info-grid two"
+              style="grid-template-columns: repeat(3, 1fr)"
+            >
+              <div class="info-card">
+                <div class="info-title" style="color: #ff6b6b">
+                  ■ red / crimson
+                </div>
+                <p>警告、错误、负向</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title" style="color: #4ecdc4">
+                  ■ teal / cyan
+                </div>
+                <p>技术、平衡、中性</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title" style="color: #ffd93d">
+                  ■ gold / yellow
+                </div>
+                <p>注意、高亮、警示</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title" style="color: #6bcb77">■ green</div>
+                <p>正向、成功、增长</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title" style="color: #4d96ff">
+                  ■ blue / steelblue
+                </div>
+                <p>数据、中性、可信</p>
+              </div>
+              <div class="info-card">
+                <div class="info-title" style="color: #c4a7e7">
+                  ■ purple / violet
+                </div>
+                <p>创意、特殊类别</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">7.6</span>调色板与配色方案
+            </h3>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">palette.py</span>
+              </div>
+              <pre><code><span class="c"># 推荐调色板：Material Design 风格</span>
+PALETTE_MATERIAL = [
+    <span class="s">'#FF6B6B'</span>, <span class="s">'#4ECDC4'</span>, <span class="s">'#45B7D1'</span>, <span class="s">'#FFA07A'</span>,
+    <span class="s">'#98D8C8'</span>, <span class="s">'#FFD93D'</span>, <span class="s">'#6BCB77'</span>, <span class="s">'#C9A7EB'</span>
+]
+
+<span class="c"># 推荐调色板：科学论文风格（柔和不刺眼）</span>
+PALETTE_SCIENCE = [
+    <span class="s">'#4D96FF'</span>, <span class="s">'#6BCB77'</span>, <span class="s">'#FF6B6B'</span>, <span class="s">'#FFD93D'</span>,
+    <span class="s">'#9B59B6'</span>, <span class="s">'#1ABC9C'</span>, <span class="s">'#E67E22'</span>, <span class="s">'#34495E'</span>
+]
+
+<span class="c"># 推荐调色板：商业演示风格</span>
+PALETTE_BUSINESS = [
+    <span class="s">'#1F4E79'</span>, <span class="s">'#2E75B6'</span>, <span class="s">'#5B9BD5'</span>, <span class="s">'#9DC3E6'</span>,
+    <span class="s">'#BDD7EE'</span>, <span class="s">'#DEEBF7'</span>
+]
+
+fig, ax = plt.subplots()
+<span class="k">for</span> i, color <span class="k">in</span> <span class="k">enumerate</span>(PALETTE_MATERIAL):
+    ax.plot([i, i+<span class="n">1</span>], [i, i+<span class="n">1</span>], color=color, lw=<span class="n">3</span>, label=<span class="s">f'颜色 {i+1}'</span>)
+ax.legend(ncol=<span class="n">2</span>)
+fig.savefig(<span class="s">'palette.png'</span>)</code></pre>
+            </div>
+            <div class="tip">
+              <strong>配色原则：</strong
+              >分类数据使用对比鲜明的颜色（多色）；顺序数据使用同一色相的不同明度（单色渐变）；发散数据使用双色发散（如红-白-蓝）。避免红绿同时使用（色盲不友好）。
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">7.7</span>透明色与 alpha 通道
+            </h3>
+            <div class="code-card compact">
+              <pre><code>fig, ax = plt.subplots()
+x = list(range(<span class="n">50</span>))
+y1 = [xi + random.gauss(<span class="n">0</span>, <span class="n">2</span>) <span class="k">for</span> xi <span class="k">in</span> x]
+y2 = [xi + random.gauss(<span class="n">0</span>, <span class="n">2</span>) <span class="k">for</span> xi <span class="k">in</span> x]
+
+<span class="c"># alpha=0.5 让两条曲线半透明，便于观察重叠区域</span>
+ax.plot(x, y1, color=<span class="s">'steelblue'</span>, alpha=<span class="n">0.5</span>, lw=<span class="n">2</span>, label=<span class="s">'序列 1'</span>)
+ax.plot(x, y2, color=<span class="s">'darkorange'</span>, alpha=<span class="n">0.5</span>, lw=<span class="n">2</span>, label=<span class="s">'序列 2'</span>)
+ax.legend()
+ax.set_title(<span class="s">'半透明叠加（alpha=0.5）'</span>)
+fig.savefig(<span class="s">'alpha.png'</span>)</code></pre>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第八章：API 速览 ============ -->
+        <article class="chapter" id="ch8">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 08</span>
+            <h2 class="chapter-title">API 速览</h2>
+            <p class="chapter-desc">快速查询常用 Axes 方法与模块级函数。</p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">8.1</span>Axes 装饰方法
+            </h3>
+            <div class="api-list">
+              <div class="api-item">
+                <code class="api-name">set_title</code
+                ><code class="api-sig-inline"
+                  >(title, fontsize=None, color=None)</code
+                >
+                <p>设置图表标题。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">set_xlabel / set_ylabel</code
+                ><code class="api-sig-inline"
+                  >(label, fontsize=None, color=None)</code
+                >
+                <p>设置坐标轴标签。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">set_xlim / set_ylim</code
+                ><code class="api-sig-inline">(xmin, xmax)</code>
+                <p>设置坐标范围。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">grid</code
+                ><code class="api-sig-inline"
+                  >(True/False, linestyle=None, alpha=None)</code
+                >
+                <p>显示/隐藏网格线。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">legend</code
+                ><code class="api-sig-inline">()</code>
+                <p>显示图例（绘图时需传入 label）。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">text</code
+                ><code class="api-sig-inline"
+                  >(x, y, text, fontsize=None, color=None)</code
+                >
+                <p>在指定坐标添加文本。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">annotate</code
+                ><code class="api-sig-inline"
+                  >(text, xy, xytext=None, arrowprops=None)</code
+                >
+                <p>添加带箭头的标注。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">set_xticks / set_yticks</code
+                ><code class="api-sig-inline">(ticks, labels=None)</code>
+                <p>设置刻度位置和标签。</p>
+              </div>
+              <div class="api-item">
+                <code class="api-name">set_xscale / set_yscale</code
+                ><code class="api-sig-inline">(scale)</code>
+                <p>设置坐标尺度（'linear' / 'log'）。</p>
+              </div>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第九章：性能与架构 ============ -->
+        <article class="chapter" id="ch9">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 09</span>
+            <h2 class="chapter-title">性能与架构</h2>
+            <p class="chapter-desc">
+              深入理解 Rust + Python 混合架构如何实现高性能渲染。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">9.1</span>分层架构
+            </h3>
+            <div class="arch-stack">
+              <div class="arch-layer python">
+                <div class="arch-layer-head">
+                  <span class="arch-layer-tag">Python</span>
+                  <span class="arch-layer-name">API 兼容层</span>
+                </div>
+                <div class="arch-layer-body">
+                  <code>pyplot.py</code> · Matplotlib 兼容 API<br />
+                  <code>api.py</code> · 参数归一化与别名映射<br />
+                  <code>_patch_*</code> · 方法补丁 / 动态分发
+                </div>
+              </div>
+              <div class="arch-arrow">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <polyline points="19 12 12 19 5 12" />
+                </svg>
+                <span>PyO3</span>
+              </div>
+              <div class="arch-layer rust">
+                <div class="arch-layer-head">
+                  <span class="arch-layer-tag">Rust</span>
+                  <span class="arch-layer-name">高性能核心</span>
+                </div>
+                <div class="arch-layer-body">
+                  <code>lib.rs</code> · 模块注册 / 字体系统<br />
+                  <code>figure.rs</code> · Figure 对象 / 渲染调度<br />
+                  <code>axes.rs</code> · Axes 对象 / 数据解析<br />
+                  <code>elements.rs</code> · PlotElement 枚举 (Line,
+                  ScatterMulti, Bar…)<br />
+                  <code>axes_render_elements.rs</code> · plotters 渲染引擎<br />
+                  <code>pyfuncs.rs</code> · 模块级函数暴露
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">9.2</span>性能对比
+            </h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>功能</th>
+                  <th>传统 Matplotlib</th>
+                  <th>rsplotlib</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>scatter(c=颜色数组)</td>
+                  <td>Python 遍历每点</td>
+                  <td>Rust ScatterMulti 统一渲染</td>
+                </tr>
+                <tr>
+                  <td>scatter(s=大小数组)</td>
+                  <td>Python 遍历每点</td>
+                  <td>Rust 统一大小数组处理</td>
+                </tr>
+                <tr>
+                  <td>批量水平线 (1000 条)</td>
+                  <td>1000 次 axhline 调用</td>
+                  <td>1 次 hlines Rust 批量调用</td>
+                </tr>
+                <tr>
+                  <td>savefig(dpi=300)</td>
+                  <td>无 / Python 缩放</td>
+                  <td>Rust 直接写入 PNG DPI 元数据</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">9.3</span>PlotElement 数据结构
+            </h3>
+            <p>
+              在 Rust 层，所有绘图元素统一由
+              <code>PlotElement</code> 枚举管理，渲染时由
+              <code>axes_render_elements</code> 统一调度到 plotters。
+            </p>
+            <div class="code-card compact">
+              <pre><code><span class="c">// elements.rs — 核心数据结构（概念）</span>
+<span class="k">pub enum</span> PlotElement {
+    Line { ... },
+    ScatterMulti { x, y, s_list, c_list, marker, alpha, ... },
+    Bar { ... },
+    Histogram { ... },
+    HSpan { y1, y2, color, alpha },
+    VSpan { x1, x2, color, alpha },
+    AxLine { xy1, xy2, color, linestyle, linewidth },
+    Arrow { x1, y1, x2, y2, color, linewidth, head_size },
+    Text { x, y, text, fontsize, color },
+    FillBetween { ... },
+}</code></pre>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第十章：综合实战 ============ -->
+        <article class="chapter" id="ch10">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 10</span>
+            <h2 class="chapter-title">综合实战</h2>
+            <p class="chapter-desc">
+              将前面所学综合应用，绘制一张完整的数据分析报告图。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">10.1</span>数据分析报告
+            </h3>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">sales_report.py</span>
+              </div>
+              <pre><code><span class="k">from</span> rsplotlib <span class="k">import</span> pyplot <span class="k">as</span> plt
+<span class="k">from</span> rsplotlib.pylab <span class="k">import</span> mpl
+<span class="k">import</span> random
+
+mpl.rcParams[<span class="s">'font.sans-serif'</span>] = [<span class="s">'PingFang SC'</span>]
+
+<span class="c"># 2x2 子图网格</span>
+fig, axes = plt.subplots(<span class="n">2</span>, <span class="n">2</span>, figsize=(<span class="n">12</span>, <span class="n">8</span>))
+
+<span class="c"># 子图 1：季度趋势折线</span>
+quarters = [<span class="s">'Q1'</span>, <span class="s">'Q2'</span>, <span class="s">'Q3'</span>, <span class="s">'Q4'</span>]
+axes[<span class="n">0</span>].plot(quarters, [<span class="n">120</span>, <span class="n">150</span>, <span class="n">180</span>, <span class="n">210</span>], marker=<span class="s">'o'</span>,
+                color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>, label=<span class="s">'产品A'</span>)
+axes[<span class="n">0</span>].plot(quarters, [<span class="n">80</span>, <span class="n">95</span>, <span class="n">110</span>, <span class="n">130</span>], marker=<span class="s">'s'</span>,
+                color=<span class="s">'darkorange'</span>, lw=<span class="n">2</span>, label=<span class="s">'产品B'</span>)
+axes[<span class="n">0</span>].axvspan(<span class="n">2.5</span>, <span class="n">3.5</span>, color=<span class="s">'gold'</span>, alpha=<span class="n">0.2</span>)  <span class="c"># 突出 Q4</span>
+axes[<span class="n">0</span>].set_title(<span class="s">'季度销售趋势'</span>)
+axes[<span class="n">0</span>].legend()
+axes[<span class="n">0</span>].grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+<span class="c"># 子图 2：Q4 销量占比饼图</span>
+axes[<span class="n">1</span>].pie([<span class="n">210</span>, <span class="n">130</span>, <span class="n">250</span>],
+              labels=[<span class="s">'产品A'</span>, <span class="s">'产品B'</span>, <span class="s">'产品C'</span>],
+              colors=[<span class="s">'steelblue'</span>, <span class="s">'darkorange'</span>, <span class="s">'forestgreen'</span>])
+axes[<span class="n">1</span>].set_title(<span class="s">'Q4 销售占比'</span>)
+
+<span class="c"># 子图 3：产品A 销售分布（每点独立颜色）</span>
+random.seed(<span class="n">42</span>)
+xs = [random.gauss(<span class="n">150</span>, <span class="n">30</span>) <span class="k">for</span> _ <span class="k">in</span> range(<span class="n">200</span>)]
+ys = [random.gauss(<span class="n">0</span>, <span class="n">1</span>) <span class="k">for</span> _ <span class="k">in</span> range(<span class="n">200</span>)]
+cs = [<span class="s">'red'</span> <span class="k">if</span> y > <span class="n">0</span> <span class="k">else</span> <span class="s">'blue'</span> <span class="k">for</span> y <span class="k">in</span> ys]
+axes[<span class="n">2</span>].scatter(xs, ys, c=cs, s=<span class="n">20</span>, alpha=<span class="n">0.6</span>)
+axes[<span class="n">2</span>].set_title(<span class="s">'产品A 销售分布'</span>)
+axes[<span class="n">2</span>].set_xlabel(<span class="s">'销售额'</span>)
+axes[<span class="n">2</span>].set_ylabel(<span class="s">'偏差'</span>)
+
+<span class="c"># 子图 4：年度总销量对比 + 标注</span>
+axes[<span class="n">3</span>].bar([<span class="s">'产品A'</span>, <span class="s">'产品B'</span>, <span class="s">'产品C'</span>],
+             [<span class="n">120</span>+<span class="n">150</span>+<span class="n">180</span>+<span class="n">210</span>, <span class="n">80</span>+<span class="n">95</span>+<span class="n">110</span>+<span class="n">130</span>, <span class="n">200</span>+<span class="n">180</span>+<span class="n">220</span>+<span class="n">250</span>],
+             color=[<span class="s">'steelblue'</span>, <span class="s">'darkorange'</span>, <span class="s">'forestgreen'</span>])
+axes[<span class="n">3</span>].annotate(<span class="s">'冠军'</span>, xy=(<span class="n">2</span>, <span class="n">850</span>), xytext=(<span class="n">1</span>, <span class="n">880</span>),
+                 color=<span class="s">'red'</span>, arrowprops={<span class="s">'arrowstyle'</span>: <span class="s">'->'</span>})
+axes[<span class="n">3</span>].set_title(<span class="s">'年度总销量对比'</span>)
+axes[<span class="n">3</span>].set_ylabel(<span class="s">'总销量'</span>)
+
+fig.tight_layout()
+fig.savefig(<span class="s">'sales_report.png'</span>, dpi=<span class="n">200</span>)
+print(<span class="s">'报告已生成'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">10.2</span>机器学习可视化
+            </h3>
+            <p>
+              机器学习中常见的可视化场景：训练曲线、混淆矩阵、特征重要性、决策边界等。
+            </p>
+            <h4>训练曲线</h4>
+            <div class="code-card compact">
+              <pre><code>fig, (ax1, ax2) = plt.subplots(<span class="n">1</span>, <span class="n">2</span>, figsize=(<span class="n">12</span>, <span class="n">4</span>))
+
+<span class="c"># 模拟训练历史</span>
+epochs = list(range(<span class="n">1</span>, <span class="n">51</span>))
+train_loss = [<span class="n">2.5</span> * <span class="n">0.95</span>**e + random.gauss(<span class="n">0</span>, <span class="n">0.05</span>) <span class="k">for</span> e <span class="k">in</span> epochs]
+val_loss = [<span class="n">2.6</span> * <span class="n">0.94</span>**e + random.gauss(<span class="n">0</span>, <span class="n">0.08</span>) <span class="k">for</span> e <span class="k">in</span> epochs]
+train_acc = [<span class="n">1</span> - <span class="n">0.6</span> * <span class="n">0.96</span>**e <span class="k">for</span> e <span class="k">in</span> epochs]
+val_acc = [<span class="n">1</span> - <span class="n">0.7</span> * <span class="n">0.95</span>**e <span class="k">for</span> e <span class="k">in</span> epochs]
+
+ax1.plot(epochs, train_loss, label=<span class="s">'训练'</span>, color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>)
+ax1.plot(epochs, val_loss, label=<span class="s">'验证'</span>, color=<span class="s">'darkorange'</span>, lw=<span class="n">2</span>)
+ax1.set_xlabel(<span class="s">'Epoch'</span>); ax1.set_ylabel(<span class="s">'Loss'</span>)
+ax1.set_title(<span class="s">'损失曲线'</span>)
+ax1.legend(); ax1.grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+ax2.plot(epochs, train_acc, label=<span class="s">'训练'</span>, color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>)
+ax2.plot(epochs, val_acc, label=<span class="s">'验证'</span>, color=<span class="s">'darkorange'</span>, lw=<span class="n">2</span>)
+ax2.set_xlabel(<span class="s">'Epoch'</span>); ax2.set_ylabel(<span class="s">'Accuracy'</span>)
+ax2.set_title(<span class="s">'准确率曲线'</span>)
+ax2.legend(); ax2.grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+
+fig.tight_layout()
+fig.savefig(<span class="s">'training_curves.png'</span>, dpi=<span class="n">200</span>)</code></pre>
+            </div>
+
+            <h4>特征重要性条形图</h4>
+            <div class="code-card compact">
+              <pre><code>features = [<span class="s">'用户活跃度'</span>, <span class="s">'消费金额'</span>, <span class="s">'停留时长'</span>, <span class="s">'点击率'</span>, <span class="s">'访问频率'</span>]
+importance = [<span class="n">0.32</span>, <span class="n">0.28</span>, <span class="n">0.18</span>, <span class="n">0.14</span>, <span class="n">0.08</span>]
+
+<span class="c"># 按重要性排序</span>
+sorted_data = <span class="k">sorted</span>(<span class="k">zip</span>(features, importance), key=<span class="k">lambda</span> x: x[<span class="n">1</span>])
+features_sorted = [x[<span class="n">0</span>] <span class="k">for</span> x <span class="k">in</span> sorted_data]
+values_sorted = [x[<span class="n">1</span>] <span class="k">for</span> x <span class="k">in</span> sorted_data]
+
+fig, ax = plt.subplots()
+ax.barh(features_sorted, values_sorted, color=<span class="s">'steelblue'</span>)
+ax.set_xlabel(<span class="s">'重要性'</span>)
+ax.set_title(<span class="s">'特征重要性排序'</span>)
+fig.savefig(<span class="s">'feature_importance.png'</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">10.3</span>金融与时间序列
+            </h3>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">finance.py</span>
+              </div>
+              <pre><code><span class="k">import</span> math
+fig, ax = plt.subplots(figsize=(<span class="n">12</span>, <span class="n">6</span>))
+
+<span class="c"># 模拟 252 个交易日（1 年）</span>
+days = list(range(<span class="n">252</span>))
+price = [<span class="n">100</span>]
+<span class="k">for</span> _ <span class="k">in</span> <span class="k">range</span>(<span class="n">251</span>):
+    ret = random.gauss(<span class="n">0.0005</span>, <span class="n">0.02</span>)
+    price.append(price[-<span class="n">1</span>] * (<span class="n">1</span> + ret))
+
+ax.plot(days, price, color=<span class="s">'steelblue'</span>, lw=<span class="n">1.5</span>, label=<span class="s">'股价'</span>)
+
+<span class="c"># 30 日移动平均线</span>
+ma30 = [sum(price[max(<span class="n">0</span>, i-<span class="n">29</span>):i+<span class="n">1</span>]) / min(i+<span class="n">1</span>, <span class="n">30</span>) <span class="k">for</span> i <span class="k">in</span> days]
+ax.plot(days, ma30, color=<span class="s">'darkorange'</span>, lw=<span class="n">2</span>, label=<span class="s">'30 日均线'</span>)
+
+ax.fill_between(days, price, ma30,
+                where=[p < m <span class="k">for</span> p, m <span class="k">in</span> <span class="k">zip</span>(price, ma30)],
+                color=<span class="s">'red'</span>, alpha=<span class="n">0.2</span>, label=<span class="s">'低于均线'</span>)
+ax.fill_between(days, price, ma30,
+                where=[p >= m <span class="k">for</span> p, m <span class="k">in</span> <span class="k">zip</span>(price, ma30)],
+                color=<span class="s">'green'</span>, alpha=<span class="n">0.2</span>, label=<span class="s">'高于均线'</span>)
+
+ax.set_xlabel(<span class="s">'交易日'</span>)
+ax.set_ylabel(<span class="s">'价格'</span>)
+ax.set_title(<span class="s">'股票价格时间序列（含移动平均线）'</span>)
+ax.legend(loc=<span class="s">'upper left'</span>)
+ax.grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>)
+fig.tight_layout()
+fig.savefig(<span class="s">'stock.png'</span>, dpi=<span class="n">200</span>)</code></pre>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">10.4</span>科学绘图模板
+            </h3>
+            <p>
+              学术论文常用模板：清晰、克制、信息密度高。配色简洁、坐标轴清晰、图例可读。
+            </p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">science_template.py</span>
+              </div>
+              <pre><code><span class="c"># === 学术论文风格模板 ===</span>
+mpl.rcParams[<span class="s">'font.sans-serif'</span>] = [<span class="s">'Arial'</span>, <span class="s">'DejaVu Sans'</span>]
+mpl.rcParams[<span class="s">'font.size'</span>] = <span class="n">11</span>
+mpl.rcParams[<span class="s">'axes.linewidth'</span>] = <span class="n">1.0</span>
+mpl.rcParams[<span class="s">'lines.linewidth'</span>] = <span class="n">1.5</span>
+
+fig, ax = plt.subplots(figsize=(<span class="n">3.5</span>, <span class="n">2.6</span>))  <span class="c"># 单栏尺寸</span>
+
+x = [i * <span class="n">0.1</span> <span class="k">for</span> i <span class="k">in</span> <span class="k">range</span>(<span class="n">100</span>)]
+y = [math.exp(-xi / <span class="n">3</span>) * math.sin(xi * <span class="n">2</span>) <span class="k">for</span> xi <span class="k">in</span> x]
+
+ax.plot(x, y, color=<span class="s">'#1F4E79'</span>, lw=<span class="n">1.5</span>)
+
+<span class="c"># 极简坐标轴：只显示左下边框</span>
+<span class="c"># ax.spines['top'].set_visible(False)</span>
+<span class="c"># ax.spines['right'].set_visible(False)</span>
+
+ax.set_xlabel(<span class="s">'Time (s)'</span>)
+ax.set_ylabel(<span class="s">'Amplitude'</span>)
+ax.set_xlim(<span class="n">0</span>, <span class="n">10</span>)
+ax.grid(<span class="k">True</span>, alpha=<span class="n">0.3</span>, lw=<span class="n">0.5</span>)
+
+fig.tight_layout()
+fig.savefig(<span class="s">'science.png'</span>, dpi=<span class="n">300</span>)</code></pre>
+            </div>
+            <div class="tip">
+              <strong>论文插图要点：</strong>3.5 英寸（单栏）或 7
+              英寸（双栏）；DPI 300+；使用无衬线字体；图例字号比正文小 1-2
+              号；坐标轴单位写完整（如"Time (s)"）。
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">10.5</span>仪表板原型
+            </h3>
+            <p>
+              用 rsplotlib
+              快速搭建数据仪表板的草图，包含关键指标（KPI）、趋势、分布等。
+            </p>
+            <div class="code-card">
+              <div class="code-card-header">
+                <span class="code-file">dashboard.py</span>
+              </div>
+              <pre><code>fig = plt.figure(figsize=(<span class="n">14</span>, <span class="n">8</span>))
+
+<span class="c"># 顶部 KPI 区：4 个数字</span>
+kpi_values = [(<span class="s">'日活'</span>, <span class="s">'12.5万'</span>, <span class="s">'+8.2%'</span>),
+              (<span class="s">'营收'</span>, <span class="s">'¥85.6万'</span>, <span class="s">'+12.5%'</span>),
+              (<span class="s">'订单'</span>, <span class="s">'3,421'</span>, <span class="s">'-2.1%'</span>),
+              (<span class="s">'转化率'</span>, <span class="s">'3.8%'</span>, <span class="s">'+0.5%'</span>)]
+<span class="k">for</span> i, (label, value, change) <span class="k">in</span> <span class="k">enumerate</span>(kpi_values):
+    ax = fig.subplot(<span class="n">2</span>, <span class="n">4</span>, i + <span class="n">1</span>)
+    ax.text(<span class="n">0.5</span>, <span class="n">0.7</span>, value, ha=<span class="s">'center'</span>, fontsize=<span class="n">22</span>, fontweight=<span class="s">'bold'</span>)
+    ax.text(<span class="n">0.5</span>, <span class="n">0.4</span>, label, ha=<span class="s">'center'</span>, fontsize=<span class="n">11</span>)
+    color = <span class="s">'green'</span> <span class="k">if</span> <span class="s">'+'</span> <span class="k">in</span> change <span class="k">else</span> <span class="s">'red'</span>
+    ax.text(<span class="n">0.5</span>, <span class="n">0.15</span>, change, ha=<span class="s">'center'</span>, fontsize=<span class="n">10</span>, color=color)
+    ax.box(<span class="k">False</span>)
+
+<span class="c"># 第二行：趋势线 + 分布</span>
+ax_trend = fig.subplot(<span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+ax_trend.plot(days, price, color=<span class="s">'steelblue'</span>, lw=<span class="n">2</span>)
+ax_trend.set_title(<span class="s">'近 30 天趋势'</span>)
+
+ax_dist = fig.subplot(<span class="n">2</span>, <span class="n">2</span>, <span class="n">4</span>)
+ax_dist.hist(price, bins=<span class="n">30</span>, color=<span class="s">'steelblue'</span>, alpha=<span class="n">0.7</span>)
+ax_dist.set_title(<span class="s">'价格分布'</span>)
+
+fig.tight_layout()
+fig.savefig(<span class="s">'dashboard.png'</span>, dpi=<span class="n">200</span>)</code></pre>
+            </div>
+          </section>
+        </article>
+
+        <!-- ============ 第十一章：最佳实践与 FAQ ============ -->
+        <article class="chapter" id="ch11">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 11</span>
+            <h2 class="chapter-title">最佳实践与 FAQ</h2>
+            <p class="chapter-desc">常见问题解答、性能优化建议与调试技巧。</p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">11.1</span>最佳实践
+            </h3>
+            <div class="info-grid two">
+              <div class="info-card">
+                <div class="info-title">代码组织</div>
+                <p>
+                  使用面向对象方式
+                  <code>fig, ax = plt.subplots()</code>，先绘制完所有元素再
+                  savefig；图表元素添加完整图例、标题、坐标轴标签。
+                </p>
+              </div>
+              <div class="info-card">
+                <div class="info-title">性能优化</div>
+                <p>
+                  大量散点用
+                  <code>scatter(c=array, s=array)</code>；批量参考线用
+                  <code>hlines/vlines</code>；PNG 适合位图，SVG 适合编辑。
+                </p>
+              </div>
+              <div class="info-card">
+                <div class="info-title">IDE 悬停提示</div>
+                <p>
+                  rsplotlib 的所有 Python 函数都带详细的中文 docstring，在 VS
+                  Code / PyCharm 中悬停即可查看参数说明。
+                </p>
+              </div>
+              <div class="info-card">
+                <div class="info-title">中文显示</div>
+                <p>
+                  脚本开头显式设置
+                  <code>mpl.rcParams['font.sans-serif']</code
+                  >，并确保系统已安装中文字体。
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">11.2</span>常见问题 FAQ
+            </h3>
+
+            <details class="faq-item" open>
+              <summary>为什么图表中的中文显示为方块（□□□）？</summary>
+              <p>这是字体配置问题。在代码开头添加：</p>
+              <div class="code-card compact">
+                <pre><code><span class="k">from</span> rsplotlib.pylab <span class="k">import</span> mpl
+mpl.rcParams[<span class="s">'font.sans-serif'</span>] = [<span class="s">'PingFang SC'</span>, <span class="s">'Microsoft YaHei'</span>, <span class="s">'Arial'</span>]</code></pre>
+              </div>
+              <p>
+                确保系统已安装中文字体，或使用
+                <code>_rs.register_sans_serif_font()</code> 注册字体文件。
+              </p>
+            </details>
+
+            <details class="faq-item">
+              <summary>scatter 的 c 参数传入列表不生效？</summary>
+              <p>
+                rsplotlib 支持颜色数组，在 Rust
+                层统一渲染。请检查：颜色字符串格式是否正确（命名颜色或十六进制），以及
+                rsplotlib 版本是否最新。
+              </p>
+            </details>
+
+            <details class="faq-item">
+              <summary>savefig 的 dpi 参数如何使用？</summary>
+              <p>
+                <code>dpi</code> 控制每英寸点数。常见用法：<code
+                  >savefig('p.png')</code
+                >
+                默认 DPI；<code>dpi=150</code> 屏幕；<code>dpi=300</code>
+                出版级。像素尺寸 = figsize (英寸) × dpi。
+              </p>
+            </details>
+
+            <details class="faq-item">
+              <summary>如何在一个 Figure 中添加多个 Axes？</summary>
+              <p>
+                使用 <code>plt.subplots(rows, cols)</code>，返回的 axes
+                是扁平列表，按行优先顺序排列。也可以使用
+                <code>fig.subplot(rows, cols, index)</code> 逐个创建。
+              </p>
+            </details>
+
+            <details class="faq-item">
+              <summary>annotate 的箭头如何自定义样式？</summary>
+              <p>
+                通过 <code>arrowprops</code> 字典传入：<code>arrowstyle</code>
+                样式（如 <code>'->'</code>、<code>'-|>'</code>），<code
+                  >arrowsize</code
+                >
+                相对大小。颜色与文本颜色一致。
+              </p>
+            </details>
+
+            <details class="faq-item">
+              <summary>为什么 hlines/vlines 比循环调用 axhline 更快？</summary>
+              <p>
+                内部循环在 Rust 层一次性处理，避免 N 次 Python→Rust
+                跨语言调用。跨语言调用有固定开销，批量处理将开销从 O(N) 降到
+                O(1)。
+              </p>
+            </details>
+
+            <details class="faq-item">
+              <summary>如何从 Matplotlib 迁移到 rsplotlib？</summary>
+              <p>
+                大多数情况下，只需将
+                <code>import matplotlib.pyplot as plt</code> 改为
+                <code>from rsplotlib import pyplot as plt</code>。注意：<code
+                  >plt.show()</code
+                >
+                在 rsplotlib 中保存到文件而非弹窗；部分高级 Matplotlib
+                特性尚未实现。
+              </p>
+            </details>
+
+            <details class="faq-item">
+              <summary>支持交互式图表吗？</summary>
+              <p>
+                当前版本主要支持静态图表（PNG/SVG），不支持交互式图表。未来版本可能添加
+                Jupyter Notebook 集成支持。
+              </p>
+            </details>
+          </section>
+        </article>
+
+        <!-- ============ 第十二章：速查表 ============ -->
+        <article class="chapter" id="ch12">
+          <header class="chapter-header">
+            <span class="chapter-eyebrow">Chapter 12</span>
+            <h2 class="chapter-title">功能速查表</h2>
+            <p class="chapter-desc">
+              一眼速览 rsplotlib 全部支持的绘图函数与新增功能。
+            </p>
+          </header>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">12.1</span>绘图函数总览
+            </h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>函数</th>
+                  <th>说明</th>
+                  <th>支持数组参数</th>
+                  <th>新增</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>plot</code></td>
+                  <td>折线图</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>scatter</code></td>
+                  <td>散点图</td>
+                  <td>颜色/大小数组</td>
+                  <td>✓</td>
+                </tr>
+                <tr>
+                  <td><code>bar</code> / <code>barh</code></td>
+                  <td>柱状/水平柱状</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>hist</code></td>
+                  <td>直方图</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>pie</code></td>
+                  <td>饼图</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>boxplot</code></td>
+                  <td>箱线图</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>fill_between</code></td>
+                  <td>填充区域</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>errorbar</code></td>
+                  <td>误差棒</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>stem</code></td>
+                  <td>茎图</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>step</code></td>
+                  <td>阶梯图</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>imshow</code></td>
+                  <td>热力图</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>stackplot</code></td>
+                  <td>堆叠面积</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>axhline</code> / <code>axvline</code></td>
+                  <td>水平/垂直参考线</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>axhspan</code> / <code>axvspan</code></td>
+                  <td>水平/垂直区间</td>
+                  <td>否</td>
+                  <td>✓</td>
+                </tr>
+                <tr>
+                  <td><code>axline</code></td>
+                  <td>任意斜率参考线</td>
+                  <td>否</td>
+                  <td>✓</td>
+                </tr>
+                <tr>
+                  <td><code>hlines</code> / <code>vlines</code></td>
+                  <td>批量参考线 (Rust)</td>
+                  <td>位置数组</td>
+                  <td>✓</td>
+                </tr>
+                <tr>
+                  <td><code>text</code></td>
+                  <td>文本标注</td>
+                  <td>否</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><code>annotate</code></td>
+                  <td>箭头标注</td>
+                  <td>否</td>
+                  <td>✓ arrowprops</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span class="title-num">12.2</span>参数别名对照
+            </h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>别名</th>
+                  <th>标准名</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>lw</code></td>
+                  <td><code>linewidth</code></td>
+                  <td>线宽</td>
+                </tr>
+                <tr>
+                  <td><code>c</code></td>
+                  <td><code>color</code></td>
+                  <td>颜色</td>
+                </tr>
+                <tr>
+                  <td><code>ls</code></td>
+                  <td><code>linestyle</code></td>
+                  <td>线型</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              rsplotlib 在 Python 层自动处理这些别名，保持与 Matplotlib
+              代码的兼容性。
+            </p>
+          </section>
+
+          <footer class="doc-footer">
+            <div class="footer-grid">
+              <div>
+                <div class="footer-label">rsplotlib</div>
+                <div class="footer-value">v0.1.5</div>
+              </div>
+              <div>
+                <div class="footer-label">最后更新</div>
+                <div class="footer-value">2026-06-17</div>
+              </div>
+              <div>
+                <div class="footer-label">许可协议</div>
+                <div class="footer-value">MIT</div>
+              </div>
+              <div>
+                <div class="footer-label">核心依赖</div>
+                <div class="footer-value">PyO3 0.29 · plotters 0.3</div>
+              </div>
+            </div>
+          </footer>
+        </article>
+      </main>
+    </div>
+
+    <!-- 浮动：返回顶部 -->
+    <button class="back-to-top" id="backToTop" aria-label="返回顶部">
+      <svg
+        viewBox="0 0 24 24"
+        width="20"
+        height="20"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <polyline points="18 15 12 9 6 15" />
+      </svg>
+    </button>
+
+    <script src="tutorial.js"></script>
+  </body>
+</html>
