@@ -18,7 +18,7 @@ use crate::colormap::{autumn_color, cool_color, inferno_color, magma_color, plas
 use crate::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
 use crate::elements::PlotElement;
 use crate::marker::draw_marker;
-use crate::text_utils::normalize_spaces;
+// 注：所有文本直接使用原文，所有间距由 plotters 和字体自身的 h_advance 决定。
 
 /// 绘制单条线段（用于 axhline/axvline/stem 等）
 pub fn draw_single_line<DB: DrawingBackend>(
@@ -526,9 +526,8 @@ where
                 let text_style: TextStyle = colored_font
                     .pos(Pos::new(HPos::Left, VPos::Center))
                     .into();
-                let normalized = normalize_spaces(text);
                 chart.draw_series(std::iter::once(plotters::element::Text::new(
-                    normalized,
+                    text.to_string(),
                     (txv, tyv),
                     text_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw text: {}", e)))?;
@@ -643,7 +642,7 @@ where
                                 .color(&BLACK)
                                 .pos(Pos::new(HPos::Center, VPos::Center));
                             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                                normalize_spaces(l), (lx, ly), pie_label_style,
+                                l.to_string(), (lx, ly), pie_label_style,
                             ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie label: {}", e)))?;
                         }
                     }
@@ -917,7 +916,7 @@ where
                                 .color(&BLACK)
                                 .pos(Pos::new(HPos::Center, VPos::Center));
                             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                                normalize_spaces(l), (cx, -0.3), box_label_style,
+                                l.to_string(), (cx, -0.3), box_label_style,
                             ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot label: {}", e)))?;
                         }
                     }
@@ -940,7 +939,7 @@ where
                     .color(&rgb)
                     .pos(Pos::new(HPos::Center, VPos::Center));
                 chart.draw_series(std::iter::once(plotters::element::Text::new(
-                    normalize_spaces(text), (txy_x, txy_y), anno_style,
+                    text.to_string(), (txy_x, txy_y), anno_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate text: {}", e)))?;
             }
         }

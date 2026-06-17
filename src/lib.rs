@@ -12,7 +12,6 @@ pub mod elements;
 pub mod figure;
 pub mod marker;
 pub mod pyfuncs;
-pub mod text_utils;
 
 use pyo3::prelude::*;
 use plotters::style::register_font;
@@ -23,32 +22,16 @@ use crate::figure::Figure;
 
 #[pymodule]
 fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // 字体注册策略说明：
+    // 字体注册策略：注册一个覆盖范围最广的字体到 "sans-serif" family。
+    // plotters 默认渲染（包括字符宽度、字距、空格宽度）完全由字体决定，
+    // 我们不再做任何间距预处理。rsplotlib 信任 plotters 的默认行为。
     //
-    // 用户反馈"字符宽度/字距视觉不一致 + 空格宽度窄"。
-    //
-    // 根因：plotters 内部用 `fontdb` 管理字体。若同一 family 名下注册了多个字体
-    // （例如 "sans-serif" 既注册了 Arial 又注册了 Arial Unicode），fontdb 在
-    // 排版一行文本时，可能：
-    //   - 拉丁字符用 Arial 渲染
-    //   - 中文用 Arial Unicode 渲染
-    //   - 空格 / 标点 / 数字 又可能用回某个字体
-    // 不同字体的 advance width（字宽）不同，混排后视觉上就是"间距忽大忽小、
-    // 空格比预期的窄"。
-    //
-    // 修复：仅注册 **一个** 覆盖范围最广的字体到 "sans-serif" family，
-    // 整行文本由同一个字形集排版，字符宽度/空格宽度都来自同一字体，视觉一致。
-    // 优先选择 Arial Unicode MS（macOS 自带，几乎覆盖所有 Unicode 字符，
-    // 中英文字形与 Arial 同一家族，混排视觉自然）。
-    //
-    // 同时在渲染端（axes_render_elements / axes_title / axes_legend）
-    // 给所有文字调用传入 `transform`, 修正 plotters 默认 baseline 偏移。
+    // 优先级：macOS 优先 Arial Unicode（含 CJK + 拉丁 + 空格，宽度继承自 Arial，
+    // 与 matplotlib 默认字体外观接近）；Linux 优先 Noto Sans CJK；Windows 优先
+    // 微软雅黑（msyh）。若都失败，回退到 matplotlib 自带的 DejaVu Sans（仅拉丁）。
 
     #[cfg(target_os = "macos")]
     {
-        // macOS 优先 Arial Unicode（含 CJK + 拉丁 + 空格，宽度继承自 Arial，
-        // 与 matplotlib 默认字体外观接近）；若不存在再退回 DejaVu Sans
-        // （仅拉丁可读，CJK 会变方块，但至少保证拉丁字符宽度一致）。
         let font_candidates: Vec<String> = vec![
             "/Library/Fonts/Arial Unicode.ttf".to_string(),
             "/System/Library/Fonts/Supplemental/Arial Unicode.ttf".to_string(),
@@ -59,7 +42,7 @@ fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
                 let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
                 if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
                     registered = true;
-                    break; // 找到第一个能用的就停，保证只用单一字体
+                    break;
                 }
             }
         }

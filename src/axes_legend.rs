@@ -12,7 +12,7 @@ use plotters::style::text_anchor::{HPos, VPos};
 use crate::axes::scale_font;
 use crate::colors::{RgbColor, to_plotters_color};
 use crate::marker::draw_marker;
-use crate::text_utils::normalize_spaces;
+// 注：图例文本直接使用原始文本，所有间距由 plotters 和字体自身的 h_advance 决定。
 
 /// 渲染图例（如果设置了 `legend_loc` 且 `legend_labels` 非空）
 ///
@@ -190,7 +190,7 @@ where
             }
 
             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                normalize_spaces(label),
+                label.to_string(),
                 (x_text, y_pos),
                 ("sans-serif", scale_font(11.0, font_scale)),
             ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e)))?;

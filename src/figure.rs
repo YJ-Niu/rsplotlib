@@ -165,8 +165,11 @@ impl Figure {
             let mut encoder = png::Encoder::new(w, self.width, self.height);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
-            encoder.set_compression(png::Compression::Best);
-            encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
+            // png 0.18 API:
+            //   - Compression: 用 High（最接近旧版 Best 的最高档）
+            //   - Filter:       用 Filter::Adaptive（替代旧版 AdaptiveFilterType::Adaptive）
+            encoder.set_compression(png::Compression::High);
+            encoder.set_filter(png::Filter::Adaptive);
             let ppm = (used_dpi / 0.0254).round() as u32;
             encoder.set_pixel_dims(Some(png::PixelDimensions {
                 xppu: ppm,
