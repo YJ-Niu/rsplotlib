@@ -94,16 +94,65 @@ def _map_aliases(kwargs):
 
 
 def _parse_plot_args(args, kwargs):
-    """解析 plot() 的位置参数为 (x, y, kwargs)"""
-    if len(args) == 2:
-        return args[0], args[1], kwargs
+    """解析 plot() 的位置参数为 (x, y, kwargs)
+    
+    支持 matplotlib 风格的格式字符串，如 'o', 'r-', 'b--', 'g^' 等
+    """
+    x = None
+    y = None
+    fmt = None
+    
+    if len(args) == 3:
+        x, y, fmt = args[0], args[1], args[2]
+    elif len(args) == 2:
+        if isinstance(args[1], str) and len(args[1]) <= 5:
+            x = list(range(len(args[0]))) if hasattr(args[0], '__len__') else []
+            y, fmt = args[0], args[1]
+        else:
+            x, y = args[0], args[1]
     elif len(args) == 1:
+        if isinstance(args[0], str):
+            return [], [], kwargs
         try:
             x = list(range(len(args[0])))
         except Exception:
             x = list(args[0]) if hasattr(args[0], '__iter__') else []
-        return x, args[0], kwargs
-    return [], [], kwargs
+        y = args[0]
+    else:
+        return [], [], kwargs
+    
+    if fmt and isinstance(fmt, str):
+        markers = 'o^sD*+xvph'
+        linestyles = {'-': '-', '--': '--', ':': ':', '-.': '-.'}
+        
+        parsed_marker = None
+        parsed_linestyle = None
+        remaining = []
+        
+        i = 0
+        while i < len(fmt):
+            if i + 1 < len(fmt) and fmt[i:i+2] in linestyles:
+                parsed_linestyle = fmt[i:i+2]
+                i += 2
+            elif fmt[i] in linestyles:
+                parsed_linestyle = fmt[i]
+                i += 1
+            elif fmt[i] in markers:
+                parsed_marker = fmt[i]
+                i += 1
+            else:
+                remaining.append(fmt[i])
+                i += 1
+        
+        if parsed_marker and not parsed_linestyle:
+            parsed_linestyle = ''
+        
+        if parsed_marker and parsed_marker not in kwargs:
+            kwargs['marker'] = parsed_marker
+        if parsed_linestyle is not None and 'linestyle' not in kwargs:
+            kwargs['linestyle'] = parsed_linestyle
+    
+    return x, y, kwargs
 
 
 # ==================== 绘图函数 ====================
@@ -115,6 +164,7 @@ def plot(*args, **kwargs):
         plt.plot(x, y)              # 以 x 为横坐标, y 为纵坐标
         plt.plot(y)                 # 仅提供 y, 自动 x = [0, 1, ...]
         plt.plot(x, y, lw=2.0)     # 自定义线宽
+        plt.plot(x1, y1, x2, y2)   # 绘制多条线
 
     关键字参数 (matplotlib 兼容别名):
         lw / linewidth: 线宽 (float)
@@ -128,6 +178,16 @@ def plot(*args, **kwargs):
         (Figure, Axes) 元组
     """
     _map_aliases(kwargs)
+    
+    if len(args) >= 4 and len(args) % 2 == 0:
+        results = []
+        for i in range(0, len(args), 2):
+            x, y = args[i], args[i+1]
+            def _call(*a, **k):
+                return _rsplotlib.plot(*a, **k)
+            results.append(_route_to_ax('plot', _call, x, y, **kwargs))
+        return results if len(results) > 1 else results[0]
+    
     x, y, kw = _parse_plot_args(args, kwargs)
 
     def _call(*a, **k):
@@ -832,8 +892,29 @@ def savefig(fname, **kwargs):
 
 
 def show(**kwargs):
-    """在默认应用中显示图形。"""
-    return _rsplotlib.show()
+    """在默认应用中显示图形。
+    
+    图形将保存到与执行脚本相同的路径下，文件名为脚本文件名（扩展名替换为 .png）。
+    例如：运行 runtest.py 会生成 runtest.png
+    """
+    import sys
+    import os
+    
+    script_path = sys.argv[0] if sys.argv else 'rsplotlib_output'
+    script_dir = os.path.dirname(script_path)
+    script_name = os.path.basename(script_path)
+    
+    base_name = os.path.splitext(script_name)[0]
+    output_path = os.path.join(script_dir, f'{base_name}.png')
+    
+    savefig(output_path, **kwargs)
+    
+    if sys.platform == 'darwin':
+        os.system(f'open "{output_path}"')
+    elif sys.platform == 'linux':
+        os.system(f'xdg-open "{output_path}"')
+    
+    print(f"Figure saved to: {output_path}")
 
 
 def gca(**kwargs):

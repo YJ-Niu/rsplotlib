@@ -149,14 +149,42 @@ impl Figure {
         let used_dpi = dpi.unwrap_or(self.dpi);
         let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            let buf_size = (self.width as usize) * (self.height as usize) * 3;
-            let mut buffer = vec![0u8; buf_size];
+            let ssaa_factor = 4;
+            let ssaa_width = self.width * ssaa_factor;
+            let ssaa_height = self.height * ssaa_factor;
+            let ssaa_buf_size = (ssaa_width as usize) * (ssaa_height as usize) * 3;
+            let mut ssaa_buffer = vec![0u8; ssaa_buf_size];
             let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(
-                &mut buffer,
-                (self.width, self.height),
+                &mut ssaa_buffer,
+                (ssaa_width, ssaa_height),
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
-            self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
+            self.render_to_backend(py, backend, ssaa_width, ssaa_height, true, font_scale * ssaa_factor as f64)?;
+
+            let buf_size = (self.width as usize) * (self.height as usize) * 3;
+            let mut buffer = vec![0u8; buf_size];
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    let mut r = 0u32;
+                    let mut g = 0u32;
+                    let mut b = 0u32;
+                    for dy in 0..ssaa_factor {
+                        for dx in 0..ssaa_factor {
+                            let sx = x * ssaa_factor + dx;
+                            let sy = y * ssaa_factor + dy;
+                            let idx = (sy as usize) * (ssaa_width as usize) * 3 + (sx as usize) * 3;
+                            r += ssaa_buffer[idx] as u32;
+                            g += ssaa_buffer[idx + 1] as u32;
+                            b += ssaa_buffer[idx + 2] as u32;
+                        }
+                    }
+                    let div = (ssaa_factor * ssaa_factor) as u32;
+                    let idx = (y as usize) * (self.width as usize) * 3 + (x as usize) * 3;
+                    buffer[idx] = (r / div) as u8;
+                    buffer[idx + 1] = (g / div) as u8;
+                    buffer[idx + 2] = (b / div) as u8;
+                }
+            }
 
             // 写入 PNG 并嵌入 DPI 信息
             let file = File::create(filename)

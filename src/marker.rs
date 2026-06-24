@@ -13,6 +13,14 @@ pub fn draw_marker<DB: DrawingBackend>(
 ) -> PyResult<()> {
     let s = size;
     let style: ShapeStyle = color.filled().into();
+    
+    let x_range = chart.x_range();
+    let y_range = chart.y_range();
+    let x_diff = x_range.end - x_range.start;
+    let y_diff = y_range.end - y_range.start;
+    let x_span = x_diff.max(1e-10) * s;
+    let y_span = y_diff.max(1e-10) * s;
+
     match marker {
         "o" => {
             // Use Circle element for filled circle markers
@@ -22,17 +30,17 @@ pub fn draw_marker<DB: DrawingBackend>(
         }
         "s" => {
             chart.draw_series(std::iter::once(Rectangle::new(
-                [(x - s / 2.0, y - s / 2.0), (x + s / 2.0, y + s / 2.0)],
+                [(x - x_span / 100.0, y - y_span / 100.0), (x + x_span / 100.0, y + y_span / 100.0)],
                 style,
             )))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
-        "^" => {
+        "v" => {
             chart.draw_series(std::iter::once(Polygon::new(
                 vec![
-                    (x, y - s / 2.0),
-                    (x - s / 2.0, y + s / 2.0),
-                    (x + s / 2.0, y + s / 2.0),
+                    (x, y - y_span / 500.0),
+                    (x - x_span / 400.0, y + y_span / 500.0),
+                    (x + x_span / 400.0, y + y_span / 500.0),
                 ],
                 style,
             )))
@@ -41,21 +49,21 @@ pub fn draw_marker<DB: DrawingBackend>(
         "D" => {
             chart.draw_series(std::iter::once(Polygon::new(
                 vec![
-                    (x, y - s / 2.0),
-                    (x + s / 2.0, y),
-                    (x, y + s / 2.0),
-                    (x - s / 2.0, y),
+                    (x, y - y_span / 500.0),
+                    (x + x_span / 400.0, y),
+                    (x, y + y_span / 500.0),
+                    (x - x_span / 400.0, y),
                 ],
                 style,
             )))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
-        "v" => {
+        "^" => {
             chart.draw_series(std::iter::once(Polygon::new(
                 vec![
-                    (x, y + s / 2.0),
-                    (x - s / 2.0, y - s / 2.0),
-                    (x + s / 2.0, y - s / 2.0),
+                    (x, y + y_span / 500.0),
+                    (x - x_span / 400.0, y - x_span / 400.0),
+                    (x + x_span / 400.0, y - x_span / 400.0),
                 ],
                 style,
             )))
@@ -64,14 +72,14 @@ pub fn draw_marker<DB: DrawingBackend>(
         "*" => {
             chart.draw_series(std::iter::once(Polygon::new(
                 vec![
-                    (x, y - s / 2.0),
-                    (x + s / 6.0, y - s / 6.0),
-                    (x + s / 2.0, y),
-                    (x + s / 6.0, y + s / 6.0),
-                    (x, y + s / 2.0),
-                    (x - s / 6.0, y + s / 6.0),
-                    (x - s / 2.0, y),
-                    (x - s / 6.0, y - s / 6.0),
+                    (x, y - y_span / 500.0),
+                    (x + x_span / 400.0, y - y_span / 500.0),
+                    (x + x_span / 400.0, y),
+                    (x + x_span / 400.0, y + y_span / 500.0),
+                    (x, y + y_span / 500.0),
+                    (x - x_span / 400.0, y + y_span / 500.0),
+                    (x - x_span / 400.0, y),
+                    (x - x_span / 400.0, y - y_span / 500.0),
                 ],
                 style,
             )))
@@ -80,14 +88,14 @@ pub fn draw_marker<DB: DrawingBackend>(
         "p" => {
             chart.draw_series(std::iter::once(Polygon::new(
                 vec![
-                    (x, y - s / 2.0),
-                    (x + s / 3.0, y - s / 4.0),
-                    (x + s / 2.0, y),
-                    (x + s / 3.0, y + s / 4.0),
-                    (x, y + s / 2.0),
-                    (x - s / 3.0, y + s / 4.0),
-                    (x - s / 2.0, y),
-                    (x - s / 3.0, y - s / 4.0),
+                    (x, y - y_span / 500.0),
+                    (x + x_span / 400.0, y - y_span / 500.0),
+                    (x + x_span / 400.0, y),
+                    (x + x_span / 400.0, y + y_span / 500.0),
+                    (x, y + y_span / 500.0),
+                    (x - x_span / 400.0, y + y_span / 500.0),
+                    (x - x_span / 400.0, y),
+                    (x - x_span / 400.0, y - y_span / 500.0),
                 ],
                 style,
             )))
@@ -96,12 +104,12 @@ pub fn draw_marker<DB: DrawingBackend>(
         "h" => {
             chart.draw_series(std::iter::once(Polygon::new(
                 vec![
-                    (x - s / 2.0, y - s / 4.0),
-                    (x, y - s / 2.0),
-                    (x + s / 2.0, y - s / 4.0),
-                    (x + s / 2.0, y + s / 4.0),
-                    (x, y + s / 2.0),
-                    (x - s / 2.0, y + s / 4.0),
+                    (x - x_span / 400.0, y - y_span / 500.0),
+                    (x, y - y_span / 500.0),
+                    (x + x_span / 400.0, y - y_span / 500.0),
+                    (x + x_span / 400.0, y + y_span / 500.0),
+                    (x, y + y_span / 500.0),
+                    (x - x_span / 400.0, y + y_span / 500.0),
                 ],
                 style,
             )))
@@ -110,25 +118,27 @@ pub fn draw_marker<DB: DrawingBackend>(
         "x" => {
             let line_style: ShapeStyle = color.stroke_width(2).into();
             chart.draw_series(std::iter::once(PathElement::new(
-                vec![(x - s / 3.0, y - s / 3.0), (x + s / 3.0, y + s / 3.0)],
+                vec![(x - x_span / 400.0, y - y_span / 500.0), (x + x_span / 400.0, y + y_span / 500.0)],
                 line_style,
             )))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
             chart.draw_series(std::iter::once(PathElement::new(
-                vec![(x - s / 3.0, y + s / 3.0), (x + s / 3.0, y - s / 3.0)],
+                vec![(x - x_span / 400.0, y + y_span / 500.0), (x + x_span / 400.0, y - y_span / 500.0)],
                 line_style,
             )))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
         "+" => {
-            let line_style: ShapeStyle = color.stroke_width(2).into();
+            let arm_len_x = s / 400.0 * x_span;
+            let arm_len_y = s / 400.0 * y_span;
+            let line_style: ShapeStyle = color.stroke_width(2).filled().into();
             chart.draw_series(std::iter::once(PathElement::new(
-                vec![(x - s / 3.0, y), (x + s / 3.0, y)],
+                vec![(x - arm_len_x + x_span * 0.002, y), (x + arm_len_x - x_span * 0.001, y)],
                 line_style,
             )))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
             chart.draw_series(std::iter::once(PathElement::new(
-                vec![(x, y - s / 3.0), (x, y + s / 3.0)],
+                vec![(x, y - arm_len_y - y_span * 0.002), (x, y + arm_len_y + y_span * 0.001)],
                 line_style,
             )))
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;

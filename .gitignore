@@ -28,6 +28,7 @@ Thumbs.db
 
 # Data / plots
 testing/
+test/
 main*.py
 out/
 wheelhouse/

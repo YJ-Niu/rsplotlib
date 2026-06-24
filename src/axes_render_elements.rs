@@ -266,7 +266,7 @@ where
                             //   lw=1.5: lw_px=3, stroke=2 → 3-5px (mpl 4px) ✓
                             //   lw=2.0: lw_px=4, stroke=3 → 5-7px (mpl 5px) ✓
                             //   lw=3.0: lw_px=6, stroke=5 → 9-11px (mpl 8px) ✓
-                            let stroke_w = (lw_px as i32).max(1) as u32;
+                            let stroke_w = (lw_px as i32 - 1).max(1) as u32;
                             let style_native: ShapeStyle = rgb.stroke_width(stroke_w).into();
                             // 像素中心对齐修正：plotters 在渲染水平线时，线中心对应像素下边缘，
                             // 而 matplotlib 使用像素中心。这导致 rsp 的水平线比 mpl 偏高 1 像素。
@@ -286,6 +286,15 @@ where
                                 chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
                                     .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
                             }
+                            // **关键：cap_y_shift 必须与上面的 y_shift 严格相同**，
+                            // 这样 cap 圆心和线段端点经过 plotters coord.translate 时
+                            // 走完全相同的截断路径，得到的 (i32, i32) 屏幕像素完全一致。
+                            let cap_y_shift = {
+                                let area2 = chart.plotting_area();
+                                let dim2 = area2.dim_in_pixel();
+                                let ph2 = dim2.1 as f64;
+                                if ph2 > 0.0 { (y_max - y_min) / ph2 * 0.5 } else { 0.0 }
+                            };
                             // 端点形状 (solid_capstyle)：
                             // plotters 0.3.7 原生不支持 linecap，因此手动在首末端绘制
                             // 装饰图形。cap 只与有线段（marker 为空）的实线情况相关，
@@ -301,18 +310,22 @@ where
                                 // 直径必须与线段**实际渲染宽度**严格相等，才能"完全契合"。
                                 // 端点圆心 = 像素中心对齐后的线段端点（与线段几何一致）。
                                 let cap_lw_px = (stroke_w as i32).max(1) as f64; // 与线段渲染宽度一致
-                                // **关键：cap_y_shift 必须与上面的 y_shift 严格相同**，
-                                // 这样 cap 圆心和线段端点经过 plotters coord.translate 时
-                                // 走完全相同的截断路径，得到的 (i32, i32) 屏幕像素完全一致。
-                                // 之前的 +0.2 是临时 hack，会让 cap 偏移 0.2/y_per_pix 像素。
-                                let cap_y_shift = {
-                                    let area2 = chart.plotting_area();
-                                    let dim2 = area2.dim_in_pixel();
-                                    let ph2 = dim2.1 as f64;
-                                    if ph2 > 0.0 { (y_max - y_min) / ph2 * 0.5 } else { 0.0 }
-                                };
                                 draw_solid_caps(chart, &points, &rgb, solid_capstyle, *linewidth, font_scale,
                                                 x_min, x_max, y_min, y_max, cap_lw_px, cap_y_shift)?;
+                            }
+                            // 在线段连接处绘制圆形关节，消除折点处的锯齿
+                            // 使用 plotters Circle（自带 AA）绘制半径为线宽一半的填充圆
+                            if points.len() >= 2 {
+                                let joint_r = (lw_px as i32 / 2).max(1);
+                                let joint_style: ShapeStyle = rgb.filled().into();
+                                for pt in points {
+                                    chart.draw_series(std::iter::once(Circle::new(
+                                        (pt.0, pt.1 - cap_y_shift),
+                                        joint_r,
+                                        joint_style,
+                                    )))
+                                    .map_err(|e| PyRuntimeError::new_err(format!("Joint circle: {}", e)))?;
+                                }
                             }
                         }
                         }
