@@ -79,6 +79,33 @@ def _route_to_ax(ax_method_name, module_method, *args, **kwargs):
     return module_method(*args, **kwargs)
 
 
+def _map_aliases(kwargs):
+    """规范化 matplotlib 别名到标准名"""
+    alias_map = {
+        'lw': 'linewidth',
+        'c': 'color',
+        'ls': 'linestyle',
+    }
+    for alias, target in alias_map.items():
+        if alias in kwargs and target not in kwargs:
+            kwargs[target] = kwargs.pop(alias)
+        elif alias in kwargs:
+            kwargs.pop(alias)
+
+
+def _parse_plot_args(args, kwargs):
+    """解析 plot() 的位置参数为 (x, y, kwargs)"""
+    if len(args) == 2:
+        return args[0], args[1], kwargs
+    elif len(args) == 1:
+        try:
+            x = list(range(len(args[0])))
+        except Exception:
+            x = list(args[0]) if hasattr(args[0], '__iter__') else []
+        return x, args[0], kwargs
+    return [], [], kwargs
+
+
 # ==================== 绘图函数 ====================
 
 def plot(*args, **kwargs):
@@ -88,7 +115,6 @@ def plot(*args, **kwargs):
         plt.plot(x, y)              # 以 x 为横坐标, y 为纵坐标
         plt.plot(y)                 # 仅提供 y, 自动 x = [0, 1, ...]
         plt.plot(x, y, lw=2.0)     # 自定义线宽
-        plt.plot(x1, y1, x2, y2)   # 绘制多条线
 
     关键字参数 (matplotlib 兼容别名):
         lw / linewidth: 线宽 (float)
@@ -101,14 +127,13 @@ def plot(*args, **kwargs):
     Returns:
         (Figure, Axes) 元组
     """
-    # 别名、fmt 解析、调用模式检测全部由 Rust 层处理
-    if len(args) >= 4 and len(args) % 2 == 0:
-        results = []
-        for i in range(0, len(args), 2):
-            results.append(_route_to_ax('plot', _rsplotlib.plot, args[i], args[i+1], **kwargs))
-        return results if len(results) > 1 else results[0]
+    _map_aliases(kwargs)
+    x, y, kw = _parse_plot_args(args, kwargs)
 
-    return _route_to_ax('plot', _rsplotlib.plot, *args, **kwargs)
+    def _call(*a, **k):
+        return _rsplotlib.plot(*a, **k)
+
+    return _route_to_ax('plot', _call, x, y, **kwargs)
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
@@ -807,29 +832,8 @@ def savefig(fname, **kwargs):
 
 
 def show(**kwargs):
-    """在默认应用中显示图形。
-    
-    图形将保存到与执行脚本相同的路径下，文件名为脚本文件名（扩展名替换为 .png）。
-    例如：运行 runtest.py 会生成 runtest.png
-    """
-    import sys
-    import os
-    
-    script_path = sys.argv[0] if sys.argv else 'rsplotlib_output'
-    script_dir = os.path.dirname(script_path)
-    script_name = os.path.basename(script_path)
-    
-    base_name = os.path.splitext(script_name)[0]
-    output_path = os.path.join(script_dir, f'{base_name}.png')
-    
-    savefig(output_path, **kwargs)
-    
-    if sys.platform == 'darwin':
-        os.system(f'open "{output_path}"')
-    elif sys.platform == 'linux':
-        os.system(f'xdg-open "{output_path}"')
-    
-    print(f"Figure saved to: {output_path}")
+    """在默认应用中显示图形。"""
+    return _rsplotlib.show()
 
 
 def gca(**kwargs):

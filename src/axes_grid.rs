@@ -197,7 +197,7 @@ where
     // 为获得 3 px 视觉效果，需要 half_w_adj ≈ 1.0-1.1
     // 使用 half_w_adj = half_w - 0.5 来精确控制像素宽度
     let half_w_adj = (half_w - 0.5).max(0.0);
-    let fill: ShapeStyle = rgb.filled();
+    let fill: ShapeStyle = rgb.filled().into();
     for win in points.windows(2) {
         let (x1, y1) = win[0];
         let (x2, y2) = win[1];

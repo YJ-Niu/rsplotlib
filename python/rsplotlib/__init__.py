@@ -11,6 +11,5 @@ MultipleLocator = ticker.MultipleLocator
 AutoMinorLocator = ticker.AutoMinorLocator
 
 # 从内部 Rust 模块导出字体注册函数
-__version__ = "0.1.7"
 
-____all__ = list(_api_all) + ['pyplot', 'style', 'gridspec', 'ticker', 'GridSpec', 'MaxNLocator', 'MultipleLocator', 'AutoMinorLocator', 'register_sans_serif_font']
+__all__ = list(_api_all) + ['pyplot', 'style', 'gridspec', 'ticker', 'GridSpec', 'MaxNLocator', 'MultipleLocator', 'AutoMinorLocator', 'register_sans_serif_font']

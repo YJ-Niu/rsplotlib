@@ -12,7 +12,7 @@ use plotters::style::text_anchor::{HPos, VPos};
 use crate::axes::scale_font;
 use crate::colors::{RgbColor, to_plotters_color};
 use crate::marker::draw_marker;
-// 注：图例文本直接使用原始文本，所有间距由 plotters 和字体自身的 h_advance 决定。
+use crate::text_utils::normalize_spaces;
 
 /// 渲染图例（如果设置了 `legend_loc` 且 `legend_labels` 非空）
 ///
@@ -89,8 +89,8 @@ where
             VPos::Center => (y_anchor - legend_height / 2.0, y_anchor + legend_height / 2.0),
         };
 
-        let bg_fill: ShapeStyle = RGBColor(255, 255, 255).mix(0.85).filled();
-        let bg_border: ShapeStyle = RGBColor(180, 180, 180).stroke_width(1);
+        let bg_fill: ShapeStyle = RGBColor(255, 255, 255).mix(0.85).filled().into();
+        let bg_border: ShapeStyle = RGBColor(180, 180, 180).stroke_width(1).into();
 
         let bg_rect = Rectangle::new(
             [(box_x1, box_y1), (box_x2, box_y2)],
@@ -119,7 +119,7 @@ where
             // plotters stroke_width(n) 实际渲染为 2n-1 像素，使用 stroke = max(1, width_px - 1) 接近 mpl
             let lw_px = ((*lw) * font_scale).max(1.0).round() as u32;
             let legend_stroke = (lw_px as i32 - 1).max(1) as u32;
-            let line_style: ShapeStyle = rgb.stroke_width(legend_stroke);
+            let line_style: ShapeStyle = rgb.stroke_width(legend_stroke).into();
 
             // 根据线型绘制图例线段
             match ls.as_str() {
@@ -181,16 +181,16 @@ where
                 }
             }
 
-            if let Some(mkr) = marker_opt
-                && !mkr.is_empty()
-            {
-                let mid_x = (x_line_start + x_line_end) / 2.0;
-                draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb)
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e)))?;
+            if let Some(mkr) = marker_opt {
+                if !mkr.is_empty() {
+                    let mid_x = (x_line_start + x_line_end) / 2.0;
+                    draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb)
+                        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e)))?;
+                }
             }
 
             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                label.to_string(),
+                normalize_spaces(label),
                 (x_text, y_pos),
                 ("sans-serif", scale_font(11.0, font_scale)),
             ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e)))?;

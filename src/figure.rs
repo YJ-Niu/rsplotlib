@@ -29,33 +29,6 @@ pub fn get_current_figure(py: Python<'_>) -> PyResult<Bound<'_, Figure>> {
     }
 }
 
-/// 使用 Lanczos3 滤镜将 2x 超采样 buffer 降采样到目标分辨率
-fn downsample_aa(buffer: Vec<u8>, src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
-    use fast_image_resize as fir;
-
-    let src = fir::images::Image::from_vec_u8(
-        src_w,
-        src_h,
-        buffer,
-        fir::PixelType::U8x3,
-    )
-    .unwrap();
-
-    let mut dst = fir::images::Image::new(
-        dst_w,
-        dst_h,
-        fir::PixelType::U8x3,
-    );
-
-    let mut resizer = fir::Resizer::new();
-    let options = fir::ResizeOptions::new().resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3));
-    resizer
-        .resize(&src, &mut dst, &options)
-        .unwrap();
-
-    dst.into_vec()
-}
-
 #[pyclass]
 pub struct Figure {
     pub axes_list: Vec<Py<Axes>>,
@@ -176,21 +149,14 @@ impl Figure {
         let used_dpi = dpi.unwrap_or(self.dpi);
         let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            // 4x 超采样抗锯齿：渲染到 4 倍分辨率，再用 Lanczos3 降采样
-            let scale: u32 = 4;
-            let hires_w = self.width * scale;
-            let hires_h = self.height * scale;
-            let buf_size = (hires_w as usize) * (hires_h as usize) * 3;
+            let buf_size = (self.width as usize) * (self.height as usize) * 3;
             let mut buffer = vec![0u8; buf_size];
             let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(
                 &mut buffer,
-                (hires_w, hires_h),
+                (self.width, self.height),
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
-            self.render_to_backend(py, backend, hires_w, hires_h, true, font_scale * scale as f64)?;
-
-            // Lanczos3 降采样
-            let downsampled = downsample_aa(buffer, hires_w, hires_h, self.width, self.height);
+            self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
 
             // 写入 PNG 并嵌入 DPI 信息
             let file = File::create(filename)
@@ -199,8 +165,8 @@ impl Figure {
             let mut encoder = png::Encoder::new(w, self.width, self.height);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
-            encoder.set_compression(png::Compression::High);
-            encoder.set_filter(png::Filter::Adaptive);
+            encoder.set_compression(png::Compression::Best);
+            encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
             let ppm = (used_dpi / 0.0254).round() as u32;
             encoder.set_pixel_dims(Some(png::PixelDimensions {
                 xppu: ppm,
@@ -209,7 +175,7 @@ impl Figure {
             }));
             let mut writer = encoder.write_header()
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
-            writer.write_image_data(&downsampled)
+            writer.write_image_data(&buffer)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
             Ok(())
         } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
@@ -239,31 +205,8 @@ impl Figure {
         let path = tmpdir.join("rsplot_output.png");
         let filename = path.to_str().unwrap_or("/tmp/rsplot_output.png").to_string();
         let font_scale = self.dpi / 72.0;
-
-        // 4x 超采样抗锯齿
-        let scale: u32 = 4;
-        let hires_w = self.width * scale;
-        let hires_h = self.height * scale;
-        let buf_size = (hires_w as usize) * (hires_h as usize) * 3;
-        let mut buffer = vec![0u8; buf_size];
-        let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(&mut buffer, (hires_w, hires_h))
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
-        self.render_to_backend(py, backend, hires_w, hires_h, true, font_scale * scale as f64)?;
-
-        // Lanczos3 降采样
-        let downsampled = downsample_aa(buffer, hires_w, hires_h, self.width, self.height);
-
-        // 写入 PNG 文件
-        let file = File::create(&filename)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create temp file: {}", e)))?;
-        let ref mut w = BufWriter::new(file);
-        let mut encoder = png::Encoder::new(w, self.width, self.height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header()
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
-        writer.write_image_data(&downsampled)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+        let backend = BitMapBackend::new(&filename, (self.width, self.height));
+        self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
 
         if cfg!(target_os = "macos") {
             let _ = std::process::Command::new("open").arg(&filename).spawn();

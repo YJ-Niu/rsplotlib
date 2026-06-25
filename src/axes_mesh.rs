@@ -108,14 +108,14 @@ pub fn compute_ticks(
     let x_pw_approx = (plot_pixel_width as f64).max(1.0);
     let y_ph_approx = (plot_pixel_height as f64).max(1.0);
 
-    let should_compute_x_minor = minor_grid_visible
-        || !minor_grid_y_visible || minor_grid_x_visible;
+    let should_compute_x_minor = minor_grid_x_visible
+        || (!minor_grid_x_visible && !minor_grid_y_visible && minor_grid_visible);
     let xminor = compute_minor_ticks(
         py, xaxis_minor_locator, &xticks, x_min, x_max, x_pw_approx,
         (x_max - x_min) / x_pw_approx, should_compute_x_minor,
     );
-    let should_compute_y_minor = minor_grid_visible
-        || !minor_grid_x_visible || minor_grid_y_visible;
+    let should_compute_y_minor = minor_grid_y_visible
+        || (!minor_grid_x_visible && !minor_grid_y_visible && minor_grid_visible);
     let yminor = compute_minor_ticks(
         py, yaxis_minor_locator, &yticks, y_min, y_max, y_ph_approx,
         (y_max - y_min) / y_ph_approx, should_compute_y_minor,
