@@ -149,9 +149,9 @@ where
                                 seg_start = seg_end.max(seg_start + 1);
                             }
                         } else if linestyle == ":" {
-                            // 点线：沿路径绘制短点段
-                            let dot_len = *linewidth * 1.0;
-                            let gap_len = *linewidth * 2.0;
+                            // 短虚线：短划线 + 间隙交替
+                            let dot_len = (*linewidth * 0.05).max(0.05);
+                            let gap_len = (*linewidth * 0.05).max(0.05);
                             let mut seg_idx = 0usize;
                             let mut pos_in_seg = 0.0f64;
                             while seg_idx < points.len() - 1 {

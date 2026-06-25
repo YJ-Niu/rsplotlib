@@ -149,40 +149,39 @@ impl Figure {
         let used_dpi = dpi.unwrap_or(self.dpi);
         let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            let ssaa_factor = 4;
-            let ssaa_width = self.width * ssaa_factor;
-            let ssaa_height = self.height * ssaa_factor;
-            let ssaa_buf_size = (ssaa_width as usize) * (ssaa_height as usize) * 3;
-            let mut ssaa_buffer = vec![0u8; ssaa_buf_size];
+            // 2x 超采样抗锯齿：渲染到 2 倍分辨率，再用 box filter 降采样
+            let scale: u32 = 2;
+            let hires_w = self.width * scale;
+            let hires_h = self.height * scale;
+            let buf_size = (hires_w as usize) * (hires_h as usize) * 3;
+            let mut buffer = vec![0u8; buf_size];
             let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(
-                &mut ssaa_buffer,
-                (ssaa_width, ssaa_height),
+                &mut buffer,
+                (hires_w, hires_h),
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
-            self.render_to_backend(py, backend, ssaa_width, ssaa_height, true, font_scale * ssaa_factor as f64)?;
+            self.render_to_backend(py, backend, hires_w, hires_h, true, font_scale * scale as f64)?;
 
-            let buf_size = (self.width as usize) * (self.height as usize) * 3;
-            let mut buffer = vec![0u8; buf_size];
-            for y in 0..self.height {
-                for x in 0..self.width {
-                    let mut r = 0u32;
-                    let mut g = 0u32;
-                    let mut b = 0u32;
-                    for dy in 0..ssaa_factor {
-                        for dx in 0..ssaa_factor {
-                            let sx = x * ssaa_factor + dx;
-                            let sy = y * ssaa_factor + dy;
-                            let idx = (sy as usize) * (ssaa_width as usize) * 3 + (sx as usize) * 3;
-                            r += ssaa_buffer[idx] as u32;
-                            g += ssaa_buffer[idx + 1] as u32;
-                            b += ssaa_buffer[idx + 2] as u32;
+            // 2x2 box filter 降采样
+            let mut downsampled = vec![0u8; (self.width as usize) * (self.height as usize) * 3];
+            for y in 0..self.height as usize {
+                for x in 0..self.width as usize {
+                    let mut r: u32 = 0;
+                    let mut g: u32 = 0;
+                    let mut b: u32 = 0;
+                    for dy in 0..scale as usize {
+                        for dx in 0..scale as usize {
+                            let idx = ((y * scale as usize + dy) * hires_w as usize + (x * scale as usize + dx)) * 3;
+                            r += buffer[idx] as u32;
+                            g += buffer[idx + 1] as u32;
+                            b += buffer[idx + 2] as u32;
                         }
                     }
-                    let div = (ssaa_factor * ssaa_factor) as u32;
-                    let idx = (y as usize) * (self.width as usize) * 3 + (x as usize) * 3;
-                    buffer[idx] = (r / div) as u8;
-                    buffer[idx + 1] = (g / div) as u8;
-                    buffer[idx + 2] = (b / div) as u8;
+                    let count = (scale * scale) as u32;
+                    let out_idx = (y * self.width as usize + x) * 3;
+                    downsampled[out_idx] = (r / count) as u8;
+                    downsampled[out_idx + 1] = (g / count) as u8;
+                    downsampled[out_idx + 2] = (b / count) as u8;
                 }
             }
 
@@ -193,9 +192,6 @@ impl Figure {
             let mut encoder = png::Encoder::new(w, self.width, self.height);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
-            // png 0.18 API:
-            //   - Compression: 用 High（最接近旧版 Best 的最高档）
-            //   - Filter:       用 Filter::Adaptive（替代旧版 AdaptiveFilterType::Adaptive）
             encoder.set_compression(png::Compression::High);
             encoder.set_filter(png::Filter::Adaptive);
             let ppm = (used_dpi / 0.0254).round() as u32;
@@ -206,7 +202,7 @@ impl Figure {
             }));
             let mut writer = encoder.write_header()
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
-            writer.write_image_data(&buffer)
+            writer.write_image_data(&downsampled)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
             Ok(())
         } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
@@ -236,8 +232,51 @@ impl Figure {
         let path = tmpdir.join("rsplot_output.png");
         let filename = path.to_str().unwrap_or("/tmp/rsplot_output.png").to_string();
         let font_scale = self.dpi / 72.0;
-        let backend = BitMapBackend::new(&filename, (self.width, self.height));
-        self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
+
+        // 2x 超采样抗锯齿
+        let scale: u32 = 2;
+        let hires_w = self.width * scale;
+        let hires_h = self.height * scale;
+        let buf_size = (hires_w as usize) * (hires_h as usize) * 3;
+        let mut buffer = vec![0u8; buf_size];
+        let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(&mut buffer, (hires_w, hires_h))
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
+        self.render_to_backend(py, backend, hires_w, hires_h, true, font_scale * scale as f64)?;
+
+        // 2x2 box filter 降采样
+        let mut downsampled = vec![0u8; (self.width as usize) * (self.height as usize) * 3];
+        for y in 0..self.height as usize {
+            for x in 0..self.width as usize {
+                let mut r: u32 = 0;
+                let mut g: u32 = 0;
+                let mut b: u32 = 0;
+                for dy in 0..scale as usize {
+                    for dx in 0..scale as usize {
+                        let idx = ((y * scale as usize + dy) * hires_w as usize + (x * scale as usize + dx)) * 3;
+                        r += buffer[idx] as u32;
+                        g += buffer[idx + 1] as u32;
+                        b += buffer[idx + 2] as u32;
+                    }
+                }
+                let count = (scale * scale) as u32;
+                let out_idx = (y * self.width as usize + x) * 3;
+                downsampled[out_idx] = (r / count) as u8;
+                downsampled[out_idx + 1] = (g / count) as u8;
+                downsampled[out_idx + 2] = (b / count) as u8;
+            }
+        }
+
+        // 写入 PNG 文件
+        let file = File::create(&filename)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create temp file: {}", e)))?;
+        let ref mut w = BufWriter::new(file);
+        let mut encoder = png::Encoder::new(w, self.width, self.height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
+        writer.write_image_data(&downsampled)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
 
         if cfg!(target_os = "macos") {
             let _ = std::process::Command::new("open").arg(&filename).spawn();

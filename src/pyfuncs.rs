@@ -565,12 +565,13 @@ pub fn subplots(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, solid_capstyle=None))]
+#[pyo3(signature = (x, y=None, fmt=None, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, solid_capstyle=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn plot<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
-    y: Bound<'a, PyAny>,
+    y: Option<Bound<'a, PyAny>>,
+    fmt: Option<String>,
     label: Option<String>,
     color: Option<String>,
     linestyle: Option<String>,
@@ -583,8 +584,51 @@ pub fn plot<'a>(
     markeredgewidth: Option<f64>,
     solid_capstyle: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
+    // 检测调用模式：
+    //   plot(x, y)          → 正常 x,y 数据
+    //   plot(x, 'fmt')      → y 是格式字符串，x 是 y 数据
+    //   plot(x, y, fmt='')  → 显式 fmt 参数
+    //   plot(x)             → 只有 y 数据
+    let (data_x, data_y, parsed_fmt) = match y {
+        Some(y_val) => {
+            // 检查 y 是否为格式字符串（如 'o:r', 'r--' 等）
+            if let Ok(fmt_str) = y_val.extract::<String>() {
+                // plot(x, 'fmt') 模式：x 实际上是 y 数据
+                let n = x.len()?;
+                let auto_x: Vec<f64> = (0..n).map(|i| i as f64).collect();
+                let x_list = PyList::new(py, auto_x.iter().map(|&v| v))?;
+                (x_list.into_any(), x, Some(fmt_str))
+            } else {
+                // plot(x, y) 正常模式
+                (x, y_val, fmt)
+            }
+        }
+        None => {
+            // plot(x) 模式：x 是 y 数据
+            let n = x.len()?;
+            let auto_x: Vec<f64> = (0..n).map(|i| i as f64).collect();
+            let x_list = PyList::new(py, auto_x.iter().map(|&v| v))?;
+            (x_list.into_any(), x, fmt)
+        }
+    };
+
+    // 解析 fmt 字符串
+    let (fmt_marker, fmt_linestyle, fmt_color) = parsed_fmt
+        .as_deref()
+        .and_then(crate::axes::parse_fmt_string)
+        .unwrap_or((None, None, None));
+
+    // 优先级：显式参数 > fmt 解析 > 默认值
+    let actual_marker = marker.or(fmt_marker);
+    let actual_color = c.or(color).or(fmt_color);
+    let actual_linestyle = ls.or(linestyle).or(fmt_linestyle).unwrap_or_else(|| "-".to_string());
+
     let mut ax = Axes::new();
-    ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
+    ax.plot(
+        py, data_x, data_y, label, actual_color, &actual_linestyle,
+        actual_marker, linewidth.unwrap_or(1.5), lw, None, None,
+        markersize, markeredgewidth, solid_capstyle,
+    )?;
 
     let mut fig = Figure::new();
     fig.width = 400;

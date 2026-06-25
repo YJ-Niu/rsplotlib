@@ -206,67 +206,70 @@ impl Clone for Axes {
 }
 
 /// 解析 matplotlib 格式字符串
+/// 支持 [marker][line][color] 以任意顺序出现
 /// 返回 (marker, linestyle, color) 三元组，如果字符串不是 fmt 格式则返回 None
-fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
-    // 已知 marker 字符
-    const MARKERS: &[&str] = &["o", "s", "^", "v", "D", "d", "*", "+", "x", ".", ",", "|", "_", "h", "H", "p", "P", "<", ">", "1", "2", "3", "4"];
-    // 已知 color
+pub(crate) fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    const MARKERS: &[&str] = &["o", "s", "^", "v", "D", "d", "*", "+", "x", "X", ".", ",", "|", "_", "h", "H", "p", "P", "<", ">", "1", "2", "3", "4", "8", "0"];
     const COLORS: &[&str] = &["b", "g", "r", "c", "m", "y", "k", "w"];
+
+    let chars: Vec<char> = fmt.chars().collect();
+    let mut used: Vec<bool> = vec![false; chars.len()];
 
     let mut found_marker: Option<String> = None;
     let mut found_ls: Option<String> = None;
     let mut found_color: Option<String> = None;
-    let mut i: usize = 0;
 
-    // 尝试解析 linestyle（在前缀位置时优先）
-    if fmt.starts_with("--") {
-        found_ls = Some("--".to_string());
-        i = 2;
-    } else if fmt.starts_with("-.") {
-        found_ls = Some("-.".to_string());
-        i = 2;
-    } else if fmt.starts_with('-') {
-        found_ls = Some("-".to_string());
-        i = 1;
-    } else if fmt.starts_with(':') {
-        found_ls = Some(":".to_string());
-        i = 1;
-    }
-
-    // 解析 color（单字符）
-    if i < fmt.len() {
-        let c = &fmt[i..i+1];
-        if COLORS.contains(&c) {
-            found_color = Some(c.to_string());
-            i += 1;
+    // 扫描 linestyle: -- 或 -.
+    for i in 0..chars.len().saturating_sub(1) {
+        if used[i] || used[i+1] { continue; }
+        let pair = format!("{}{}", chars[i], chars[i+1]);
+        if pair == "--" || pair == "-." {
+            found_ls = Some(pair);
+            used[i] = true;
+            used[i+1] = true;
         }
     }
 
-    // 解析 marker
-    if i < fmt.len() {
-        let m1 = &fmt[i..i+1];
-        if MARKERS.contains(&m1) {
-            found_marker = Some(m1.to_string());
-            i += 1;
-        }
-        // 检查是否还有更多 marker 字符
-        while i < fmt.len() {
-            let m = &fmt[i..i+1];
-            if MARKERS.contains(&m) {
-                found_marker = Some(m.to_string());
-                i += 1;
-            } else {
+    // 扫描 linestyle: - 或 :（单字符，且不与 -- 或 -. 冲突）
+    if found_ls.is_none() {
+        for i in 0..chars.len() {
+            if used[i] { continue; }
+            if chars[i] == '-' || chars[i] == ':' {
+                found_ls = Some(chars[i].to_string());
+                used[i] = true;
                 break;
             }
         }
     }
 
-    // 如果还有剩余字符，说明不是 fmt 字符串
-    if i < fmt.len() {
+    // 扫描 color（单字符）
+    for i in 0..chars.len() {
+        if used[i] { continue; }
+        let c = chars[i].to_string();
+        if COLORS.contains(&c.as_str()) {
+            found_color = Some(c);
+            used[i] = true;
+            break;
+        }
+    }
+
+    // 扫描 marker（单字符，取最后一个匹配的）
+    for i in 0..chars.len() {
+        if used[i] { continue; }
+        let m = chars[i].to_string();
+        if MARKERS.contains(&m.as_str()) {
+            found_marker = Some(m);
+            used[i] = true;
+            // 继续扫描，后面的 marker 覆盖前面的
+        }
+    }
+
+    // 检查是否所有字符都被消费完
+    if !used.iter().all(|&u| u) {
         return None;
     }
 
-    // 必须至少解析出 marker 或 linestyle 才算 fmt 字符串
+    // 必须至少解析出 marker 或 linestyle 或 color 才算 fmt 字符串
     if found_marker.is_none() && found_ls.is_none() && found_color.is_none() {
         return None;
     }

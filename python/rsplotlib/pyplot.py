@@ -124,10 +124,12 @@ def _parse_plot_args(args, kwargs):
     if fmt and isinstance(fmt, str):
         markers = 'o^sD*+xvph'
         linestyles = {'-': '-', '--': '--', ':': ':', '-.': '-.'}
+        colors = {'b': 'blue', 'g': 'green', 'r': 'red', 'c': 'cyan',
+                  'm': 'magenta', 'y': 'yellow', 'k': 'black', 'w': 'white'}
         
         parsed_marker = None
         parsed_linestyle = None
-        remaining = []
+        parsed_color = None
         
         i = 0
         while i < len(fmt):
@@ -140,8 +142,10 @@ def _parse_plot_args(args, kwargs):
             elif fmt[i] in markers:
                 parsed_marker = fmt[i]
                 i += 1
+            elif fmt[i] in colors:
+                parsed_color = colors[fmt[i]]
+                i += 1
             else:
-                remaining.append(fmt[i])
                 i += 1
         
         if parsed_marker and not parsed_linestyle:
@@ -151,6 +155,8 @@ def _parse_plot_args(args, kwargs):
             kwargs['marker'] = parsed_marker
         if parsed_linestyle is not None and 'linestyle' not in kwargs:
             kwargs['linestyle'] = parsed_linestyle
+        if parsed_color is not None and 'color' not in kwargs:
+            kwargs['color'] = parsed_color
     
     return x, y, kwargs
 
