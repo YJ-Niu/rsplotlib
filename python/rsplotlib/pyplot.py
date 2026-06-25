@@ -79,88 +79,6 @@ def _route_to_ax(ax_method_name, module_method, *args, **kwargs):
     return module_method(*args, **kwargs)
 
 
-def _map_aliases(kwargs):
-    """规范化 matplotlib 别名到标准名"""
-    alias_map = {
-        'lw': 'linewidth',
-        'c': 'color',
-        'ls': 'linestyle',
-    }
-    for alias, target in alias_map.items():
-        if alias in kwargs and target not in kwargs:
-            kwargs[target] = kwargs.pop(alias)
-        elif alias in kwargs:
-            kwargs.pop(alias)
-
-
-def _parse_plot_args(args, kwargs):
-    """解析 plot() 的位置参数为 (x, y, kwargs)
-    
-    支持 matplotlib 风格的格式字符串，如 'o', 'r-', 'b--', 'g^' 等
-    """
-    x = None
-    y = None
-    fmt = None
-    
-    if len(args) == 3:
-        x, y, fmt = args[0], args[1], args[2]
-    elif len(args) == 2:
-        if isinstance(args[1], str) and len(args[1]) <= 5:
-            x = list(range(len(args[0]))) if hasattr(args[0], '__len__') else []
-            y, fmt = args[0], args[1]
-        else:
-            x, y = args[0], args[1]
-    elif len(args) == 1:
-        if isinstance(args[0], str):
-            return [], [], kwargs
-        try:
-            x = list(range(len(args[0])))
-        except Exception:
-            x = list(args[0]) if hasattr(args[0], '__iter__') else []
-        y = args[0]
-    else:
-        return [], [], kwargs
-    
-    if fmt and isinstance(fmt, str):
-        markers = 'o^sD*+xvph'
-        linestyles = {'-': '-', '--': '--', ':': ':', '-.': '-.'}
-        colors = {'b': 'blue', 'g': 'green', 'r': 'red', 'c': 'cyan',
-                  'm': 'magenta', 'y': 'yellow', 'k': 'black', 'w': 'white'}
-        
-        parsed_marker = None
-        parsed_linestyle = None
-        parsed_color = None
-        
-        i = 0
-        while i < len(fmt):
-            if i + 1 < len(fmt) and fmt[i:i+2] in linestyles:
-                parsed_linestyle = fmt[i:i+2]
-                i += 2
-            elif fmt[i] in linestyles:
-                parsed_linestyle = fmt[i]
-                i += 1
-            elif fmt[i] in markers:
-                parsed_marker = fmt[i]
-                i += 1
-            elif fmt[i] in colors:
-                parsed_color = colors[fmt[i]]
-                i += 1
-            else:
-                i += 1
-        
-        if parsed_marker and not parsed_linestyle:
-            parsed_linestyle = ''
-        
-        if parsed_marker and parsed_marker not in kwargs:
-            kwargs['marker'] = parsed_marker
-        if parsed_linestyle is not None and 'linestyle' not in kwargs:
-            kwargs['linestyle'] = parsed_linestyle
-        if parsed_color is not None and 'color' not in kwargs:
-            kwargs['color'] = parsed_color
-    
-    return x, y, kwargs
-
-
 # ==================== 绘图函数 ====================
 
 def plot(*args, **kwargs):
@@ -183,24 +101,14 @@ def plot(*args, **kwargs):
     Returns:
         (Figure, Axes) 元组
     """
-    _map_aliases(kwargs)
-    
+    # 别名、fmt 解析、调用模式检测全部由 Rust 层处理
     if len(args) >= 4 and len(args) % 2 == 0:
         results = []
         for i in range(0, len(args), 2):
-            x, y = args[i], args[i+1]
-            
-            def _call(*a, **k):
-                return _rsplotlib.plot(*a, **k)
-            results.append(_route_to_ax('plot', _call, x, y, **kwargs))
+            results.append(_route_to_ax('plot', _rsplotlib.plot, args[i], args[i+1], **kwargs))
         return results if len(results) > 1 else results[0]
-    
-    x, y, kw = _parse_plot_args(args, kwargs)
 
-    def _call(*a, **k):
-        return _rsplotlib.plot(*a, **k)
-
-    return _route_to_ax('plot', _call, x, y, **kwargs)
+    return _route_to_ax('plot', _rsplotlib.plot, *args, **kwargs)
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):

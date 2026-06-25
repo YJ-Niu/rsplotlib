@@ -595,8 +595,11 @@ pub fn plot<'a>(
             if let Ok(fmt_str) = y_val.extract::<String>() {
                 // plot(x, 'fmt') 模式：x 实际上是 y 数据
                 let n = x.len()?;
-                let auto_x: Vec<f64> = (0..n).map(|i| i as f64).collect();
-                let x_list = PyList::new(py, auto_x.iter().map(|&v| v))?;
+                let mut auto_x = Vec::with_capacity(n);
+                for i in 0..n {
+                    auto_x.push(i as f64);
+                }
+                let x_list = PyList::new(py, auto_x)?;
                 (x_list.into_any(), x, Some(fmt_str))
             } else {
                 // plot(x, y) 正常模式
@@ -606,8 +609,11 @@ pub fn plot<'a>(
         None => {
             // plot(x) 模式：x 是 y 数据
             let n = x.len()?;
-            let auto_x: Vec<f64> = (0..n).map(|i| i as f64).collect();
-            let x_list = PyList::new(py, auto_x.iter().map(|&v| v))?;
+            let mut auto_x = Vec::with_capacity(n);
+            for i in 0..n {
+                auto_x.push(i as f64);
+            }
+            let x_list = PyList::new(py, auto_x)?;
             (x_list.into_any(), x, fmt)
         }
     };
