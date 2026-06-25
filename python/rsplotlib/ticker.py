@@ -1,9 +1,10 @@
 """rsplotlib.ticker - Matplotlib ticker 兼容接口
 
 提供刻度定位器和格式化器类。
+底层实现已迁移至 Rust 层，此模块为保持完整 Python 接口的薄包装层。
 """
 
-import math
+from . import rsplotlib as _rs
 
 
 class Tick:
@@ -28,25 +29,19 @@ class Locator:
 
 class MultipleLocator(Locator):
     """倍数定位器 - 刻度位置是基数的整数倍
-    
+
+    底层实现: Rust MultipleLocator
+
     Args:
         base: 刻度间距
     """
 
     def __init__(self, base=1.0):
         self.base = base
+        self._impl = _rs.MultipleLocator(base)
 
     def tick_values(self, vmin, vmax):
-        if self.base == 0:
-            return []
-        vmin = math.floor(vmin / self.base) * self.base
-        vmax = math.ceil(vmax / self.base) * self.base
-        ticks = []
-        v = vmin
-        while v <= vmax + self.base * 0.5:
-            ticks.append(v)
-            v += self.base
-        return ticks
+        return self._impl.tick_values(vmin, vmax)
 
     def __repr__(self):
         return f'MultipleLocator(base={self.base})'
@@ -54,7 +49,9 @@ class MultipleLocator(Locator):
 
 class MaxNLocator(Locator):
     """最大数量定位器 - 最多 nbins+1 个刻度
-    
+
+    底层实现: Rust MaxNLocator
+
     Args:
         nbins: 最大区间数 (默认: 10)
         integer: 是否只使用整数 (默认: False)
@@ -63,53 +60,20 @@ class MaxNLocator(Locator):
     def __init__(self, nbins=10, integer=False):
         self.nbins = nbins
         self.integer = integer
+        self._impl = _rs.MaxNLocator(nbins, integer)
 
     def tick_values(self, vmin, vmax):
-        if vmax <= vmin:
-            return [vmin]
-        range_val = vmax - vmin
-        if range_val == 0:
-            return [vmin]
-        raw_step = range_val / self.nbins
-        if self.integer:
-            step = max(1, int(raw_step))
-        else:
-            step = self._nice_step(raw_step)
-        vmin = math.floor(vmin / step) * step
-        ticks = []
-        v = vmin
-        while v <= vmax + step * 0.5:
-            if not self.integer or abs(v - round(v)) < 1e-10:
-                if self.integer:
-                    v = round(v)
-                if not ticks or abs(v - ticks[-1]) > 1e-10:
-                    ticks.append(v)
-            v += step
-        while len(ticks) > self.nbins + 1:
-            ticks = ticks[::2]
-        return ticks
-
-    def _nice_step(self, step):
-        if step <= 0:
-            return 1.0
-        exponent = math.floor(math.log10(step))
-        fraction = step / (10 ** exponent)
-        if fraction < 1.5:
-            nice = 1.0
-        elif fraction < 3.5:
-            nice = 2.0
-        elif fraction < 7.5:
-            nice = 5.0
-        else:
-            nice = 10.0
-        return nice * (10 ** exponent)
+        return self._impl.tick_values(vmin, vmax)
 
     def __repr__(self):
         return f'MaxNLocator(nbins={self.nbins}, integer={self.integer})'
 
 
 class AutoLocator(MaxNLocator):
-    """自动定位器"""
+    """自动定位器
+
+    底层实现: Rust MaxNLocator(nbins=10)
+    """
 
     def __init__(self):
         super().__init__(nbins=10)
@@ -117,74 +81,78 @@ class AutoLocator(MaxNLocator):
 
 class AutoMinorLocator(Locator):
     """自动次要刻度定位器
-    
+
+    底层实现: Rust AutoMinorLocator
+
     Args:
         n: 每个主要间隔中的次要刻度数 (默认: 5)
     """
 
     def __init__(self, n=5):
         self.n = n
+        self._impl = _rs.AutoMinorLocator(n)
 
     def tick_values(self, vmin, vmax):
-        major_step = (vmax - vmin) / 10
-        if major_step <= 0:
-            return []
-        minor_step = major_step / self.n
-        ticks = []
-        v = vmin
-        while v <= vmax + minor_step * 0.5:
-            ticks.append(v)
-            v += minor_step
-        return ticks
+        return self._impl.tick_values(vmin, vmax)
 
     def __repr__(self):
         return f'AutoMinorLocator(n={self.n})'
 
 
 class FixedLocator(Locator):
-    """固定位置定位器"""
+    """固定位置定位器
+
+    底层实现: Rust FixedLocator
+    """
 
     def __init__(self, locs):
         self.locs = list(locs)
+        self._impl = _rs.FixedLocator(list(locs))
 
     def tick_values(self, vmin, vmax):
-        return [l for l in self.locs if vmin <= l <= vmax]
+        return self._impl.tick_values(vmin, vmax)
 
 
 class LinearLocator(Locator):
-    """线性定位器"""
+    """线性定位器
+
+    底层实现: Rust LinearLocator
+    """
 
     def __init__(self, numticks=10):
         self.numticks = numticks
+        self._impl = _rs.LinearLocator(numticks)
 
     def tick_values(self, vmin, vmax):
-        if vmax <= vmin:
-            return [vmin]
-        step = (vmax - vmin) / (self.numticks - 1)
-        return [vmin + i * step for i in range(self.numticks)]
+        return self._impl.tick_values(vmin, vmax)
 
 
 class LogLocator(Locator):
-    """对数定位器"""
+    """对数定位器
+
+    底层实现: Rust LogLocator
+    """
 
     def __init__(self, base=10.0, numticks=10):
         self.base = base
         self.numticks = numticks
+        self._impl = _rs.LogLocator(base, numticks)
 
     def tick_values(self, vmin, vmax):
-        if vmin <= 0:
-            vmin = 1e-10
-        log_min = math.log(vmin, self.base)
-        log_max = math.log(vmax, self.base)
-        step = (log_max - log_min) / (self.numticks - 1)
-        return [self.base ** (log_min + i * step) for i in range(self.numticks)]
+        return self._impl.tick_values(vmin, vmax)
 
 
 class NullLocator(Locator):
-    """空定位器 - 不显示刻度"""
+    """空定位器 - 不显示刻度
+
+    底层实现: Rust NullLocator
+    """
+
+    def __init__(self):
+        self._impl = _rs.NullLocator()
 
     def tick_values(self, vmin, vmax):
-        return []
+        return self._impl.tick_values(vmin, vmax)
 
 
 # ==================== 格式化器 ====================
@@ -200,75 +168,98 @@ class Formatter:
 
 
 class NullFormatter(Formatter):
-    """不显示标签"""
+    """不显示标签
+
+    底层实现: Rust NullFormatter
+    """
+
+    def __init__(self):
+        self._impl = _rs.NullFormatter()
 
     def __call__(self, value):
-        return ''
+        return self._impl.__call__(value)
 
 
 class FixedFormatter(Formatter):
-    """固定标签格式化器"""
+    """固定标签格式化器
+
+    底层实现: Rust FixedFormatter
+    """
 
     def __init__(self, seq):
         self.seq = list(seq)
+        self._impl = _rs.FixedFormatter([str(s) for s in seq])
 
     def __call__(self, value):
-        try:
-            idx = int(round(value))
-            if 0 <= idx < len(self.seq):
-                return str(self.seq[idx])
-        except (ValueError, IndexError):
-            pass
-        return ''
+        return self._impl.__call__(value)
 
 
 class FormatStrFormatter(Formatter):
-    """格式化字符串"""
+    """格式化字符串
+
+    底层实现: Rust FormatStrFormatter
+    """
 
     def __init__(self, fmt):
         self.fmt = fmt
+        self._impl = _rs.FormatStrFormatter(fmt)
 
     def __call__(self, value):
-        return self.fmt % value
+        return self._impl.__call__(value)
 
 
 class ScalarFormatter(Formatter):
-    """标量格式化器"""
+    """标量格式化器
+
+    底层实现: Rust ScalarFormatter
+    """
+
+    def __init__(self):
+        self._impl = _rs.ScalarFormatter()
 
     def __call__(self, value):
-        if abs(value) >= 1e4 or abs(value) < 1e-3:
-            return f'{value:.2e}'
-        return f'{value:g}'
+        return self._impl.__call__(value)
 
 
 class LogFormatterSciNotation(Formatter):
-    """科学计数法格式化器"""
+    """科学计数法格式化器
+
+    底层实现: Rust LogFormatterSciNotation
+    """
+
+    def __init__(self):
+        self._impl = _rs.LogFormatterSciNotation()
 
     def __call__(self, value):
-        if value <= 0:
-            return '0'
-        exp = math.log10(value)
-        return f'$10^{{{int(exp)}}}$'
+        return self._impl.__call__(value)
 
 
 class FuncFormatter(Formatter):
-    """函数格式化器"""
+    """函数格式化器
+
+    底层实现: Rust FuncFormatter
+    """
 
     def __init__(self, func):
         self.func = func
+        self._impl = _rs.FuncFormatter(func)
 
     def __call__(self, value):
-        return self.func(value)
+        return self._impl.__call__(value)
 
 
 class StrMethodFormatter(Formatter):
-    """字符串方法格式化器"""
+    """字符串方法格式化器
+
+    底层实现: Rust StrMethodFormatter
+    """
 
     def __init__(self, fmt):
         self.fmt = fmt
+        self._impl = _rs.StrMethodFormatter(fmt)
 
     def __call__(self, value):
-        return self.fmt.format(value)
+        return self._impl.__call__(value)
 
 
 # ==================== 便捷函数 ====================

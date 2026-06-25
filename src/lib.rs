@@ -10,9 +10,11 @@ pub mod colormap;
 pub mod colors;
 pub mod elements;
 pub mod figure;
+pub mod gridspec;
 pub mod marker;
 pub mod pyfuncs;
 pub mod text_utils;
+pub mod ticker;
 
 use pyo3::prelude::*;
 use plotters::style::register_font;
@@ -22,7 +24,7 @@ use crate::axes::Axes;
 use crate::figure::Figure;
 
 #[pymodule]
-fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 字体注册策略说明：
     //
     // 用户反馈"字符宽度/字距视觉不一致 + 空格宽度窄"。
@@ -215,5 +217,8 @@ fn rsplotlib(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyfuncs::axvspan, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::axline, m)?)?;
     m.add_function(wrap_pyfunction!(pyfuncs::register_sans_serif_font, m)?)?;
+
+    ticker::register(py, m)?;
+    gridspec::register(py, m)?;
     Ok(())
 }

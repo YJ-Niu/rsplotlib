@@ -1,11 +1,18 @@
-"""rsplotlib.gridspec - Matplotlib GridSpec 兼容接口"""
+"""rsplotlib.gridspec - Matplotlib GridSpec 兼容接口
+
+提供子图网格布局管理。
+底层实现已迁移至 Rust 层，此模块为保持完整 Python 接口的薄包装层。
+"""
+
+from . import rsplotlib as _rs
 
 
 class GridSpec:
     """GridSpec 布局管理器
-    
+
     用于在 Figure 中创建子图网格布局。
-    
+    底层实现: Rust GridSpec
+
     Args:
         nrows: 行数
         ncols: 列数
@@ -32,26 +39,20 @@ class GridSpec:
         self.hspace = hspace
         self.width_ratios = width_ratios or [1] * ncols
         self.height_ratios = height_ratios or [1] * nrows
+        self._impl = _rs.GridSpec(nrows, ncols, left, bottom, right, top,
+                                   wspace, hspace, width_ratios, height_ratios)
 
     def __getitem__(self, key):
         """支持 gs[row, col] 和 gs[row_start:row_end, col_start:col_end] 语法
-        
+
+        底层实现: Rust GridSpec.__getitem__
+
         Returns:
             SubplotSpec: 子图定位器
         """
-        if isinstance(key, tuple):
-            row_spec, col_spec = key
-            row_start, row_end = self._parse_slice(row_spec)
-            col_start, col_end = self._parse_slice(col_spec)
-            return SubplotSpec(self, row_start, row_end, col_start, col_end)
-        raise TypeError("GridSpec indices must be tuples (row, col)")
-
-    def _parse_slice(self, spec):
-        if isinstance(spec, slice):
-            start = spec.start or 0
-            stop = spec.stop or (self.nrows if isinstance(spec, slice) else self.ncols)
-            return start, stop
-        return spec, spec + 1
+        result = self._impl.__getitem__(key)
+        # 将 Rust SubplotSpec 包装为 Python SubplotSpec
+        return SubplotSpec._from_rust(result)
 
     def get_subplot_params(self, figure=None):
         """获取子图布局参数"""
@@ -66,13 +67,16 @@ class GridSpec:
 
     def tight_layout(self, figure=None, renderer=None, pad=1.08, h_pad=None, w_pad=None, rect=None):
         """自动调整布局"""
-        pass
+        self._impl.tight_layout(figure, renderer)
 
 
 class SubplotSpec:
-    """子图定位器"""
+    """子图定位器
 
-    def __init__(self, gridspec, row_start, row_end, col_start, col_end):
+    底层实现: Rust SubplotSpec
+    """
+
+    def __init__(self, gridspec, row_start=0, row_end=1, col_start=0, col_end=1):
         self.gridspec = gridspec
         self.row_start = row_start
         self.row_end = row_end
@@ -82,41 +86,77 @@ class SubplotSpec:
             self.numRows = gridspec.nrows
             self.numCols = gridspec.ncols
         else:
-            # 用于模式 (nrows, ncols, index) 调用 add_subplot
             self.numRows = max(row_end, 1)
             self.numCols = max(col_end, 1)
         self.rowStart = row_start
         self.rowStop = row_end
         self.colStart = col_start
         self.colStop = col_end
+        # 创建 Rust 实现
+        if gridspec is not None:
+            self._impl = _rs.SubplotSpec(gridspec._impl, row_start, row_end, col_start, col_end)
+        else:
+            self._impl = _rs.SubplotSpec(None, row_start, row_end, col_start, col_end)
+
+    @classmethod
+    def _from_rust(cls, rust_spec):
+        """从 Rust SubplotSpec 创建 Python 包装"""
+        instance = cls.__new__(cls)
+        instance._impl = rust_spec
+        instance.numRows = rust_spec.numRows
+        instance.numCols = rust_spec.numCols
+        instance.rowStart = rust_spec.rowStart
+        instance.rowStop = rust_spec.rowStop
+        instance.colStart = rust_spec.colStart
+        instance.colStop = rust_spec.colStop
+        instance.row_start = rust_spec.rowStart
+        instance.row_end = rust_spec.rowStop
+        instance.col_start = rust_spec.colStart
+        instance.col_end = rust_spec.colStop
+        instance.gridspec = None  # 简化处理
+        return instance
 
     def get_position(self, figure):
-        """返回子图位置 (left, bottom, width, height)"""
-        if self.gridspec is None:
-            # 没有 gridspec 时使用均匀划分
-            return (self.colStart / self.numCols,
-                    1.0 - self.rowEnd / self.numRows,
-                    (self.colEnd - self.colStart) / self.numCols,
-                    (self.rowEnd - self.rowStart) / self.numRows)
-        row_heights = self.gridspec.height_ratios
-        col_widths = self.gridspec.width_ratios
+        """返回子图位置 (left, bottom, width, height)
 
-        total_h = sum(row_heights)
-        total_w = sum(col_widths)
-
-        x = sum(col_widths[:self.col_start]) / total_w
-        y = 1.0 - sum(row_heights[:self.row_end]) / total_h
-        w = sum(col_widths[self.col_start:self.col_end]) / total_w
-        h = sum(row_heights[self.row_start:self.row_end]) / total_h
-
-        return x, y, w, h
+        底层实现: Rust SubplotSpec.get_position
+        """
+        return self._impl.get_position(figure)
 
     def get_grid_span(self):
         """返回网格跨度"""
-        return (self.row_start, self.row_end, self.col_start, self.col_end)
+        return (self.rowStart, self.rowStop, self.colStart, self.colStop)
 
 
 # 便利函数
 def GridSpecFromSubplotSpec(nrows, ncols, subplot_spec, **kwargs):
     """从 SubplotSpec 创建 GridSpec"""
-    return GridSpec(nrows, ncols, **kwargs)
+    from .rsplotlib import gridspec_from_subplotspec
+    # 参数提取
+    left = kwargs.get('left')
+    bottom = kwargs.get('bottom')
+    right = kwargs.get('right')
+    top = kwargs.get('top')
+    wspace = kwargs.get('wspace')
+    hspace = kwargs.get('hspace')
+    width_ratios = kwargs.get('width_ratios')
+    height_ratios = kwargs.get('height_ratios')
+    rust_gs = gridspec_from_subplotspec(
+        nrows, ncols, left=left, bottom=bottom, right=right, top=top,
+        wspace=wspace, hspace=hspace, width_ratios=width_ratios,
+        height_ratios=height_ratios,
+    )
+    # 包装为 Python GridSpec
+    gs = GridSpec.__new__(GridSpec)
+    gs.nrows = nrows
+    gs.ncols = ncols
+    gs.left = left
+    gs.bottom = bottom
+    gs.right = right
+    gs.top = top
+    gs.wspace = wspace
+    gs.hspace = hspace
+    gs.width_ratios = width_ratios or [1] * ncols
+    gs.height_ratios = height_ratios or [1] * nrows
+    gs._impl = rust_gs
+    return gs
