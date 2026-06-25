@@ -189,6 +189,7 @@ def plot(*args, **kwargs):
         results = []
         for i in range(0, len(args), 2):
             x, y = args[i], args[i+1]
+            
             def _call(*a, **k):
                 return _rsplotlib.plot(*a, **k)
             results.append(_route_to_ax('plot', _call, x, y, **kwargs))

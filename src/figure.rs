@@ -29,6 +29,33 @@ pub fn get_current_figure(py: Python<'_>) -> PyResult<Bound<'_, Figure>> {
     }
 }
 
+/// 使用 Lanczos3 滤镜将 2x 超采样 buffer 降采样到目标分辨率
+fn downsample_aa(buffer: Vec<u8>, src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    use fast_image_resize as fir;
+
+    let src = fir::images::Image::from_vec_u8(
+        src_w,
+        src_h,
+        buffer,
+        fir::PixelType::U8x3,
+    )
+    .unwrap();
+
+    let mut dst = fir::images::Image::new(
+        dst_w,
+        dst_h,
+        fir::PixelType::U8x3,
+    );
+
+    let mut resizer = fir::Resizer::new();
+    let options = fir::ResizeOptions::new().resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3));
+    resizer
+        .resize(&src, &mut dst, &options)
+        .unwrap();
+
+    dst.into_vec()
+}
+
 #[pyclass]
 pub struct Figure {
     pub axes_list: Vec<Py<Axes>>,
@@ -149,8 +176,8 @@ impl Figure {
         let used_dpi = dpi.unwrap_or(self.dpi);
         let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            // 2x 超采样抗锯齿：渲染到 2 倍分辨率，再用 box filter 降采样
-            let scale: u32 = 2;
+            // 4x 超采样抗锯齿：渲染到 4 倍分辨率，再用 Lanczos3 降采样
+            let scale: u32 = 4;
             let hires_w = self.width * scale;
             let hires_h = self.height * scale;
             let buf_size = (hires_w as usize) * (hires_h as usize) * 3;
@@ -162,28 +189,8 @@ impl Figure {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
             self.render_to_backend(py, backend, hires_w, hires_h, true, font_scale * scale as f64)?;
 
-            // 2x2 box filter 降采样
-            let mut downsampled = vec![0u8; (self.width as usize) * (self.height as usize) * 3];
-            for y in 0..self.height as usize {
-                for x in 0..self.width as usize {
-                    let mut r: u32 = 0;
-                    let mut g: u32 = 0;
-                    let mut b: u32 = 0;
-                    for dy in 0..scale as usize {
-                        for dx in 0..scale as usize {
-                            let idx = ((y * scale as usize + dy) * hires_w as usize + (x * scale as usize + dx)) * 3;
-                            r += buffer[idx] as u32;
-                            g += buffer[idx + 1] as u32;
-                            b += buffer[idx + 2] as u32;
-                        }
-                    }
-                    let count = (scale * scale) as u32;
-                    let out_idx = (y * self.width as usize + x) * 3;
-                    downsampled[out_idx] = (r / count) as u8;
-                    downsampled[out_idx + 1] = (g / count) as u8;
-                    downsampled[out_idx + 2] = (b / count) as u8;
-                }
-            }
+            // Lanczos3 降采样
+            let downsampled = downsample_aa(buffer, hires_w, hires_h, self.width, self.height);
 
             // 写入 PNG 并嵌入 DPI 信息
             let file = File::create(filename)
@@ -233,8 +240,8 @@ impl Figure {
         let filename = path.to_str().unwrap_or("/tmp/rsplot_output.png").to_string();
         let font_scale = self.dpi / 72.0;
 
-        // 2x 超采样抗锯齿
-        let scale: u32 = 2;
+        // 4x 超采样抗锯齿
+        let scale: u32 = 4;
         let hires_w = self.width * scale;
         let hires_h = self.height * scale;
         let buf_size = (hires_w as usize) * (hires_h as usize) * 3;
@@ -243,28 +250,8 @@ impl Figure {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
         self.render_to_backend(py, backend, hires_w, hires_h, true, font_scale * scale as f64)?;
 
-        // 2x2 box filter 降采样
-        let mut downsampled = vec![0u8; (self.width as usize) * (self.height as usize) * 3];
-        for y in 0..self.height as usize {
-            for x in 0..self.width as usize {
-                let mut r: u32 = 0;
-                let mut g: u32 = 0;
-                let mut b: u32 = 0;
-                for dy in 0..scale as usize {
-                    for dx in 0..scale as usize {
-                        let idx = ((y * scale as usize + dy) * hires_w as usize + (x * scale as usize + dx)) * 3;
-                        r += buffer[idx] as u32;
-                        g += buffer[idx + 1] as u32;
-                        b += buffer[idx + 2] as u32;
-                    }
-                }
-                let count = (scale * scale) as u32;
-                let out_idx = (y * self.width as usize + x) * 3;
-                downsampled[out_idx] = (r / count) as u8;
-                downsampled[out_idx + 1] = (g / count) as u8;
-                downsampled[out_idx + 2] = (b / count) as u8;
-            }
-        }
+        // Lanczos3 降采样
+        let downsampled = downsample_aa(buffer, hires_w, hires_h, self.width, self.height);
 
         // 写入 PNG 文件
         let file = File::create(&filename)
