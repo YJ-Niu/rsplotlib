@@ -50,6 +50,8 @@ pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
 
 fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
     let mut fig = Figure::new();
+    fig.width = 400;
+    fig.height = 300;
     fig.axes_list.clear();
     let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
@@ -585,6 +587,8 @@ pub fn plot<'a>(
     ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
 
     let mut fig = Figure::new();
+    fig.width = 400;
+    fig.height = 300;
     fig.axes_list.clear();
     fig.axes_positions.clear();
     let fig_py = Py::new(py, fig)?;

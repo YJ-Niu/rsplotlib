@@ -1492,9 +1492,8 @@ impl Axes {
             let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
-                .x_labels(ticks_info.xticks.len().max(2))
-                .y_labels(ticks_info.yticks.len().max(2))
                 .x_label_style(("sans-serif", label_size))
+                .y_labels(ticks_info.yticks.len().max(2))
                 .y_label_style(("sans-serif", label_size))
                 .x_desc(self.xlabel.clone())
                 .y_desc(self.ylabel.clone())
@@ -1507,7 +1506,9 @@ impl Axes {
                 mesh_builder.y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
             } else {
                 mesh_builder.y_label_formatter(&|v| crate::axes_mesh::format_linear_tick(*v));
-                mesh_builder.x_label_formatter(&|v| crate::axes_mesh::format_linear_tick(*v));
+                if !xlog {
+                    mesh_builder.x_label_formatter(&|v| crate::axes_mesh::format_linear_tick(*v));
+                }
             }
 
             if !self.spine_bottom && !self.spine_top {
@@ -1515,9 +1516,6 @@ impl Axes {
             }
             if !self.spine_left && !self.spine_right {
                 mesh_builder.disable_y_axis();
-            }
-            if !self.tick_bottom && !self.tick_top {
-                mesh_builder.x_labels(0);
             }
             if !self.tick_left && !self.tick_right {
                 mesh_builder.y_labels(0);
