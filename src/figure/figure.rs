@@ -6,8 +6,13 @@ use pyo3::prelude::*;
 use pyo3::types::PyAny;
 use plotters::prelude::*;
 
-use crate::axes::Axes;
+use crate::figure::axes::Axes;
 // colors not needed directly in this module
+
+/// 默认图形尺寸（英寸），与 matplotlib 默认一致
+pub const DEFAULT_FIGSIZE: (f64, f64) = (6.4, 4.8);
+/// 默认 DPI
+pub const DEFAULT_DPI: f64 = 100.0;
 
 pub(crate) static CURRENT_FIGURE: Mutex<Option<Py<Figure>>> = Mutex::new(None);
 
@@ -137,7 +142,7 @@ impl Figure {
         };
         let ax = Axes::new();
         let ax_py = Py::new(py, ax)?;
-        crate::pyfuncs::init_axes_self_py(&ax_py, py);
+        crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
         self.axes_positions.push((left, right, bottom, top));
         Ok(ax_py)
@@ -408,4 +413,16 @@ impl Figure {
 
         Ok(())
     }
+}
+
+/// 返回默认图形尺寸 (width, height)
+#[pyfunction]
+pub fn get_default_figsize() -> (f64, f64) {
+    DEFAULT_FIGSIZE
+}
+
+/// 返回默认 DPI
+#[pyfunction]
+pub fn get_default_dpi() -> f64 {
+    DEFAULT_DPI
 }

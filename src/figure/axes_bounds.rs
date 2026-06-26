@@ -9,7 +9,7 @@
 //! 主要 API：
 //! - `compute_bounds()`: 计算 X/Y 数据范围
 
-use crate::elements::PlotElement;
+use crate::core::elements::PlotElement;
 
 /// 对 log 刻度轴的数据值进行 log10 转换
 fn log_transform(val: f64) -> f64 {

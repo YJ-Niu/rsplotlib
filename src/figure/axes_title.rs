@@ -10,8 +10,8 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, VPos, Pos};
 
-use crate::axes::scale_font;
-use crate::text_utils::normalize_spaces;
+use crate::figure::axes::scale_font;
+use crate::core::text_utils::normalize_spaces;
 
 /// 渲染 axes 标题
 ///

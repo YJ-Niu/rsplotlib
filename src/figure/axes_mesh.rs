@@ -13,7 +13,7 @@
 
 use pyo3::prelude::*;
 
-use crate::colors::{RgbColor, parse_color};
+use crate::core::colors::{RgbColor, parse_color};
 
 /// matplotlib 兼容的"漂亮"主刻度算法
 pub fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
@@ -32,7 +32,8 @@ pub fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
                else { 10.0 * mag };
     let start = (min / step).ceil() * step;
     let end = (max / step).floor() * step;
-    let mut ticks = Vec::new();
+    let n = ((end + step * 0.001 - start) / step).ceil() as usize + 1;
+    let mut ticks = Vec::with_capacity(n);
     let mut t = start;
     while t <= end + step * 0.001 {
         ticks.push(t);
@@ -156,7 +157,7 @@ fn compute_minor_ticks(
         if major_ticks.len() < 2 || major_ticks.len() > MAX_MAJOR_TICKS_FOR_MINOR {
             return None;
         }
-        let mut minor = Vec::new();
+        let mut minor = Vec::with_capacity(major_ticks.len().saturating_sub(1) * 4);
         for i in 0..major_ticks.len().saturating_sub(1) {
             let spacing = major_ticks[i + 1] - major_ticks[i];
             if spacing <= 0.0 { continue; }
@@ -228,6 +229,6 @@ pub fn format_linear_tick(val: f64) -> String {
         let s = format!("{:.2}", val);
         // 去掉末尾的 0 和可能的 .
         let trimmed = s.trim_end_matches('0').trim_end_matches('.');
-        trimmed.to_string()
+        trimmed.to_owned()
     }
 }

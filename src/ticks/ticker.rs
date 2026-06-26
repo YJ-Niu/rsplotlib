@@ -27,7 +27,8 @@ impl MultipleLocator {
         }
         let vmin = (vmin / self.base).floor() * self.base;
         let vmax = (vmax / self.base).ceil() * self.base;
-        let mut ticks = Vec::new();
+        let n = ((vmax + self.base * 0.5 - vmin) / self.base).ceil() as usize;
+        let mut ticks = Vec::with_capacity(n);
         let mut v = vmin;
         while v <= vmax + self.base * 0.5 {
             ticks.push(v);
@@ -89,7 +90,8 @@ impl MaxNLocator {
             nice_step(raw_step)
         };
         let vmin = (vmin / step).floor() * step;
-        let mut ticks = Vec::new();
+        let estimated = ((vmax + step * 0.5 - vmin) / step).ceil() as usize;
+        let mut ticks = Vec::with_capacity(estimated.min(50));
         let mut v = vmin;
         while v <= vmax + step * 0.5 {
             if !self.integer || (v - v.round()).abs() < 1e-10 {
@@ -131,7 +133,8 @@ impl AutoMinorLocator {
             return vec![];
         }
         let minor_step = major_step / self.n as f64;
-        let mut ticks = Vec::new();
+        let n = ((vmax + minor_step * 0.5 - vmin) / minor_step).ceil() as usize;
+        let mut ticks = Vec::with_capacity(n);
         let mut v = vmin;
         while v <= vmax + minor_step * 0.5 {
             ticks.push(v);

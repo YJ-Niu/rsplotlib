@@ -13,12 +13,12 @@ use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 
-use crate::axes::scale_font;
-use crate::colormap::{autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color, viridis_color, winter_color};
-use crate::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
-use crate::elements::PlotElement;
-use crate::marker::draw_marker;
-use crate::text_utils::normalize_spaces;
+use crate::figure::axes::scale_font;
+use crate::core::colormap::{autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color, viridis_color, winter_color};
+use crate::core::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
+use crate::core::elements::PlotElement;
+use crate::core::marker::draw_marker;
+use crate::core::text_utils::normalize_spaces;
 
 /// 绘制单条线段（用于 axhline/axvline/stem 等）
 pub fn draw_single_line<DB: DrawingBackend>(

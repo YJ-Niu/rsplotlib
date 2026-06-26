@@ -5,8 +5,8 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 
-use crate::colors::{RgbColor, parse_color, default_color, default_color_str, to_plotters_color};
-use crate::elements::PlotElement;
+use crate::core::colors::{RgbColor, parse_color, default_color, default_color_str, to_plotters_color};
+use crate::core::elements::PlotElement;
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<f64>
 fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
@@ -85,7 +85,7 @@ fn py_to_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
     }
     Err(PyValueError::new_err("Cannot convert to Vec<Vec<f64>>"))
 }
-use crate::axis::{Axis, Patch, SpineDict};
+use crate::figure::axis::{Axis, Patch, SpineDict};
 
 /// 字体大小缩放并四舍五入到1位小数
 /// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
@@ -1421,7 +1421,7 @@ impl Axes {
     pub fn compute_bounds(&self) -> ((f64, f64), (f64, f64)) {
         let xlog = self.xscale == "log";
         let ylog = self.yscale == "log";
-        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) = crate::axes_bounds::compute_bounds(
+        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) = crate::figure::axes_bounds::compute_bounds(
             &self.elements, self.xlim, self.ylim, xlog, ylog,
         );
         // 应用轴反转
@@ -1465,7 +1465,7 @@ impl Axes {
         let ylog = self.yscale == "log";
 
         // 计算主/副刻度
-        let ticks_info = crate::axes_mesh::compute_ticks(
+        let ticks_info = crate::figure::axes_mesh::compute_ticks(
             py,
             &self.xticks_val,
             &self.yticks_val,
@@ -1479,7 +1479,7 @@ impl Axes {
         );
 
         // 计算网格线颜色/线宽/样式
-        let grid_style = crate::axes_mesh::compute_grid_style(
+        let grid_style = crate::figure::axes_mesh::compute_grid_style(
             &self.grid_color, self.grid_linewidth, &self.grid_linestyle,
             &self.minor_grid_color, self.minor_grid_linewidth, &self.minor_grid_linestyle,
         );
@@ -1506,8 +1506,8 @@ impl Axes {
             if ylog {
                 mesh_builder.y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
             } else {
-                mesh_builder.y_label_formatter(&|v| crate::axes_mesh::format_linear_tick(*v));
-                mesh_builder.x_label_formatter(&|v| crate::axes_mesh::format_linear_tick(*v));
+                mesh_builder.y_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
+                mesh_builder.x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
             }
 
             if !self.spine_bottom && !self.spine_top {
@@ -1553,14 +1553,14 @@ impl Axes {
         if self.grid_visible {
             let major_ls = grid_style.major_ls.as_deref();
             if self.grid_axis == "both" || self.grid_axis == "x" {
-                crate::axes_grid::draw_grid_lines(
+                crate::figure::axes_grid::draw_grid_lines(
                     chart, true, &ticks_info.xticks,
                     grid_style.major_color, grid_style.major_lw, major_ls,
                     font_scale, x_min, x_max, y_min, y_max,
                 )?;
             }
             if self.grid_axis == "both" || self.grid_axis == "y" {
-                crate::axes_grid::draw_grid_lines(
+                crate::figure::axes_grid::draw_grid_lines(
                     chart, false, &ticks_info.yticks,
                     grid_style.major_color, grid_style.major_lw, major_ls,
                     font_scale, x_min, x_max, y_min, y_max,
@@ -1573,10 +1573,10 @@ impl Axes {
             let minor_ls = grid_style.minor_ls.as_deref();
             // 过滤掉与主刻度位置重叠的副刻度，避免副网格线覆盖主网格线
             let xmin_filtered = ticks_info.xminor.as_ref().map(|minor| {
-                crate::axes_grid::filter_minor_ticks(minor, &ticks_info.xticks)
+                crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.xticks)
             });
             let ymin_filtered = ticks_info.yminor.as_ref().map(|minor| {
-                crate::axes_grid::filter_minor_ticks(minor, &ticks_info.yticks)
+                crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.yticks)
             });
             let show_x_minor = self.minor_grid_x_visible
                 || (!self.minor_grid_x_visible && !self.minor_grid_y_visible);
@@ -1584,7 +1584,7 @@ impl Axes {
                 || (!self.minor_grid_x_visible && !self.minor_grid_y_visible);
             if show_x_minor {
                 if let Some(ref ticks) = xmin_filtered {
-                    crate::axes_grid::draw_grid_lines(
+                    crate::figure::axes_grid::draw_grid_lines(
                         chart, true, ticks,
                         grid_style.minor_color, grid_style.minor_lw, minor_ls,
                         font_scale, x_min, x_max, y_min, y_max,
@@ -1593,7 +1593,7 @@ impl Axes {
             }
             if show_y_minor {
                 if let Some(ref ticks) = ymin_filtered {
-                    crate::axes_grid::draw_grid_lines(
+                    crate::figure::axes_grid::draw_grid_lines(
                         chart, false, ticks,
                         grid_style.minor_color, grid_style.minor_lw, minor_ls,
                         font_scale, x_min, x_max, y_min, y_max,
@@ -1603,14 +1603,14 @@ impl Axes {
         }
 
         // 渲染所有数据元素（线、散点、柱状图、填充、误差棒、饼图等）
-        crate::axes_render_elements::render_elements(
+        crate::figure::axes_render_elements::render_elements(
             chart, &self.elements, font_scale, xlog, ylog,
             x_min, x_max, y_min, y_max,
         )?;
 
         if let Some(loc) = &self.legend_loc.clone() {
             if !self.legend_labels.is_empty() {
-                crate::axes_legend::draw_legend(
+                crate::figure::axes_legend::draw_legend(
                     chart, Some(loc), &self.legend_labels, font_scale,
                     x_min, x_max, y_min, y_max,
                 )?;
@@ -1618,7 +1618,7 @@ impl Axes {
         }
 
         // 渲染 axes 标题（在数据区域上方的 margin_top 区域内）
-        crate::axes_title::draw_title(
+        crate::figure::axes_title::draw_title(
             chart, &self.title, self.title_fontsize, font_scale,
             x_min, x_max, y_min, y_max,
         )?;

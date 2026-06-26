@@ -9,10 +9,10 @@ use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, VPos};
 
-use crate::axes::scale_font;
-use crate::colors::{RgbColor, to_plotters_color};
-use crate::marker::draw_marker;
-use crate::text_utils::normalize_spaces;
+use crate::figure::axes::scale_font;
+use crate::core::colors::{RgbColor, to_plotters_color};
+use crate::core::marker::draw_marker;
+use crate::core::text_utils::normalize_spaces;
 
 /// 渲染图例（如果设置了 `legend_loc` 且 `legend_labels` 非空）
 ///

@@ -5,11 +5,13 @@
 """
 
 from . import rsplotlib as _rsplotlib
-from ._figure_defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
+from .figure._defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
 # ============ 样式接口 ============
-from . import style as _style_module
+from .utils import style as _style_module
 
 # 延迟获取 mpl.rcParams，避免 pyplot <-> pylab 循环导入
+
+
 def _get_rcparams():
     """从 pylab.mpl 获取 rcParams，统一配置入口"""
     from .pylab import mpl
@@ -45,6 +47,7 @@ def _to_list_recursive(obj):
     if isinstance(obj, (list, tuple)):
         return [_to_list_recursive(item) for item in obj]
     return obj
+
 
 def _get_axes():
     """获取当前 axes，如果没有则返回 None"""
@@ -434,7 +437,7 @@ def text(x, y, s, fontdict=None, **kwargs):
     if family:
         try:
             import os
-            from ._font_resolver import resolve_font_path
+            from .utils._font_resolver import resolve_font_path
             path = resolve_font_path(family)
             if path is None and os.path.isfile(family):
                 path = family  # 也允许直接传文件路径
@@ -517,7 +520,11 @@ def axline(xy1, xy2, **kwargs):
         linewidth: 线宽
         **kwargs: 其他关键字参数
     """
-    return _rsplotlib.axline(tuple(xy1), tuple(xy2), kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
+    return _rsplotlib.axline(
+        tuple(xy1), tuple(xy2),
+        kwargs.get('color'), kwargs.get('linestyle'),
+        kwargs.get('linewidth'),
+    )
 
 
 def annotate(text, xy, xytext=None, fontsize=12.0, color='black', arrowprops=None, **kwargs):
@@ -629,7 +636,9 @@ def legend(loc='best', **kwargs):
     """显示图例 (需要 plot 时设置 label 参数)。
 
     Args:
-        loc: 图例位置 ('best', 'upper right', 'upper left', 'lower left', 'lower right', 'upper center', 'lower center', 'center left', 'center right', 'center')
+        loc: 图例位置 ('best', 'upper right', 'upper left', 'lower left',
+              'lower right', 'upper center', 'lower center',
+              'center left', 'center right', 'center')
     """
     return _rsplotlib.legend(loc)
 
@@ -912,7 +921,7 @@ def _patch_figure_add_subplot():
                 row_end = row_start + 1
                 col_start = index_0 % ncols
                 col_end = col_start + 1
-            from .gridspec import SubplotSpec
+            from .layout.gridspec import SubplotSpec
             spec = SubplotSpec(None, row_start, row_end, col_start, col_end)
             return _orig_add_subplot(self, spec)
         else:

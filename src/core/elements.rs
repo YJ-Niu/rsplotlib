@@ -1,4 +1,4 @@
-use crate::colors::RgbColor;
+use crate::core::colors::RgbColor;
 
 #[derive(Clone)]
 #[allow(dead_code)]

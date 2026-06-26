@@ -4,8 +4,8 @@ use pyo3::types::{PyList, PyTuple, PyAny};
 
 use plotters::style::{register_font, FontStyle};
 
-use crate::axes::Axes;
-use crate::figure::{get_current_figure, set_current_figure, Figure};
+use crate::figure::axes::Axes;
+use crate::figure::figure::{get_current_figure, set_current_figure, Figure};
 
 /// 从文件路径注册一个字体到 "sans-serif" family。
 ///
@@ -442,7 +442,7 @@ pub fn cla(py: Python) -> PyResult<()> {
 
 #[pyfunction]
 pub fn close(_py: Python) -> PyResult<()> {
-    if let Ok(mut current) = crate::figure::CURRENT_FIGURE.lock() {
+    if let Ok(mut current) = crate::figure::figure::CURRENT_FIGURE.lock() {
         *current = None;
     }
     Ok(())

@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use crate::axes::Axes;
+use crate::figure::axes::Axes;
 
 #[pyclass]
 pub struct Axis {

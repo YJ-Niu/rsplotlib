@@ -76,12 +76,8 @@ impl GridSpec {
                 row_end,
                 col_start,
                 col_end,
-                numRows: self.nrows,
-                numCols: self.ncols,
-                rowStart: row_start,
-                rowStop: row_end,
-                colStart: col_start,
-                colStop: col_end,
+                num_rows: self.nrows,
+                num_cols: self.ncols,
             };
             Ok(Py::new(py, spec)?)
         } else {
@@ -138,26 +134,26 @@ impl GridSpec {
 // ==================== SubplotSpec ====================
 
 /// SubplotSpec - 子图定位器
+///
+/// 字段使用 snake_case （Rust 惯例），
+/// 通过 `#[pyo3(name = "...")]` 在 Python 侧显示为 camelCase
+/// （与 matplotlib API 兼容）。
 #[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct SubplotSpec {
     pub gridspec: Option<GridSpec>,
+    #[pyo3(get, name = "rowStart")]
     pub row_start: i32,
+    #[pyo3(get, name = "rowStop")]
     pub row_end: i32,
+    #[pyo3(get, name = "colStart")]
     pub col_start: i32,
+    #[pyo3(get, name = "colStop")]
     pub col_end: i32,
-    #[pyo3(get)]
-    pub numRows: i32,
-    #[pyo3(get)]
-    pub numCols: i32,
-    #[pyo3(get)]
-    pub rowStart: i32,
-    #[pyo3(get)]
-    pub rowStop: i32,
-    #[pyo3(get)]
-    pub colStart: i32,
-    #[pyo3(get)]
-    pub colStop: i32,
+    #[pyo3(get, name = "numRows")]
+    pub num_rows: i32,
+    #[pyo3(get, name = "numCols")]
+    pub num_cols: i32,
 }
 
 #[pymethods]
@@ -165,7 +161,7 @@ impl SubplotSpec {
     #[new]
     #[pyo3(signature = (gridspec, row_start=0, row_end=1, col_start=0, col_end=1))]
     fn new(gridspec: Option<GridSpec>, row_start: i32, row_end: i32, col_start: i32, col_end: i32) -> Self {
-        let (numRows, numCols) = if let Some(ref gs) = gridspec {
+        let (num_rows, num_cols) = if let Some(ref gs) = gridspec {
             (gs.nrows, gs.ncols)
         } else {
             (row_end.max(1), col_end.max(1))
@@ -176,12 +172,8 @@ impl SubplotSpec {
             row_end,
             col_start,
             col_end,
-            numRows,
-            numCols,
-            rowStart: row_start,
-            rowStop: row_end,
-            colStart: col_start,
-            colStop: col_end,
+            num_rows,
+            num_cols,
         }
     }
 
@@ -206,13 +198,13 @@ impl SubplotSpec {
 
             (x, y, w, h)
         } else {
-            let num_rows_f = self.numRows as f64;
-            let num_cols_f = self.numCols as f64;
+            let num_rows_f = self.num_rows as f64;
+            let num_cols_f = self.num_cols as f64;
             (
-                self.colStart as f64 / num_cols_f,
-                1.0 - self.rowStop as f64 / num_rows_f,
-                (self.colStop - self.colStart) as f64 / num_cols_f,
-                (self.rowStop - self.rowStart) as f64 / num_rows_f,
+                self.col_start as f64 / num_cols_f,
+                1.0 - self.row_end as f64 / num_rows_f,
+                (self.col_end - self.col_start) as f64 / num_cols_f,
+                (self.row_end - self.row_start) as f64 / num_rows_f,
             )
         }
     }
