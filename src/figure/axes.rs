@@ -792,7 +792,7 @@ impl Axes {
         // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters，
         // 使用实际字体家族名称（而非 "sans-serif"），确保只影响指定文字。
         let font_family = family.and_then(|family_name| {
-            if let Ok(resolver_mod) = py.import("rsplotlib._font_resolver") {
+            if let Ok(resolver_mod) = py.import("rsplotlib.utils._font_resolver") {
                 if let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,)) {
                     if let Ok(Some(path)) = path_obj.extract::<Option<String>>() {
                         if let Ok(font_data) = std::fs::read(&path) {
