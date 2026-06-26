@@ -9,7 +9,7 @@ use crate::figure::axes::Axes;
 // colors not needed directly in this module
 
 /// 默认图形尺寸（英寸），与 matplotlib 默认一致
-pub const DEFAULT_FIGSIZE: (f64, f64) = (6.4, 4.8);
+pub const DEFAULT_FIGSIZE: (f64, f64) = (12.0, 9.0);
 /// 默认 DPI
 pub const DEFAULT_DPI: f64 = 100.0;
 
