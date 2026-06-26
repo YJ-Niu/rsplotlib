@@ -278,6 +278,12 @@ fn is_format_string(s: &str) -> bool {
     parse_fmt_string(s).is_some()
 }
 
+impl Default for Axes {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl Axes {
     #[new]
@@ -361,23 +367,22 @@ impl Axes {
         let mut actual_marker = marker;
         let mut actual_linestyle = linestyle.to_string();
         let mut actual_color = color;
-        if let Some(ref lbl) = actual_label {
-            if is_format_string(lbl) {
-                if let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(lbl) {
-                    if actual_marker.is_none() {
-                        actual_marker = fmt_marker;
-                    }
-                    if ls.is_none() && linestyle == "-" {
-                        if let Some(ls_val) = fmt_ls {
-                            actual_linestyle = ls_val;
-                        }
-                    }
-                    if actual_color.is_none() {
-                        actual_color = fmt_color;
-                    }
-                    actual_label = None;
-                }
+        if let Some(ref lbl) = actual_label
+            && is_format_string(lbl)
+            && let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(lbl)
+        {
+            if actual_marker.is_none() {
+                actual_marker = fmt_marker;
             }
+            if ls.is_none() && linestyle == "-"
+                && let Some(ls_val) = fmt_ls
+            {
+                actual_linestyle = ls_val;
+            }
+            if actual_color.is_none() {
+                actual_color = fmt_color;
+            }
+            actual_label = None;
         }
 
         let x_vec = py_to_vec_option_f64(&x)?;
@@ -561,29 +566,19 @@ impl Axes {
         } else if let Some(c) = color {
             Self::parse_color_list(&c, x_parsed.len())?
         } else {
-            (0..x_parsed.len()).map(|i| default_color_str(i)).collect()
+            (0..x_parsed.len()).map(default_color_str).collect()
         };
         let histtype_val = histtype.unwrap_or_else(|| "bar".to_string());
         let idx = self.element_count;
         self.element_count += 1;
-        self.elements.push(PlotElement::Hist {
-            data_all: x_parsed.clone(),
-            bins: num_bins,
-            density,
-            histtype: histtype_val,
-            label: label.clone(),
-            alpha,
-            colors: colors.clone(),
-            color_idx: idx,
-            bin_edges: custom_edges.clone(),
-        });
-        if let Some(lbl) = label {
-            let col = parse_color(colors.first().unwrap_or(&String::new()), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
-        }
-        let all_data: Vec<f64> = x_parsed.iter().flatten().cloned().collect();
-        let global_min = if all_data.is_empty() { 0.0 } else { all_data.iter().cloned().fold(f64::INFINITY, f64::min) };
-        let global_max = if all_data.is_empty() { 1.0 } else { all_data.iter().cloned().fold(f64::NEG_INFINITY, f64::max) };
+
+        // 先计算统计量（使用 &x_parsed），再 move 进 PlotElement
+        let (global_min, global_max) = x_parsed.iter().flatten().fold(
+            (f64::INFINITY, f64::NEG_INFINITY),
+            |(mn, mx), &v| (mn.min(v), mx.max(v)),
+        );
+        let global_min = if global_min.is_finite() { global_min } else { 0.0 };
+        let global_max = if global_max.is_finite() { global_max } else { 1.0 };
         let global_range = global_max - global_min;
         let bin_width = if global_range < 1e-10 { 1.0 } else { global_range / num_bins as f64 };
         let n: Vec<Vec<f64>> = x_parsed.iter().map(|dataset| {
@@ -592,7 +587,6 @@ impl Axes {
             }
             let mut counts = vec![0usize; num_bins];
             if let Some(ref edges) = custom_edges {
-                // 使用自定义 edges 进行分箱，与渲染代码（axes_render_elements.rs）一致
                 let edge_min = edges[0];
                 let edge_max = edges[edges.len() - 1];
                 for &val in dataset {
@@ -626,7 +620,25 @@ impl Axes {
         } else {
             (0..=num_bins).map(|i| global_min + i as f64 * bin_width).collect()
         };
-        let n_obj: Py<PyAny> = if x_parsed.len() <= 1 {
+
+        let x_parsed_len = x_parsed.len();
+        // 移动 x_parsed 和 custom_edges，避免克隆
+        self.elements.push(PlotElement::Hist {
+            data_all: x_parsed,
+            bins: num_bins,
+            density,
+            histtype: histtype_val,
+            label: label.clone(),
+            alpha,
+            colors: colors.clone(),
+            color_idx: idx,
+            bin_edges: custom_edges,
+        });
+        if let Some(lbl) = label {
+            let col = parse_color(colors.first().unwrap_or(&String::new()), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+        }
+        let n_obj: Py<PyAny> = if x_parsed_len <= 1 {
             let empty: Vec<f64> = Vec::new();
             let data = n.first().unwrap_or(&empty);
             PyList::new(py, data.as_slice()).unwrap().into_any().unbind()
@@ -792,16 +804,14 @@ impl Axes {
         // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters，
         // 使用实际字体家族名称（而非 "sans-serif"），确保只影响指定文字。
         let font_family = family.and_then(|family_name| {
-            if let Ok(resolver_mod) = py.import("rsplotlib.utils._font_resolver") {
-                if let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,)) {
-                    if let Ok(Some(path)) = path_obj.extract::<Option<String>>() {
-                        if let Ok(font_data) = std::fs::read(&path) {
-                            let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                            let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
-                            return Some(family_name);
-                        }
-                    }
-                }
+            if let Ok(resolver_mod) = py.import("rsplotlib.utils._font_resolver")
+                && let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,))
+                && let Ok(Some(path)) = path_obj.extract::<Option<String>>()
+                && let Ok(font_data) = std::fs::read(&path)
+            {
+                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
+                return Some(family_name);
             }
             None
         });
@@ -1381,7 +1391,7 @@ impl Axes {
         let mut axis = Axis::new();
         axis.which = "x".to_string();
         axis.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, axis)?)
+        Py::new(py, axis)
     }
 
     #[getter]
@@ -1389,7 +1399,7 @@ impl Axes {
         let mut axis = Axis::new();
         axis.which = "y".to_string();
         axis.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, axis)?)
+        Py::new(py, axis)
     }
 
     #[getter]
@@ -1397,7 +1407,7 @@ impl Axes {
         let mut patch = Patch::new();
         patch.facecolor = self.facecolor.clone();
         patch.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, patch)?)
+        Py::new(py, patch)
     }
 
     #[getter]
@@ -1413,7 +1423,7 @@ impl Axes {
             }
         }
         sd.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, sd)?)
+        Py::new(py, sd)
     }
 }
 
@@ -1488,16 +1498,17 @@ impl Axes {
         {
             let frame_color = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
             let frame_lw = self.spine_linewidth.round().max(1.0) as u32;
-            let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw).into();
+            let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw);
             let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
                 .x_labels(ticks_info.xticks.len().max(2))
                 .y_labels(ticks_info.yticks.len().max(2))
-                .x_label_style(("sans-serif", label_size))
-                .y_label_style(("sans-serif", label_size))
+                .x_label_style(("sans-serif", label_size).into_font().color(&BLACK))
+                .y_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .x_desc(self.xlabel.clone())
                 .y_desc(self.ylabel.clone())
+                .axis_desc_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .bold_line_style(frame_style);
 
             if xlog {
@@ -1536,7 +1547,7 @@ impl Axes {
             let spine_col = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
             let spine_rgb = to_plotters_color(spine_col);
             let spine_lw = self.spine_linewidth.round().max(1.0) as u32;
-            let spine_style: ShapeStyle = spine_rgb.stroke_width(spine_lw).into();
+            let spine_style: ShapeStyle = spine_rgb.stroke_width(spine_lw);
             if self.spine_top {
                 chart.draw_series(std::iter::once(PathElement::new(
                     vec![(x_min, y_max), (x_max, y_max)], spine_style,
@@ -1578,27 +1589,25 @@ impl Axes {
             let ymin_filtered = ticks_info.yminor.as_ref().map(|minor| {
                 crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.yticks)
             });
-            let show_x_minor = self.minor_grid_x_visible
-                || (!self.minor_grid_x_visible && !self.minor_grid_y_visible);
-            let show_y_minor = self.minor_grid_y_visible
-                || (!self.minor_grid_x_visible && !self.minor_grid_y_visible);
-            if show_x_minor {
-                if let Some(ref ticks) = xmin_filtered {
-                    crate::figure::axes_grid::draw_grid_lines(
-                        chart, true, ticks,
-                        grid_style.minor_color, grid_style.minor_lw, minor_ls,
-                        font_scale, x_min, x_max, y_min, y_max,
-                    )?;
-                }
+            let show_x_minor = self.minor_grid_x_visible || !self.minor_grid_y_visible;
+            let show_y_minor = self.minor_grid_y_visible || !self.minor_grid_x_visible;
+            if show_x_minor
+                && let Some(ref ticks) = xmin_filtered
+            {
+                crate::figure::axes_grid::draw_grid_lines(
+                    chart, true, ticks,
+                    grid_style.minor_color, grid_style.minor_lw, minor_ls,
+                    font_scale, x_min, x_max, y_min, y_max,
+                )?;
             }
-            if show_y_minor {
-                if let Some(ref ticks) = ymin_filtered {
-                    crate::figure::axes_grid::draw_grid_lines(
-                        chart, false, ticks,
-                        grid_style.minor_color, grid_style.minor_lw, minor_ls,
-                        font_scale, x_min, x_max, y_min, y_max,
-                    )?;
-                }
+            if show_y_minor
+                && let Some(ref ticks) = ymin_filtered
+            {
+                crate::figure::axes_grid::draw_grid_lines(
+                    chart, false, ticks,
+                    grid_style.minor_color, grid_style.minor_lw, minor_ls,
+                    font_scale, x_min, x_max, y_min, y_max,
+                )?;
             }
         }
 
@@ -1608,13 +1617,13 @@ impl Axes {
             x_min, x_max, y_min, y_max,
         )?;
 
-        if let Some(loc) = &self.legend_loc.clone() {
-            if !self.legend_labels.is_empty() {
-                crate::figure::axes_legend::draw_legend(
-                    chart, Some(loc), &self.legend_labels, font_scale,
-                    x_min, x_max, y_min, y_max,
-                )?;
-            }
+        if let Some(loc) = &self.legend_loc.clone()
+            && !self.legend_labels.is_empty()
+        {
+            crate::figure::axes_legend::draw_legend(
+                chart, Some(loc), &self.legend_labels, font_scale,
+                x_min, x_max, y_min, y_max,
+            )?;
         }
 
         // 渲染 axes 标题（在数据区域上方的 margin_top 区域内）
@@ -1631,7 +1640,7 @@ impl Axes {
             if lst.is_empty() {
                 return Ok(Vec::new());
             }
-            if let Ok(_) = lst[0].extract::<f64>() {
+            if lst[0].extract::<f64>().is_ok() {
                 let flat: Vec<f64> = lst.iter().map(|item| item.extract::<f64>())
                     .collect::<Result<Vec<f64>, _>>()
                     .map_err(|e| PyValueError::new_err(format!("hist data parse error: {}", e)))?;
@@ -1662,7 +1671,7 @@ impl Axes {
                 Ok(result)
             }
         } else {
-            Ok((0..expected_len).map(|i| default_color_str(i)).collect())
+            Ok((0..expected_len).map(default_color_str).collect())
         }
     }
 }

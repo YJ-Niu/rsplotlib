@@ -6,4 +6,5 @@ pub mod axes_mesh;
 pub mod axes_render_elements;
 pub mod axes_title;
 pub mod axis;
+#[allow(clippy::module_inception)]
 pub mod figure;

@@ -50,7 +50,7 @@ where
     // 为匹配 matplotlib 视觉高度，乘以 1.20 补偿。
     let font: FontDesc = ("sans-serif", scale_font(title_size * 1.20, font_scale)).into();
     let colored_font = font.color(&BLACK);
-    let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom)).into();
+    let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom));
     chart.draw_series(std::iter::once(plotters::element::Text::new(
         normalize_spaces(title),
         (title_x, title_y),

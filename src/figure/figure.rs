@@ -1,5 +1,4 @@
 use std::sync::Mutex;
-use std::io::BufWriter;
 use std::fs::File;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -49,6 +48,12 @@ pub struct Figure {
     pub subplot_right: f64,
     pub subplot_bottom: f64,
     pub subplot_top: f64,
+}
+
+impl Default for Figure {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[pymethods]
@@ -123,7 +128,7 @@ impl Figure {
     #[pyo3(signature = (spec))]
     #[allow(unused_variables)]
     fn add_subplot(&mut self, py: Python, spec: &Bound<'_, PyAny>) -> PyResult<Py<Axes>> {
-        let (left, right, bottom, top) = if let Ok(_) = spec.getattr("rowStart") {
+        let (left, right, bottom, top) = if spec.getattr("rowStart").is_ok() {
             let num_rows: f64 = spec.getattr("numRows")?.extract::<i32>().map(|v| v as f64).unwrap_or(100.0);
             let num_cols: f64 = spec.getattr("numCols")?.extract::<i32>().map(|v| v as f64).unwrap_or(100.0);
             let row_start: f64 = spec.getattr("rowStart")?.extract::<i32>().map(|v| v as f64).unwrap_or(0.0);
@@ -163,11 +168,10 @@ impl Figure {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
             self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
 
-            // 写入 PNG 并嵌入 DPI 信息
+            // 写入 PNG 并嵌入 DPI 信息（PNG encoder 内部已做缓冲，无需额外 BufWriter）
             let file = File::create(filename)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
-            let ref mut w = BufWriter::new(file);
-            let mut encoder = png::Encoder::new(w, self.width, self.height);
+            let mut encoder = png::Encoder::new(file, self.width, self.height);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
             encoder.set_compression(png::Compression::Best);
@@ -197,8 +201,8 @@ impl Figure {
                 // plotters SVGBackend 输出 width="pixel_width" height="pixel_height"
                 // 替换为英寸单位
                 let content = content
-                    .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{}in\"", format!("{:.4}", width_in)), 1)
-                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{}in\"", format!("{:.4}", height_in)), 1);
+                    .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{:.4}in\"", width_in), 1)
+                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", height_in), 1);
                 let _ = std::fs::write(filename, content);
             }
             Ok(())
@@ -275,10 +279,10 @@ impl Figure {
             let plot_bottom_frac = bottom * usable_h + margin_b;
             let plot_top_frac = top * usable_h + margin_b;
 
-            let x0 = (plot_left * total_w) as f64;
-            let y0 = ((1.0 - plot_top_frac) * total_h) as f64;
-            let sub_w = ((plot_right - plot_left) * total_w) as f64;
-            let sub_h = ((plot_top_frac - plot_bottom_frac) * total_h) as f64;
+            let x0 = plot_left * total_w;
+            let y0 = (1.0 - plot_top_frac) * total_h;
+            let sub_w = (plot_right - plot_left) * total_w;
+            let sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
 
             if sub_w <= 0.0 || sub_h <= 0.0 {
                 drop(ax);
@@ -351,12 +355,12 @@ impl Figure {
             // 限制扩展不超过 figure 边界（最左侧/最上侧子图可扩展到边）
             let chart_x0 = (x0 - y_label_actual as f64).max(0.0);
             let chart_y0 = (y0 - margin_top_actual as f64).max(0.0);
-            let chart_w = (sub_w + y_label_actual as f64) as f64;
-            let chart_h = (sub_h + x_label_actual as f64) as f64;
+            let chart_w = sub_w + y_label_actual as f64;
+            let chart_h = sub_h + x_label_actual as f64;
 
             // 防止超出 figure 右/下边界
-            let chart_w = chart_w.min((total_w - chart_x0) as f64).max(1.0);
-            let chart_h = chart_h.min((total_h - chart_y0) as f64).max(1.0);
+            let chart_w = chart_w.min(total_w - chart_x0).max(1.0);
+            let chart_h = chart_h.min(total_h - chart_y0).max(1.0);
 
             let chart_area = root.clone().shrink(
                 (chart_x0 as i32, chart_y0 as i32),

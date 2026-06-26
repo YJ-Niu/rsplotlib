@@ -51,6 +51,7 @@ pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
 fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
     let mut fig = Figure::new();
     fig.axes_list.clear();
+    fig.axes_positions.clear();
     let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
     let ax_py = Py::new(py, ax)?;
@@ -58,6 +59,18 @@ fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
     fig_py.borrow_mut(py).axes_list.push(ax_py.clone_ref(py));
     fig_py.borrow_mut(py).axes_positions.push((0.0, 1.0, 0.0, 1.0));
     Ok((fig_py, ax_py))
+}
+
+/// 宏：消除创建 figure+axes 并返回 PyTuple 的样板代码
+macro_rules! make_fig_ax {
+    ($py:expr, |$ax:ident| $($body:tt)*) => {{
+        let mut $ax = Axes::new();
+        $($body)*
+        let (fig_py, ax_py) = _make_fig_ax($py, $ax)?;
+        let fig_obj = fig_py.bind($py).as_any().clone();
+        let ax_obj = ax_py.bind($py).as_any().clone();
+        PyTuple::new($py, [fig_obj, ax_obj])
+    }};
 }
 
 #[pyfunction]
@@ -122,12 +135,9 @@ pub fn scatter<'a>(
     label: Option<String>,
     alpha: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.scatter(py, x, y, s, c, marker, label, alpha)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.scatter(py, x, y, s, c, marker, label, alpha)?;
+    })
 }
 
 #[pyfunction]
@@ -143,12 +153,9 @@ pub fn scatter_multi<'a>(
     label: Option<String>,
     alpha: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
+    })
 }
 
 #[pyfunction]
@@ -161,12 +168,9 @@ pub fn bar<'a>(
     color: Option<String>,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.bar(py, x, height, width, color, label)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.bar(py, x, height, width, color, label)?;
+    })
 }
 
 #[pyfunction]
@@ -183,12 +187,9 @@ pub fn hist<'py>(
     align: Option<String>,
     histtype: Option<String>,
 ) -> PyResult<Bound<'py, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.hist(py, x, bins, density, label, alpha, color, facecolor, align, histtype)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.hist(py, x, bins, density, label, alpha, color, facecolor, align, histtype)?;
+    })
 }
 
 #[pyfunction]
@@ -202,12 +203,9 @@ pub fn fill_between<'a>(
     alpha: f64,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.fill_between(py, x, y1, y2, color, alpha, label)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.fill_between(py, x, y1, y2, color, alpha, label)?;
+    })
 }
 
 #[pyfunction]
@@ -220,12 +218,9 @@ pub fn stackplot<'a>(
     colors: Option<Vec<String>>,
     alpha: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.stackplot(py, x, args, labels, colors, alpha)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.stackplot(py, x, args, labels, colors, alpha)?;
+    })
 }
 
 #[pyfunction]
@@ -241,12 +236,9 @@ pub fn errorbar<'a>(
     label: Option<String>,
     capsize: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.errorbar(py, x, y, yerr, xerr, fmt, color, label, capsize)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.errorbar(py, x, y, yerr, xerr, fmt, color, label, capsize)?;
+    })
 }
 
 #[pyfunction]
@@ -259,12 +251,9 @@ pub fn stem<'a>(
     markerfmt: &'a str,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.stem(py, x, y, linefmt, markerfmt, label)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.stem(py, x, y, linefmt, markerfmt, label)?;
+    })
 }
 
 #[pyfunction]
@@ -279,32 +268,25 @@ pub fn step<'a>(
     linestyle: &'a str,
     linewidth: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.step(py, x, y, where_, label, color, linestyle, linewidth)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.step(py, x, y, where_, label, color, linestyle, linewidth)?;
+    })
 }
 
 #[pyfunction]
 #[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
 pub fn imshow<'a>(py: Python<'a>, x: Bound<'a, PyAny>, cmap: &'a str, aspect: &'a str) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    // 将 Python 对象转换为 Vec<Vec<f64>>
-    let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
-        v
-    } else if x.hasattr("tolist")? {
-        let list = x.call_method0("tolist")?;
-        list.extract::<Vec<Vec<f64>>>()?
-    } else {
-        x.extract::<Vec<Vec<f64>>>()?
-    };
-    ax.imshow(data, cmap, aspect);
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
+            v
+        } else if x.hasattr("tolist")? {
+            let list = x.call_method0("tolist")?;
+            list.extract::<Vec<Vec<f64>>>()?
+        } else {
+            x.extract::<Vec<Vec<f64>>>()?
+        };
+        ax.imshow(data, cmap, aspect);
+    })
 }
 
 #[pyfunction]
@@ -317,21 +299,17 @@ pub fn pie<'a>(
     autopct: Option<String>,
     startangle: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    // 将 Python 对象转换为 Vec<f64>
-    let x_vec = if let Ok(v) = x.extract::<Vec<f64>>() {
-        v
-    } else if x.hasattr("tolist")? {
-        let list = x.call_method0("tolist")?;
-        list.extract::<Vec<f64>>()?
-    } else {
-        x.extract::<Vec<f64>>()?
-    };
-    ax.pie(x_vec, labels, colors, autopct, startangle);
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        let x_vec = if let Ok(v) = x.extract::<Vec<f64>>() {
+            v
+        } else if x.hasattr("tolist")? {
+            let list = x.call_method0("tolist")?;
+            list.extract::<Vec<f64>>()?
+        } else {
+            x.extract::<Vec<f64>>()?
+        };
+        ax.pie(x_vec, labels, colors, autopct, startangle);
+    })
 }
 
 #[pyfunction]
@@ -342,12 +320,9 @@ pub fn boxplot<'a>(
     labels: Option<Vec<String>>,
     vert: bool,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.boxplot(py, x, labels, vert)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.boxplot(py, x, labels, vert)?;
+    })
 }
 
 #[pyfunction]
@@ -581,26 +556,9 @@ pub fn plot<'a>(
     markeredgewidth: Option<f64>,
     solid_capstyle: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
+    })
 }
 
 #[pyfunction]
@@ -652,26 +610,9 @@ pub fn clf(py: Python) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (y, width, height=0.8, color=None, label=None))]
 pub fn barh<'a>(py: Python<'a>, y: Bound<'a, PyAny>, width: Bound<'a, PyAny>, height: f64, color: Option<String>, label: Option<String>) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.barh(py, y, width, height, color, label)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.barh(py, y, width, height, color, label)?;
+    })
 }
 
 #[pyfunction]
@@ -687,29 +628,12 @@ pub fn semilogx<'a>(
     marker: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.set_xscale("log");
-    let ls = linestyle.as_deref().unwrap_or("-");
-    let lw = linewidth.unwrap_or(1.5);
-    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.set_xscale("log");
+        let ls = linestyle.as_deref().unwrap_or("-");
+        let lw = linewidth.unwrap_or(1.5);
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+    })
 }
 
 #[pyfunction]
@@ -725,29 +649,12 @@ pub fn semilogy<'a>(
     marker: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.set_yscale("log");
-    let ls = linestyle.as_deref().unwrap_or("-");
-    let lw = linewidth.unwrap_or(1.5);
-    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.set_yscale("log");
+        let ls = linestyle.as_deref().unwrap_or("-");
+        let lw = linewidth.unwrap_or(1.5);
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+    })
 }
 
 #[pyfunction]
@@ -763,29 +670,13 @@ pub fn loglog<'a>(
     marker: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.set_xscale("log");
-    ax.set_yscale("log");
-    let ls = linestyle.as_deref().unwrap_or("-");
-    let lw = linewidth.unwrap_or(1.5);
-    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.set_xscale("log");
+        ax.set_yscale("log");
+        let ls = linestyle.as_deref().unwrap_or("-");
+        let lw = linewidth.unwrap_or(1.5);
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+    })
 }
 
 #[pyfunction]

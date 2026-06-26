@@ -104,10 +104,11 @@ pub fn compute_bounds(
             }
             PlotElement::Hist { data_all, bins, density, bin_edges, .. } => {
                 if data_all.is_empty() { continue; }
-                let all_data: Vec<f64> = data_all.iter().flatten().cloned().collect();
-                if all_data.is_empty() { continue; }
-                let data_min = all_data.iter().cloned().fold(f64::INFINITY, f64::min);
-                let data_max = all_data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let (data_min, data_max) = data_all.iter().flatten().fold(
+                    (f64::INFINITY, f64::NEG_INFINITY),
+                    |(mn, mx), &v| (mn.min(v), mx.max(v)),
+                );
+                if !data_max.is_finite() { continue; }
                 let (x_start, x_end) = if let Some(edges) = bin_edges {
                     (edges[0], edges[edges.len() - 1])
                 } else {
@@ -117,7 +118,7 @@ pub fn compute_bounds(
                 let tx_end = tx(x_end);
                 if tx_start > f64::NEG_INFINITY && tx_start < x_min { x_min = tx_start; }
                 if tx_end > x_max { x_max = tx_end; }
-                let total = all_data.len() as f64;
+                let total = data_all.iter().flatten().count() as f64;
                 let mut max_count = 0.0f64;
                 for dataset in data_all {
                     if dataset.is_empty() { continue; }

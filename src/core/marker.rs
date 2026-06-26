@@ -12,7 +12,7 @@ pub fn draw_marker<DB: DrawingBackend>(
     color: RGBColor,
 ) -> PyResult<()> {
     let s = size;
-    let style: ShapeStyle = color.filled().into();
+    let style: ShapeStyle = color.filled();
     match marker {
         "o" => {
             // Use Circle element for filled circle markers
@@ -108,7 +108,7 @@ pub fn draw_marker<DB: DrawingBackend>(
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
         "x" => {
-            let line_style: ShapeStyle = color.stroke_width(2).into();
+            let line_style: ShapeStyle = color.stroke_width(2);
             chart.draw_series(std::iter::once(PathElement::new(
                 vec![(x - s / 3.0, y - s / 3.0), (x + s / 3.0, y + s / 3.0)],
                 line_style,
@@ -121,7 +121,7 @@ pub fn draw_marker<DB: DrawingBackend>(
                 .map_err(|e| PyRuntimeError::new_err(format!("Marker error: {}", e)))?;
         }
         "+" => {
-            let line_style: ShapeStyle = color.stroke_width(2).into();
+            let line_style: ShapeStyle = color.stroke_width(2);
             chart.draw_series(std::iter::once(PathElement::new(
                 vec![(x - s / 3.0, y), (x + s / 3.0, y)],
                 line_style,

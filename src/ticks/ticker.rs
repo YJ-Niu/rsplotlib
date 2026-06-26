@@ -309,13 +309,13 @@ impl FormatStrFormatter {
 
     fn __call__(&self, value: f64) -> String {
         // 支持 % 格式化
-        format!("{}", self.fmt.replace("%d", &(value as i64).to_string())
+        self.fmt.replace("%d", &(value as i64).to_string())
             .replace("%f", &format!("{:.6}", value))
             .replace("%g", &format!("{}", value))
             .replace("%e", &format!("{:e}", value))
             .replace("%.2e", &format!("{:.2e}", value))
             .replace("%.1f", &format!("{:.1}", value))
-            .replace("%.2f", &format!("{:.2}", value)))
+            .replace("%.2f", &format!("{:.2}", value))
     }
 
     fn format_ticks(&self, values: Vec<f64>) -> Vec<String> {

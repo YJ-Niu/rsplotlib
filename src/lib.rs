@@ -55,21 +55,19 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         }
         if !registered {
             // 退回 matplotlib 自带 DejaVu Sans（仅英文可用）
-            for base in &[
+            for prefix in [
                 std::env::var("VIRTUAL_ENV").ok(),
                 Some(std::env::current_dir()
                     .map(|p| p.join(".venv").to_string_lossy().to_string())
                     .unwrap_or_default())
                     .filter(|p| !p.is_empty()),
-            ] {
-                if let Some(prefix) = base {
-                    let p = std::path::Path::new(&prefix)
-                        .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
-                    if let Ok(font_data) = std::fs::read(&p) {
-                        let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                        let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
-                        break;
-                    }
+            ].iter().flatten() {
+                let p = std::path::Path::new(&prefix)
+                    .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
+                if let Ok(font_data) = std::fs::read(&p) {
+                    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                    let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    break;
                 }
             }
         }
@@ -95,21 +93,19 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         }
         if !registered {
             // 退回 DejaVu Sans
-            for base in &[
+            for prefix in [
                 std::env::var("VIRTUAL_ENV").ok(),
                 Some(std::env::current_dir()
                     .map(|p| p.join(".venv").to_string_lossy().to_string())
                     .unwrap_or_default())
                     .filter(|p| !p.is_empty()),
-            ] {
-                if let Some(prefix) = base {
-                    let p = std::path::Path::new(&prefix)
-                        .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
-                    if let Ok(font_data) = std::fs::read(&p) {
-                        let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                        let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
-                        break;
-                    }
+            ].iter().flatten() {
+                let p = std::path::Path::new(&prefix)
+                    .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
+                if let Ok(font_data) = std::fs::read(&p) {
+                    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                    let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    break;
                 }
             }
         }

@@ -1,7 +1,6 @@
 use crate::core::colors::RgbColor;
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub enum PlotElement {
     Line {
         x: Vec<Option<f64>>,

@@ -1,111 +1,118 @@
 use pyo3::prelude::*;
 use std::path::Path;
+use std::sync::OnceLock;
 
-/// 字体族名 → 候选文件路径映射
-fn font_name_to_paths() -> Vec<(&'static str, Vec<&'static str>)> {
-    vec![
-        // macOS
-        #[cfg(target_os = "macos")]
-        ("Arial Unicode MS", vec![
-            "/Library/Fonts/Arial Unicode.ttf",
-            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        ]),
-        #[cfg(target_os = "macos")]
-        ("Arial", vec![
-            "/Library/Fonts/Arial.ttf",
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-        ]),
-        #[cfg(target_os = "macos")]
-        ("Helvetica", vec![
-            "/System/Library/Fonts/Helvetica.ttc",
-            "/System/Library/Fonts/HelveticaNeue.ttc",
-        ]),
-        #[cfg(target_os = "macos")]
-        ("Helvetica Neue", vec![
-            "/System/Library/Fonts/HelveticaNeue.ttc",
-        ]),
-        #[cfg(target_os = "macos")]
-        ("PingFang SC", vec![
-            "/System/Library/Fonts/PingFang.ttc",
-        ]),
-        #[cfg(target_os = "macos")]
-        ("Heiti SC", vec![
-            "/System/Library/Fonts/STHeiti Light.ttc",
-            "/System/Library/Fonts/STHeiti Medium.ttc",
-        ]),
-        #[cfg(target_os = "macos")]
-        ("Hiragino Sans GB", vec![
-            "/System/Library/Fonts/Hiragino Sans GB W3.otf",
-            "/System/Library/Fonts/Hiragino Sans GB W6.otf",
-        ]),
-        // Linux
-        #[cfg(target_os = "linux")]
-        ("DejaVu Sans", vec![
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        ]),
-        #[cfg(target_os = "linux")]
-        ("Liberation Sans", vec![
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        ]),
-        #[cfg(target_os = "linux")]
-        ("Noto Sans CJK SC", vec![
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        ]),
-        #[cfg(target_os = "linux")]
-        ("WenQuanYi Micro Hei", vec![
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        ]),
-        // Windows
-        #[cfg(target_os = "windows")]
-        ("Microsoft YaHei", vec![
-            "C:/Windows/Fonts/msyh.ttc",
-            "C:/Windows/Fonts/msyh.ttf",
-            "C:/Windows/Fonts/msyhbd.ttc",
-        ]),
-        #[cfg(target_os = "windows")]
-        ("SimHei", vec![
-            "C:/Windows/Fonts/simhei.ttf",
-        ]),
-        #[cfg(target_os = "windows")]
-        ("SimSun", vec![
-            "C:/Windows/Fonts/simsun.ttc",
-        ]),
-    ]
+/// 字体族名 → 候选文件路径映射（OnceLock 缓存，仅初始化一次）
+fn font_name_to_paths() -> &'static Vec<(&'static str, Vec<&'static str>)> {
+    static MAPPINGS: OnceLock<Vec<(&'static str, Vec<&'static str>)>> = OnceLock::new();
+    MAPPINGS.get_or_init(|| {
+        vec![
+            // macOS
+            #[cfg(target_os = "macos")]
+            ("Arial Unicode MS", vec![
+                "/Library/Fonts/Arial Unicode.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            ]),
+            #[cfg(target_os = "macos")]
+            ("Arial", vec![
+                "/Library/Fonts/Arial.ttf",
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+            ]),
+            #[cfg(target_os = "macos")]
+            ("Helvetica", vec![
+                "/System/Library/Fonts/Helvetica.ttc",
+                "/System/Library/Fonts/HelveticaNeue.ttc",
+            ]),
+            #[cfg(target_os = "macos")]
+            ("Helvetica Neue", vec![
+                "/System/Library/Fonts/HelveticaNeue.ttc",
+            ]),
+            #[cfg(target_os = "macos")]
+            ("PingFang SC", vec![
+                "/System/Library/Fonts/PingFang.ttc",
+            ]),
+            #[cfg(target_os = "macos")]
+            ("Heiti SC", vec![
+                "/System/Library/Fonts/STHeiti Light.ttc",
+                "/System/Library/Fonts/STHeiti Medium.ttc",
+            ]),
+            #[cfg(target_os = "macos")]
+            ("Hiragino Sans GB", vec![
+                "/System/Library/Fonts/Hiragino Sans GB W3.otf",
+                "/System/Library/Fonts/Hiragino Sans GB W6.otf",
+            ]),
+            // Linux
+            #[cfg(target_os = "linux")]
+            ("DejaVu Sans", vec![
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            ]),
+            #[cfg(target_os = "linux")]
+            ("Liberation Sans", vec![
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            ]),
+            #[cfg(target_os = "linux")]
+            ("Noto Sans CJK SC", vec![
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            ]),
+            #[cfg(target_os = "linux")]
+            ("WenQuanYi Micro Hei", vec![
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            ]),
+            // Windows
+            #[cfg(target_os = "windows")]
+            ("Microsoft YaHei", vec![
+                "C:/Windows/Fonts/msyh.ttc",
+                "C:/Windows/Fonts/msyh.ttf",
+                "C:/Windows/Fonts/msyhbd.ttc",
+            ]),
+            #[cfg(target_os = "windows")]
+            ("SimHei", vec![
+                "C:/Windows/Fonts/simhei.ttf",
+            ]),
+            #[cfg(target_os = "windows")]
+            ("SimSun", vec![
+                "C:/Windows/Fonts/simsun.ttc",
+            ]),
+        ]
+    })
 }
 
-/// 按当前操作系统返回一组"通用全功能字体"候选路径
-fn system_fallback_paths() -> Vec<&'static str> {
-    #[cfg(target_os = "macos")]
-    {
-        vec![
-            "/Library/Fonts/Arial Unicode.ttf",
-            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        ]
-    }
-    #[cfg(target_os = "linux")]
-    {
-        vec![
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        ]
-    }
-    #[cfg(target_os = "windows")]
-    {
-        vec![
-            "C:/Windows/Fonts/msyh.ttc",
-            "C:/Windows/Fonts/msyh.ttf",
-            "C:/Windows/Fonts/msyhbd.ttc",
-        ]
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        vec![]
-    }
+/// 按当前操作系统返回一组"通用全功能字体"候选路径（OnceLock 缓存）
+fn system_fallback_paths() -> &'static Vec<&'static str> {
+    static FALLBACK: OnceLock<Vec<&'static str>> = OnceLock::new();
+    FALLBACK.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        {
+            vec![
+                "/Library/Fonts/Arial Unicode.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            ]
+        }
+        #[cfg(target_os = "linux")]
+        {
+            vec![
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            ]
+        }
+        #[cfg(target_os = "windows")]
+        {
+            vec![
+                "C:/Windows/Fonts/msyh.ttc",
+                "C:/Windows/Fonts/msyh.ttf",
+                "C:/Windows/Fonts/msyhbd.ttc",
+            ]
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        {
+            vec![]
+        }
+    })
 }
 
 /// 根据字体族名查找本地的字体文件路径
@@ -119,7 +126,7 @@ fn resolve_font_path_inner(family: &str) -> Option<String> {
     let mappings = font_name_to_paths();
 
     // 精确匹配
-    for (name, paths) in &mappings {
+    for (name, paths) in mappings {
         if *name == family {
             for path in paths {
                 if Path::new(path).is_file() {
@@ -131,7 +138,7 @@ fn resolve_font_path_inner(family: &str) -> Option<String> {
 
     // 大小写不敏感匹配
     let family_lower = family.to_lowercase();
-    for (name, paths) in &mappings {
+    for (name, paths) in mappings {
         if name.to_lowercase() == family_lower {
             for path in paths {
                 if Path::new(path).is_file() {
