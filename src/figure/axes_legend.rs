@@ -12,7 +12,8 @@ use plotters::style::text_anchor::{HPos, VPos};
 use crate::figure::axes::scale_font;
 use crate::core::colors::{RgbColor, to_plotters_color};
 use crate::core::marker::draw_marker;
-use crate::core::text_utils::normalize_spaces;
+use crate::core::text_utils::normalize_text;
+use crate::utils::font_stack;
 
 /// 渲染图例（如果设置了 `legend_loc` 且 `legend_labels` 非空）
 ///
@@ -189,12 +190,13 @@ where
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e)))?;
             }
 
-            let legend_font: TextStyle = ("sans-serif", scale_font(11.0, font_scale))
+            let legend_family = font_stack::select_family(label);
+            let legend_font: TextStyle = (legend_family.as_str(), scale_font(11.0, font_scale))
                 .into_font()
                 .color(&BLACK)
                 .into();
             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                normalize_spaces(label),
+                normalize_text(label),
                 (x_text, y_pos),
                 legend_font,
             ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e)))?;

@@ -5,28 +5,53 @@ use pyo3::types::{PyList, PyTuple, PyAny};
 use plotters::style::{register_font, FontStyle};
 
 use crate::figure::axes::Axes;
-use crate::figure::figure::{get_current_figure, set_current_figure, Figure};
+use crate::figure::figure::{get_current_figure, set_current_figure, Figure, DEFAULT_DPI, DEFAULT_FIGSIZE};
+use crate::utils::font_stack;
 
-/// 从文件路径注册一个字体到 "sans-serif" family。
+/// 从文件路径注册一个字体到字体系统。
 ///
-/// 这样 Python 端 `plt.rcParams["font.sans-serif"] = ["Arial Unicode MS"]`
-/// 设置的字体可以真正驱动 plotters 的文本渲染。
+/// 该方法执行以下操作：
+/// 1. 读取字体文件到内存
+/// 2. 如果传入了 family_name，直接使用；否则从字体文件中提取真实家族名称
+/// 3. 用家族名称注册到 plotters 字体数据库
+/// 4. 将字体数据推入全局 `font_stack`，用于后续 glyph 覆盖检测
+///
+/// 这样 Python 端 `plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial Unicode MS"]`
+/// 设置的多个字体可以形成"字体栈"，渲染时根据文本字符自动选择最佳字体。
 ///
 /// # 参数
 /// - `path`: 字体文件路径（.ttf/.otf/.ttc）
+/// - `family_name`: 可选的字体族名。如果提供，直接使用；否则从字体文件中提取。
 ///
 /// # 返回
 /// - 成功返回 Ok(())
 /// - 文件不存在或字体解析失败返回 Err
 #[pyfunction]
-pub fn register_sans_serif_font(py: Python, path: String) -> PyResult<()> {
+#[pyo3(signature = (path, family_name=None))]
+pub fn register_sans_serif_font(py: Python, path: String, family_name: Option<String>) -> PyResult<()> {
     let font_data = std::fs::read(&path).map_err(|e| {
         PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e))
     })?;
+
+    // 优先使用传入的 family_name，否则从字体文件中提取
+    let family = match family_name {
+        Some(name) if !name.is_empty() => name,
+        _ => font_stack::extract_family_name(&font_data)
+            .unwrap_or_else(|| "sans-serif".to_string()),
+    };
+
+    // 用家族名称注册到 plotters
     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-    register_font("sans-serif", FontStyle::Normal, font_ref).map_err(|_| {
+    register_font(&family, FontStyle::Normal, font_ref).map_err(|_| {
         PyValueError::new_err(format!("Failed to register font from '{}'", path))
     })?;
+
+    // 推入字体栈（重新读取，因为 font_data 已被 Box::leak 消耗）
+    let font_data2 = std::fs::read(&path).map_err(|e| {
+        PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e))
+    })?;
+    font_stack::push_font(family, font_data2);
+
     let _ = py; // suppress unused warning
     Ok(())
 }
@@ -332,7 +357,7 @@ pub fn text(
     x: f64,
     y: f64,
     text: Bound<'_, PyAny>,
-    fontsize: Option<i32>,
+    fontsize: Option<f64>,
     color: Option<String>,
     c: Option<String>,
     family: Option<String>,
@@ -490,11 +515,13 @@ pub fn subplots(
     dpi: Option<f64>,
 ) -> PyResult<Bound<'_, PyTuple>> {
     let total = nrows * ncols;
-    let dpi_val = dpi.unwrap_or(100.0);
+    let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
     let (width, height) = if let Some((w, h)) = figsize {
         ((w * dpi_val).round() as u32, (h * dpi_val).round() as u32)
     } else {
-        ((ncols as f64 * 4.0 * dpi_val).round() as u32, (nrows as f64 * 3.0 * dpi_val).round() as u32)
+        let w = (DEFAULT_FIGSIZE.0 * dpi_val).round() as u32;
+        let h = (DEFAULT_FIGSIZE.1 * dpi_val).round() as u32;
+        (w, h)
     };
 
     let mut fig = Figure::new();

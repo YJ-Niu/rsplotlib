@@ -69,7 +69,7 @@ pub enum PlotElement {
         x: f64,
         y: f64,
         text: String,
-        fontsize: i32,
+        fontsize: f64,
         color: RgbColor,
         font_family: Option<String>,
     },

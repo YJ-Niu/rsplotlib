@@ -217,13 +217,15 @@ pub fn apply_rcparams_font(py: Python) -> PyResult<Option<String>> {
 
     let rsplotlib = PyModule::import(py, "rsplotlib.rsplotlib")?;
 
-    // 注册列表中 **所有** 能解析到文件的字体，但**反转顺序**注册。
-    // fontdb 对同一 family/style 的多个字体，优先返回**最早注册**的那个。
-    // 用户习惯把 CJK 字体放列表末尾（如 ["Helvetica", "Arial Unicode MS"]），
-    // 反转后 Arial Unicode MS 先注册，fontdb 优先用它渲染（拉丁 + CJK 都能覆盖），
-    // 避免中文显示为口。
+    // 清空旧的字体栈，然后注册所有新的字体
+    crate::utils::font_stack::clear_font_stack();
+
+    // 注册所有能解析到本地文件的字体到 font_stack。
+    // register_sans_serif_font 现在会将每个字体以其真实家族名称注册到 plotters，
+    // 并推入 font_stack。渲染时通过 font_stack::resolve_font_family(text, ...)
+    // 根据文本字符自动选择能覆盖所有字符的第一个字体。
     let mut last_registered: Option<String> = None;
-    for family in candidates.iter().rev() {
+    for family in candidates.iter() {
         let path = resolve_font_path_inner(family);
         let path = match path {
             Some(p) => p,
@@ -237,7 +239,7 @@ pub fn apply_rcparams_font(py: Python) -> PyResult<Option<String>> {
             }
         };
 
-        if rsplotlib.call_method1("register_sans_serif_font", (path.clone(),)).is_ok() {
+        if rsplotlib.call_method1("register_sans_serif_font", (path.clone(), family.to_string())).is_ok() {
             last_registered = Some(path);
         }
     }

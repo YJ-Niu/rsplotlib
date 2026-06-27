@@ -7,6 +7,7 @@ use plotters::style::ShapeStyle;
 
 use crate::core::colors::{RgbColor, parse_color, default_color, default_color_str, to_plotters_color};
 use crate::core::elements::PlotElement;
+use crate::utils::font_stack;
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<f64>
 fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
@@ -91,7 +92,7 @@ use crate::figure::axis::{Axis, Patch, SpineDict};
 /// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
 /// 通过 * 1.30 将字号放大到与 matplotlib 一致。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
-    (size * font_scale * 11.0).round() / 10.0
+    (size * font_scale * 1.30 * 10.0).round() / 10.0
 }
 
 #[pyclass(skip_from_py_object)]
@@ -371,13 +372,17 @@ impl Axes {
             && is_format_string(lbl)
             && let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(lbl)
         {
+            let has_marker = fmt_marker.is_some();
             if actual_marker.is_none() {
                 actual_marker = fmt_marker;
             }
-            if ls.is_none() && linestyle == "-"
-                && let Some(ls_val) = fmt_ls
-            {
-                actual_linestyle = ls_val;
+            if ls.is_none() && linestyle == "-" {
+                if let Some(ls_val) = fmt_ls {
+                    actual_linestyle = ls_val;
+                } else if has_marker {
+                    // 格式字符串只有 marker（如 'o'），无线条
+                    actual_linestyle = " ".to_string();
+                }
             }
             if actual_color.is_none() {
                 actual_color = fmt_color;
@@ -791,7 +796,7 @@ impl Axes {
         x: f64,
         y: f64,
         text: Bound<'_, PyAny>,
-        fontsize: Option<i32>,
+        fontsize: Option<f64>,
         color: Option<String>,
         c: Option<String>,
         family: Option<String>,
@@ -819,7 +824,7 @@ impl Axes {
             x,
             y,
             text: text_str,
-            fontsize: fontsize.unwrap_or(12),
+            fontsize: fontsize.unwrap_or(12.0),
             color: col,
             font_family,
         });
@@ -1500,6 +1505,7 @@ impl Axes {
             let frame_lw = self.spine_linewidth.round().max(1.0) as u32;
             let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw);
             let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
+            let axis_desc_family = font_stack::select_family(&self.xlabel);
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
                 .x_labels(ticks_info.xticks.len().max(2))
@@ -1508,7 +1514,7 @@ impl Axes {
                 .y_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .x_desc(self.xlabel.clone())
                 .y_desc(self.ylabel.clone())
-                .axis_desc_style(("sans-serif", label_size).into_font().color(&BLACK))
+                .axis_desc_style((axis_desc_family.as_str(), label_size).into_font().color(&BLACK))
                 .bold_line_style(frame_style);
 
             if xlog {

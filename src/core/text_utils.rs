@@ -1,6 +1,6 @@
 //! 文本预处理工具
 //!
-//! 解决 plotters 文本渲染中"字符宽度/字距视觉不一致 + 空格过窄"的问题。
+//! 解决 plotters 文本渲染中"空格过窄 + 特殊符号尺寸/间距不均"的问题。
 //!
 //! ## 根因
 //!
@@ -8,28 +8,28 @@
 //!   1. `font.h_advance(glyph_id)` 决定每个字形的横向推进量（即"字宽"）。
 //!   2. `font.kern(prev, curr)` 决定两个相邻字形之间的字距调整。
 //!
-//! 对于 Arial Unicode 来说：
-//!   - ASCII 空格 (U+0020) 的 h_advance ≈ 0.278 em（窄）
-//!   - 拉丁字母 h_advance ≈ 0.5-0.6 em（中）
-//!   - CJK 字符 h_advance ≈ 1.0 em（宽）
-//!   - 拉丁-拉丁对有 kerning（如 "AV" 收紧），但 CJK-CJK / CJK-拉丁 kerning 几乎为 0
-//!
-//! 当一行中混合 CJK + 拉丁 + 空格时，肉眼很容易感到"字距忽大忽小、空格特别窄"。
+//! 常见问题：
+//!   - ASCII 空格 (U+0020) 太窄（约 0.278 em），视觉上间距不足
+//!   - 特殊符号（|、-、#、* 等）左右边距不对称，且视觉上偏小
+//!   - 拉丁字母之间有 kerning，导致某些字符对间距忽大忽小
 //!
 //! ## 修复策略
 //!
 //! 不动 plotters 内部（ab_glyph 不支持禁用 kerning），而是在 **送入 plotters 之前**
-//! 对文本做一次归一化预处理：
+//! 对文本做一次预处理：
 //!
-//!   1. 用更宽的 Unicode 空格替换 ASCII 空格：
-//!      - 文本中含 CJK 字符 → 替换为全角空格 (U+3000 IDEOGRAPHIC SPACE，1 em)
-//!      - 文本中无 CJK 字符 → 替换为 en 空格 (U+2002 EN SPACE，0.5 em)
-//!      - 这样做可让空格与 CJK / 拉丁字符的视觉间距更协调
-//!   2. 连续 ASCII 空格统一为更宽的空格 + 占位符，避免 plotters 仍按原宽累加
+//!   1. **空格加宽**：ASCII 空格 → EM 空格 (U+2003, 宽度 1em)
+//!      - 这样空格宽度与典型字符宽度协调，视觉更舒适
 //!
-//! 注意：plotters 的 `font.draw` 在最后会调用 `font.h_advance(glyph_id)`，因此替换
-//! 为更宽的字形后，**布局宽度（layout_box）也会变宽**，自然就让后续字符的 x 坐标
-//! 推得更远，视觉上等价于"加了字距"。
+//!   2. **特殊符号间距优化**：在常用分隔符号（|、-、#、*、+、= 等）两侧
+//!      添加细空格 (THIN SPACE, U+2009, 约 0.2em)
+//!      - 使符号左右间距更均匀
+//!      - 增加符号的视觉存在感（相当于"放大"了符号的视觉宽度）
+//!      - 连续相同符号之间不添加（如 "---" 保持连续）
+//!      - 符号与空格之间不重复添加
+//!
+//! **重要原则**：不做任何"字符替换"（如半角转全角），保持原字符不变，
+//! 只通过添加空格来调整间距和视觉效果。
 
 /// 判断字符是否为 CJK（中日韩）字符。
 ///
@@ -86,52 +86,85 @@ pub fn contains_cjk(text: &str) -> bool {
     text.chars().any(is_cjk)
 }
 
-/// 将文本中的 ASCII 空格替换为更宽的 Unicode 空格，使排版视觉更协调。
+/// 判断字符是否为常用分隔符号（需要优化间距的符号）。
+fn is_separator_symbol(c: char) -> bool {
+    matches!(c, '|' | '-' | '#' | '+' | '=' | ':' | ';' | '(' | ')' | ' ')
+}
+
+/// 判断字符是否为空格类字符。
+fn is_any_space(c: char) -> bool {
+    match c as u32 {
+        0x0020 |        // ASCII space
+        0x00A0 |        // NBSP
+        0x2000..=0x200B | // EN quad..zero width space
+        0x202F |        // Narrow NBSP
+        0x3000 => true, // Ideographic space
+        _ => false,
+    }
+}
+
+/// 在特殊符号两侧添加细空格，使符号左右间距更均匀，同时增加视觉存在感。
 ///
-/// **上下文感知**：根据每个空格前后的"非空格"字符选择合适的 Unicode 空格：
+/// **规则**：
+/// - 对常用分隔符号生效：| - # * + = : ; ( )
+/// - 正常情况（符号与文字/数字相邻）：加 THIN SPACE (~0.2em)
+/// - 连续相同符号之间：加 HAIR SPACE (~0.1em)，更细
+/// - 符号旁边已有空格：加 HAIR SPACE (~0.1em)，更细
+/// - 文本开头/结尾的符号外侧：加 HAIR SPACE (~0.1em)，更细
+/// - 保持原符号不变，不做任何字符替换
+pub fn adjust_symbol_spacing(text: &str) -> String {
+    if text.is_empty() {
+        return text.to_string();
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + text.len() / 4);
+    let thin = '\u{2009}';  // THIN SPACE, ~0.2em （正常宽度）
+    let hair = '\u{200A}';  // HAIR SPACE, ~0.1em （更细，用于例外情况）
+
+    for i in 0..chars.len() {
+        let c = chars[i];
+        if !is_separator_symbol(c) {
+            out.push(c);
+            continue;
+        }
+
+        let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+        let next = if i + 1 < chars.len() { Some(chars[i + 1]) } else { None };
+
+        // 左侧：例外情况（开头、空格、相同符号）加 hair，否则加 thin
+        let left_space = match prev {
+            None => hair,
+            Some(p) => if is_any_space(p) || p == c { hair } else { thin },
+        };
+
+        // 右侧：例外情况（结尾、空格、相同符号）加 hair，否则加 thin
+        let right_space = match next {
+            None => hair,
+            Some(n) => if is_any_space(n) || n == c { hair } else { thin },
+        };
+
+        out.push(left_space);
+        out.push(c);
+        out.push(right_space);
+    }
+
+    out
+}
+
+/// 将文本中的 ASCII 空格替换为 EM 空格（U+2003, 宽度 1em）。
 ///
-/// | 前一个字符 | 后一个字符 | 替换为 | 宽度 |
-/// |-----------|-----------|--------|------|
-/// | CJK       | CJK       | U+3000 全角空格 | 1.0 em |
-/// | CJK       | ASCII     | U+3000 全角空格 | 1.0 em |
-/// | ASCII     | CJK       | U+3000 全角空格 | 1.0 em |
-/// | ASCII     | ASCII     | U+2002 en 空格  | 0.5 em |
-/// | 文本开头/结尾 | 任意     | U+2002 en 空格  | 0.5 em |
-///
-/// 这样 CJK 上下文用全角空格（与汉字等宽），纯拉丁上下文用 en 空格（约为
-/// ASCII 空格的两倍），与 matplotlib / InDesign / Word 的"中英文混排空格"行为
-/// 一致。
-///
-/// **连续空格不会被合并**——每个 ASCII 空格都按其上下文独立替换，
-/// 保留用户输入的间距。
+/// ASCII 空格通常只有约 0.278em 宽，视觉上太窄。
+/// EM 空格宽度为 1em，与典型字符宽度协调。
 pub fn normalize_spaces(text: &str) -> String {
     if text.is_empty() {
         return text.to_string();
     }
-    let mut out = String::with_capacity(text.len() + 4);
-    let chars: Vec<char> = text.chars().collect();
-    for i in 0..chars.len() {
-        let c = chars[i];
+
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
         if c == ' ' {
-            // 找到当前空格前一个"非空格"字符（向前跳过多余空格）
-            let prev = if i == 0 {
-                None
-            } else {
-                let mut j = i as isize - 1;
-                while j >= 0 && chars[j as usize] == ' ' {
-                    j -= 1;
-                }
-                if j >= 0 { Some(chars[j as usize]) } else { None }
-            };
-            // 找到当前空格后一个"非空格"字符
-            let next = {
-                let mut j = i + 1;
-                while j < chars.len() && chars[j] == ' ' {
-                    j += 1;
-                }
-                if j < chars.len() { Some(chars[j]) } else { None }
-            };
-            out.push(pick_space(prev, next));
+            out.push('\u{2003}');  // EM SPACE
         } else {
             out.push(c);
         }
@@ -139,14 +172,12 @@ pub fn normalize_spaces(text: &str) -> String {
     out
 }
 
-/// 根据前后字符决定空格替换字符
-fn pick_space(prev: Option<char>, next: Option<char>) -> char {
-    match (prev.map(is_cjk).unwrap_or(false), next.map(is_cjk).unwrap_or(false)) {
-        // 任意一侧是 CJK → 用全角空格（CJK 上下文用全角视觉协调）
-        (true, _) | (_, true) => '\u{3000}',
-        // 两侧都是非 CJK（含开头/结尾的 None）→ 用 en 空格
-        (false, false) => '\u{2002}',
-    }
+/// 统一的文本预处理入口：
+///   1. 先调整特殊符号间距（添加细空格）
+///   2. 再将 ASCII 空格替换为 EM 空格
+pub fn normalize_text(text: &str) -> String {
+    let after_symbols = adjust_symbol_spacing(text);
+    normalize_spaces(&after_symbols)
 }
 
 #[cfg(test)]
@@ -164,32 +195,26 @@ mod tests {
         assert!(!contains_cjk(""));
     }
 
+    // ========== normalize_spaces 测试 ==========
+
     #[test]
-    fn test_normalize_spaces_latin() {
-        // 拉丁文本：空格 → en 空格
-        let r = normalize_spaces("hello world");
-        assert_eq!(r, "hello\u{2002}world");
+    fn test_normalize_spaces_basic() {
+        // ASCII 空格 → EM 空格
+        assert_eq!(normalize_spaces("hello world"), "hello\u{2003}world");
+        assert_eq!(normalize_spaces("a b c"), "a\u{2003}b\u{2003}c");
     }
 
     #[test]
-    fn test_normalize_spaces_cjk() {
-        // CJK 文本：空格 → 全角空格
-        let r = normalize_spaces("请确认 关键字");
-        assert_eq!(r, "请确认\u{3000}关键字");
+    fn test_normalize_spaces_multiple() {
+        // 连续空格都替换
+        assert_eq!(normalize_spaces("a    b"), "a\u{2003}\u{2003}\u{2003}\u{2003}b");
     }
 
     #[test]
-    fn test_normalize_spaces_mixed() {
-        // 混合：含 CJK 用全角空格
-        let r = normalize_spaces("Plot 图表");
-        assert_eq!(r, "Plot\u{3000}图表");
-    }
-
-    #[test]
-    fn test_normalize_spaces_preserve() {
-        // 连续空格不再合并——每个空格独立替换为 en 空格（拉丁上下文）
-        let r = normalize_spaces("a    b");
-        assert_eq!(r, "a\u{2002}\u{2002}\u{2002}\u{2002}b");
+    fn test_normalize_spaces_leading_trailing() {
+        assert_eq!(normalize_spaces(" hello"), "\u{2003}hello");
+        assert_eq!(normalize_spaces("hello "), "hello\u{2003}");
+        assert_eq!(normalize_spaces(" hello "), "\u{2003}hello\u{2003}");
     }
 
     #[test]
@@ -197,68 +222,86 @@ mod tests {
         assert_eq!(normalize_spaces(""), "");
     }
 
+    // ========== adjust_symbol_spacing 测试 ==========
+
     #[test]
-    fn test_context_aware_cjk_to_cjk() {
-        // CJK 上下文：使用全角空格
-        assert_eq!(normalize_spaces("请 确认"), "请\u{3000}确认");
-        assert_eq!(normalize_spaces("中 文"), "中\u{3000}文");
+    fn test_adjust_pipe_basic() {
+        // 正常情况：符号与文字相邻 → THIN SPACE (U+2009, ~0.2em)
+        assert_eq!(adjust_symbol_spacing("a|b"), "a\u{2009}|\u{2009}b");
+        assert_eq!(adjust_symbol_spacing("Test|Name"), "Test\u{2009}|\u{2009}Name");
     }
 
     #[test]
-    fn test_context_aware_latin_to_latin() {
-        // 纯拉丁：使用 en 空格
-        assert_eq!(normalize_spaces("hello world"), "hello\u{2002}world");
-        assert_eq!(normalize_spaces("foo bar"), "foo\u{2002}bar");
+    fn test_adjust_dash_basic() {
+        // 正常情况：符号与文字相邻 → THIN SPACE
+        assert_eq!(adjust_symbol_spacing("a-b"), "a\u{2009}-\u{2009}b");
+        assert_eq!(adjust_symbol_spacing("test-data"), "test\u{2009}-\u{2009}data");
     }
 
     #[test]
-    fn test_context_aware_mixed_cjk_to_latin() {
-        // CJK 到拉丁：用全角空格（CJK 一侧）
-        assert_eq!(normalize_spaces("中文 abc"), "中文\u{3000}abc");
+    fn test_adjust_consecutive_same() {
+        // 连续相同符号之间 → HAIR SPACE (U+200A, ~0.1em)，更细
+        assert_eq!(adjust_symbol_spacing("---"), "\u{200A}-\u{200A}-\u{200A}-\u{200A}");
+        assert_eq!(adjust_symbol_spacing("|||"), "\u{200A}|\u{200A}|\u{200A}|\u{200A}");
     }
 
     #[test]
-    fn test_context_aware_mixed_latin_to_cjk() {
-        // 拉丁到 CJK：用全角空格（CJK 一侧）
-        assert_eq!(normalize_spaces("abc 中文"), "abc\u{3000}中文");
+    fn test_adjust_adjacent_to_space() {
+        // 符号旁边已有空格 → HAIR SPACE，更细
+        assert_eq!(adjust_symbol_spacing("a | b"), "a \u{200A}|\u{200A} b");
+        assert_eq!(adjust_symbol_spacing("a - b"), "a \u{200A}-\u{200A} b");
     }
 
     #[test]
-    fn test_context_aware_leading_space() {
-        // 文本开头的空格：next 决定
-        assert_eq!(normalize_spaces(" hello"), "\u{2002}hello");
-        assert_eq!(normalize_spaces(" 中文"), "\u{3000}中文");
+    fn test_adjust_at_start_end() {
+        // 符号在开头/结尾：外侧是例外 → HAIR SPACE；内侧是正常 → THIN SPACE
+        assert_eq!(adjust_symbol_spacing("|test"), "\u{200A}|\u{2009}test");
+        assert_eq!(adjust_symbol_spacing("test|"), "test\u{2009}|\u{200A}");
+        assert_eq!(adjust_symbol_spacing("-test"), "\u{200A}-\u{2009}test");
+        assert_eq!(adjust_symbol_spacing("test-"), "test\u{2009}-\u{200A}");
     }
 
     #[test]
-    fn test_context_aware_trailing_space() {
-        // 文本结尾的空格：prev 决定
-        assert_eq!(normalize_spaces("hello "), "hello\u{2002}");
-        assert_eq!(normalize_spaces("中文 "), "中文\u{3000}");
+    fn test_adjust_other_symbols() {
+        // 其他分隔符号，正常情况 → THIN SPACE
+        assert_eq!(adjust_symbol_spacing("a#b"), "a\u{2009}#\u{2009}b");
+        assert_eq!(adjust_symbol_spacing("a*b"), "a\u{2009}*\u{2009}b");
+        assert_eq!(adjust_symbol_spacing("a+b"), "a\u{2009}+\u{2009}b");
+        assert_eq!(adjust_symbol_spacing("a=b"), "a\u{2009}=\u{2009}b");
+        assert_eq!(adjust_symbol_spacing("a:b"), "a\u{2009}:\u{2009}b");
+        assert_eq!(adjust_symbol_spacing("a;b"), "a\u{2009};\u{2009}b");
     }
 
     #[test]
-    fn test_context_aware_multiple_spaces_preserve() {
-        // 多个连续空格不再合并——每个空格都按上下文独立替换
-        // 前后都是拉丁字符 → 全部用 en 空格
-        assert_eq!(normalize_spaces("a   b"), "a\u{2002}\u{2002}\u{2002}b");
-        // 前后都是 CJK → 全部用全角空格
-        assert_eq!(normalize_spaces("中   文"), "中\u{3000}\u{3000}\u{3000}文");
+    fn test_adjust_parentheses() {
+        // 括号：与文字相邻 → THIN SPACE；开头/结尾 → HAIR SPACE
+        assert_eq!(adjust_symbol_spacing("a(b)c"), "a\u{2009}(\u{2009}b\u{2009})\u{2009}c");
+        assert_eq!(adjust_symbol_spacing("(test)"), "\u{200A}(\u{2009}test\u{2009})\u{200A}");
     }
 
     #[test]
-    fn test_context_aware_japanese_kana() {
-        // 日文假名也算 CJK
-        assert_eq!(normalize_spaces("あい うえ"), "あい\u{3000}うえ");
+    fn test_adjust_no_effect_on_text() {
+        // 普通文本不改变
+        assert_eq!(adjust_symbol_spacing("hello world"), "hello world");
+        assert_eq!(adjust_symbol_spacing("abc123"), "abc123");
+        assert_eq!(adjust_symbol_spacing(""), "");
+        // 逗号、句号等不处理
+        assert_eq!(adjust_symbol_spacing("hello, world!"), "hello, world!");
+        assert_eq!(adjust_symbol_spacing("3.14"), "3.14");
+    }
+
+    // ========== normalize_text 测试 ==========
+
+    #[test]
+    fn test_normalize_text_combined() {
+        // 统一入口：先调整符号间距，再替换空格
+        assert_eq!(normalize_text("a|b c"), "a\u{2009}|\u{2009}b\u{2003}c");
+        assert_eq!(normalize_text("test-data text"), "test\u{2009}-\u{2009}data\u{2003}text");
+        assert_eq!(normalize_text("--- ---"), "\u{200A}-\u{200A}-\u{200A}-\u{200A}\u{2003}\u{200A}-\u{200A}-\u{200A}-\u{200A}");
     }
 
     #[test]
-    fn test_context_aware_punctuation() {
-        // 标点不是 CJK（不在我们定义的范围），跟拉丁相同
-        // U+3000 是 CJK 标点（属于 CJK Symbols and Punctuation）
-        // U+FF0C 全角逗号属于 Halfwidth and Fullwidth Forms（也属于 CJK）
-        assert_eq!(normalize_spaces("hi, world"), "hi,\u{2002}world");
-        // 全角标点算 CJK → 用全角空格
-        assert_eq!(normalize_spaces("中文， 测试"), "中文，\u{3000}测试");
+    fn test_normalize_text_empty() {
+        assert_eq!(normalize_text(""), "");
     }
 }

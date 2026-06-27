@@ -6,9 +6,10 @@ use pyo3::types::PyAny;
 use plotters::prelude::*;
 
 use crate::figure::axes::Axes;
+use crate::utils::font_stack;
 // colors not needed directly in this module
 
-/// 默认图形尺寸（英寸），与 matplotlib 默认一致
+/// 默认图形尺寸（英寸），与 matplotlib 默认一致 (12.0, 9.0)
 pub const DEFAULT_FIGSIZE: (f64, f64) = (12.0, 9.0);
 /// 默认 DPI
 pub const DEFAULT_DPI: f64 = 100.0;
@@ -60,6 +61,8 @@ impl Default for Figure {
 impl Figure {
     #[new]
     pub fn new() -> Self {
+        let w = (DEFAULT_FIGSIZE.0 * DEFAULT_DPI).round() as u32;
+        let h = (DEFAULT_FIGSIZE.1 * DEFAULT_DPI).round() as u32;
         // matplotlib 兼容的默认 subplots_adjust 边距
         // matplotlib 默认: left=0.125, right=0.9, bottom=0.11, top=0.88
         Figure {
@@ -67,9 +70,9 @@ impl Figure {
             nrows: 1,
             ncols: 1,
             suptitle: String::new(),
-            width: 640,
-            height: 480,
-            dpi: 100.0,
+            width: w,
+            height: h,
+            dpi: DEFAULT_DPI,
             axes_positions: Vec::new(),
             facecolor: "white".to_string(),
             subplot_left: 0.125,
@@ -251,7 +254,9 @@ impl Figure {
         let _ncols = self.ncols;
 
         if !self.suptitle.is_empty() {
-            let _ = root.titled(&self.suptitle, ("sans-serif", 21.0 * font_scale));
+            let sup_family = font_stack::select_family(&self.suptitle);
+            let sup_size = 21.0 * 1.30 * font_scale;
+            let _ = root.titled(&self.suptitle, (sup_family.as_str(), sup_size));
         }
 
         let total_w = actual_w as f64;
@@ -290,7 +295,7 @@ impl Figure {
             }
 
             // 计算 tick/label 区域大小
-            let tick_label_size = (ax.tick_labelsize * font_scale).ceil() as u32;
+            let tick_label_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale).ceil() as u32;
 
             // 估算 y/x tick label 区域大小（容纳最长的 tick 数字 + 少量 padding）
             let y_tick_area = tick_label_size + 6;
@@ -395,7 +400,7 @@ impl Figure {
                 let (ux_min, ux_max) = if twin.is_twin_x { (tx_min, tx_max) } else { (x_min, x_max) };
                 let (uy_min, uy_max) = if twin.is_twin_y { (ty_min, ty_max) } else { (y_min, y_max) };
                 // twin axes 使用与主轴相同的 chart_area，但 label area 在右侧/顶部
-                let twin_tick_size = (twin.tick_labelsize * font_scale).ceil() as u32;
+                let twin_tick_size = crate::figure::axes::scale_font(twin.tick_labelsize, font_scale).ceil() as u32;
                 let twin_y_label_area = twin_tick_size + 6;
                 let twin_x_label_area = twin_tick_size + 6;
                 let mut twin_chart = ChartBuilder::on(&chart_area)

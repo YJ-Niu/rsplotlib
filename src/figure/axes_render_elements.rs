@@ -18,7 +18,8 @@ use crate::core::colormap::{autumn_color, cool_color, inferno_color, magma_color
 use crate::core::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
-use crate::core::text_utils::normalize_spaces;
+use crate::utils::font_stack;
+use crate::core::text_utils::normalize_text;
 
 /// 绘制单条线段（用于 axhline/axvline/stem 等）
 pub fn draw_single_line<DB: DrawingBackend>(
@@ -263,7 +264,7 @@ where
                             //   lw=1.5: lw_px=3, stroke=2 → 3-5px (mpl 4px) ✓
                             //   lw=2.0: lw_px=4, stroke=3 → 5-7px (mpl 5px) ✓
                             //   lw=3.0: lw_px=6, stroke=5 → 9-11px (mpl 8px) ✓
-                            let stroke_w = (lw_px as i32).max(1) as u32;
+                            let stroke_w = (lw_px as i32 - 1).max(1) as u32;
                             let style_native: ShapeStyle = rgb.stroke_width(stroke_w);
                             // 像素中心对齐修正：plotters 在渲染水平线时，线中心对应像素下边缘，
                             // 而 matplotlib 使用像素中心。这导致 rsp 的水平线比 mpl 偏高 1 像素。
@@ -514,15 +515,15 @@ where
                 let txv = tx(*x);
                 let tyv = ty(*y);
                 if !txv.is_finite() || !tyv.is_finite() { continue; }
-                let fs = scale_font(*fontsize as f64, font_scale);
-                let family_name = font_family.as_deref().unwrap_or("sans-serif");
-                let font: FontDesc = (family_name, fs).into();
+                let fs = scale_font(*fontsize, font_scale);
+                let family_name = font_stack::resolve_font_family(text, font_family.as_deref());
+                let font: FontDesc = (family_name.as_str(), fs).into();
                 let colored_font = font.color(&to_plotters_color(*color));
                 // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
                 // 与 axhline/axvline 在同一坐标时的视觉位置一致。
                 let text_style = colored_font
                     .pos(Pos::new(HPos::Left, VPos::Center));
-                let normalized = normalize_spaces(text);
+                let normalized = normalize_text(text);
                 chart.draw_series(std::iter::once(plotters::element::Text::new(
                     normalized,
                     (txv, tyv),
@@ -636,11 +637,12 @@ where
                         let lx = mid_angle.cos() * label_r;
                         let ly = mid_angle.sin() * label_r;
                         // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
-                        let pie_label_style: TextStyle = FontDesc::from(("sans-serif", scale_font(12.0, font_scale)))
+                        let pie_family = font_stack::select_family(l);
+                        let pie_label_style: TextStyle = FontDesc::from((pie_family.as_str(), scale_font(12.0, font_scale)))
                             .color(&BLACK)
                             .pos(Pos::new(HPos::Center, VPos::Center));
                         chart.draw_series(std::iter::once(plotters::element::Text::new(
-                            normalize_spaces(l), (lx, ly), pie_label_style,
+                            normalize_text(l), (lx, ly), pie_label_style,
                         ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie label: {}", e)))?;
                     }
                     if let Some(fmt) = autopct {
@@ -655,7 +657,8 @@ where
                         let text_r = 0.7;
                         let tx = mid_angle.cos() * text_r;
                         let ty = mid_angle.sin() * text_r;
-                        let autopct_style: TextStyle = FontDesc::from(("sans-serif", scale_font(11.0, font_scale)))
+                        let autopct_family = font_stack::select_family(&text);
+                        let autopct_style: TextStyle = FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))
                             .color(&BLACK)
                             .pos(Pos::new(HPos::Center, VPos::Center));
                         chart.draw_series(std::iter::once(plotters::element::Text::new(
@@ -910,11 +913,12 @@ where
                     if let Some(lbls) = labels
                         && let Some(l) = lbls.get(i)
                     {
-                        let box_label_style: TextStyle = FontDesc::from(("sans-serif", scale_font(11.0, font_scale)))
+                        let box_family = font_stack::select_family(l);
+                        let box_label_style: TextStyle = FontDesc::from((box_family.as_str(), scale_font(11.0, font_scale)))
                             .color(&BLACK)
                             .pos(Pos::new(HPos::Center, VPos::Center));
                         chart.draw_series(std::iter::once(plotters::element::Text::new(
-                            normalize_spaces(l), (cx, -0.3), box_label_style,
+                            normalize_text(l), (cx, -0.3), box_label_style,
                         ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot label: {}", e)))?;
                     }
                 }
@@ -932,11 +936,12 @@ where
                 chart.draw_series(std::iter::once(PathElement::new(
                     vec![(txy_x, txy_y), (txy_xy_x, txy_xy_y)], arrow_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate arrow: {}", e)))?;
-                let anno_style: TextStyle = FontDesc::from(("sans-serif", scale_font(*fontsize, font_scale)))
+                let anno_family = font_stack::select_family(text);
+                let anno_style: TextStyle = FontDesc::from((anno_family.as_str(), scale_font(*fontsize, font_scale)))
                     .color(&rgb)
                     .pos(Pos::new(HPos::Center, VPos::Center));
                 chart.draw_series(std::iter::once(plotters::element::Text::new(
-                    normalize_spaces(text), (txy_x, txy_y), anno_style,
+                    normalize_text(text), (txy_x, txy_y), anno_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate text: {}", e)))?;
             }
         }

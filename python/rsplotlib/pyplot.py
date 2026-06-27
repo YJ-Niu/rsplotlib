@@ -97,16 +97,34 @@ def _map_aliases(kwargs):
 
 
 def _parse_plot_args(args, kwargs):
-    """解析 plot() 的位置参数为 (x, y, kwargs)"""
-    if len(args) == 2:
-        return args[0], args[1], kwargs
-    elif len(args) == 1:
+    """解析 plot() 的位置参数为 [(x, y, fmt_or_none), ...] 对列表 + kwargs"""
+    if len(args) == 0:
+        return [], kwargs
+    if len(args) == 1:
+        y = args[0]
         try:
-            x = list(range(len(args[0])))
+            x = list(range(len(y)))
         except Exception:
-            x = list(args[0]) if hasattr(args[0], '__iter__') else []
-        return x, args[0], kwargs
-    return [], [], kwargs
+            x = list(y) if hasattr(y, '__iter__') else []
+        return [(x, y, None)], kwargs
+    if len(args) == 2:
+        return [(args[0], args[1], None)], kwargs
+    # 3 个参数且第 3 个是字符串 → fmt 格式字符串
+    if len(args) == 3 and isinstance(args[2], str):
+        return [(args[0], args[1], args[2])], kwargs
+    # 多对参数: plt.plot(x1, y1, x2, y2, ...)
+    pairs = []
+    for i in range(0, len(args), 2):
+        if i + 1 < len(args):
+            pairs.append((args[i], args[i + 1], None))
+        else:
+            # 奇数个参数: 最后一组只有 y
+            try:
+                x = list(range(len(args[i])))
+            except Exception:
+                x = list(args[i]) if hasattr(args[i], '__iter__') else []
+            pairs.append((x, args[i], None))
+    return pairs, kwargs
 
 
 # ==================== 绘图函数 ====================
@@ -118,6 +136,8 @@ def plot(*args, **kwargs):
         plt.plot(x, y)              # 以 x 为横坐标, y 为纵坐标
         plt.plot(y)                 # 仅提供 y, 自动 x = [0, 1, ...]
         plt.plot(x, y, lw=2.0)     # 自定义线宽
+        plt.plot(x, y, x, z)       # 绘制多条线
+        plt.plot(x, y, 'o')        # 格式字符串（只绘标记）
 
     关键字参数 (matplotlib 兼容别名):
         lw / linewidth: 线宽 (float)
@@ -131,12 +151,19 @@ def plot(*args, **kwargs):
         (Figure, Axes) 元组
     """
     _map_aliases(kwargs)
-    x, y, kw = _parse_plot_args(args, kwargs)
+    pairs, _ = _parse_plot_args(args, kwargs)
 
     def _call(*a, **k):
         return _rsplotlib.plot(*a, **k)
 
-    return _route_to_ax('plot', _call, x, y, **kwargs)
+    result = None
+    for triple in pairs:
+        x, y, fmt = triple
+        if fmt is not None:
+            result = _route_to_ax('plot', _call, x, y, label=fmt, **kwargs)
+        else:
+            result = _route_to_ax('plot', _call, x, y, **kwargs)
+    return result
 
 
 def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
@@ -831,7 +858,7 @@ def savefig(fname, **kwargs):
         if dpi is not None:
             fig.savefig(fname, dpi)
         else:
-            fig.savefig(fname)
+            fig.savefig(fname, dpi=DEFAULT_DPI)
         return
     # 无 Figure 时回退到模块级
     if dpi is not None:

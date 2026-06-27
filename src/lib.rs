@@ -201,6 +201,9 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(utils::pyfuncs::axvspan, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::axline, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::register_sans_serif_font, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::font_stack::clear_font_stack, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::font_stack::debug_font_stack, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::font_stack::debug_select_family, m)?)?;
     m.add_function(wrap_pyfunction!(figure::figure::get_default_figsize, m)?)?;
     m.add_function(wrap_pyfunction!(figure::figure::get_default_dpi, m)?)?;
 
