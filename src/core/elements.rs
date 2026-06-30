@@ -1,7 +1,6 @@
-use crate::colors::RgbColor;
+use crate::core::colors::RgbColor;
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub enum PlotElement {
     Line {
         x: Vec<Option<f64>>,
@@ -70,7 +69,7 @@ pub enum PlotElement {
         x: f64,
         y: f64,
         text: String,
-        fontsize: i32,
+        fontsize: f64,
         color: RgbColor,
         font_family: Option<String>,
     },

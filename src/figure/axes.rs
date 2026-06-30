@@ -5,8 +5,9 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 
-use crate::colors::{RgbColor, parse_color, default_color, default_color_str, to_plotters_color};
-use crate::elements::PlotElement;
+use crate::core::colors::{RgbColor, parse_color, default_color, default_color_str, to_plotters_color};
+use crate::core::elements::PlotElement;
+use crate::utils::font_stack;
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<f64>
 fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
@@ -85,13 +86,13 @@ fn py_to_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
     }
     Err(PyValueError::new_err("Cannot convert to Vec<Vec<f64>>"))
 }
-use crate::axis::{Axis, Patch, SpineDict};
+use crate::figure::axis::{Axis, Patch, SpineDict};
 
 /// 字体大小缩放并四舍五入到1位小数
 /// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
-/// 通过 * 1.10 将字号放大到与 matplotlib 一致。
+/// 通过 * 14.5 将字号放大到与 matplotlib 一致。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
-    (size * font_scale * 11.0).round() / 10.0
+    (size * font_scale * 14.5).round() / 10.0
 }
 
 #[pyclass(skip_from_py_object)]
@@ -278,6 +279,12 @@ fn is_format_string(s: &str) -> bool {
     parse_fmt_string(s).is_some()
 }
 
+impl Default for Axes {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl Axes {
     #[new]
@@ -361,23 +368,26 @@ impl Axes {
         let mut actual_marker = marker;
         let mut actual_linestyle = linestyle.to_string();
         let mut actual_color = color;
-        if let Some(ref lbl) = actual_label {
-            if is_format_string(lbl) {
-                if let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(lbl) {
-                    if actual_marker.is_none() {
-                        actual_marker = fmt_marker;
-                    }
-                    if ls.is_none() && linestyle == "-" {
-                        if let Some(ls_val) = fmt_ls {
-                            actual_linestyle = ls_val;
-                        }
-                    }
-                    if actual_color.is_none() {
-                        actual_color = fmt_color;
-                    }
-                    actual_label = None;
+        if let Some(ref lbl) = actual_label
+            && is_format_string(lbl)
+            && let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(lbl)
+        {
+            let has_marker = fmt_marker.is_some();
+            if actual_marker.is_none() {
+                actual_marker = fmt_marker;
+            }
+            if ls.is_none() && linestyle == "-" {
+                if let Some(ls_val) = fmt_ls {
+                    actual_linestyle = ls_val;
+                } else if has_marker {
+                    // 格式字符串只有 marker（如 'o'），无线条
+                    actual_linestyle = " ".to_string();
                 }
             }
+            if actual_color.is_none() {
+                actual_color = fmt_color;
+            }
+            actual_label = None;
         }
 
         let x_vec = py_to_vec_option_f64(&x)?;
@@ -561,29 +571,19 @@ impl Axes {
         } else if let Some(c) = color {
             Self::parse_color_list(&c, x_parsed.len())?
         } else {
-            (0..x_parsed.len()).map(|i| default_color_str(i)).collect()
+            (0..x_parsed.len()).map(default_color_str).collect()
         };
         let histtype_val = histtype.unwrap_or_else(|| "bar".to_string());
         let idx = self.element_count;
         self.element_count += 1;
-        self.elements.push(PlotElement::Hist {
-            data_all: x_parsed.clone(),
-            bins: num_bins,
-            density,
-            histtype: histtype_val,
-            label: label.clone(),
-            alpha,
-            colors: colors.clone(),
-            color_idx: idx,
-            bin_edges: custom_edges.clone(),
-        });
-        if let Some(lbl) = label {
-            let col = parse_color(colors.first().unwrap_or(&String::new()), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
-        }
-        let all_data: Vec<f64> = x_parsed.iter().flatten().cloned().collect();
-        let global_min = if all_data.is_empty() { 0.0 } else { all_data.iter().cloned().fold(f64::INFINITY, f64::min) };
-        let global_max = if all_data.is_empty() { 1.0 } else { all_data.iter().cloned().fold(f64::NEG_INFINITY, f64::max) };
+
+        // 先计算统计量（使用 &x_parsed），再 move 进 PlotElement
+        let (global_min, global_max) = x_parsed.iter().flatten().fold(
+            (f64::INFINITY, f64::NEG_INFINITY),
+            |(mn, mx), &v| (mn.min(v), mx.max(v)),
+        );
+        let global_min = if global_min.is_finite() { global_min } else { 0.0 };
+        let global_max = if global_max.is_finite() { global_max } else { 1.0 };
         let global_range = global_max - global_min;
         let bin_width = if global_range < 1e-10 { 1.0 } else { global_range / num_bins as f64 };
         let n: Vec<Vec<f64>> = x_parsed.iter().map(|dataset| {
@@ -592,7 +592,6 @@ impl Axes {
             }
             let mut counts = vec![0usize; num_bins];
             if let Some(ref edges) = custom_edges {
-                // 使用自定义 edges 进行分箱，与渲染代码（axes_render_elements.rs）一致
                 let edge_min = edges[0];
                 let edge_max = edges[edges.len() - 1];
                 for &val in dataset {
@@ -626,7 +625,25 @@ impl Axes {
         } else {
             (0..=num_bins).map(|i| global_min + i as f64 * bin_width).collect()
         };
-        let n_obj: Py<PyAny> = if x_parsed.len() <= 1 {
+
+        let x_parsed_len = x_parsed.len();
+        // 移动 x_parsed 和 custom_edges，避免克隆
+        self.elements.push(PlotElement::Hist {
+            data_all: x_parsed,
+            bins: num_bins,
+            density,
+            histtype: histtype_val,
+            label: label.clone(),
+            alpha,
+            colors: colors.clone(),
+            color_idx: idx,
+            bin_edges: custom_edges,
+        });
+        if let Some(lbl) = label {
+            let col = parse_color(colors.first().unwrap_or(&String::new()), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+        }
+        let n_obj: Py<PyAny> = if x_parsed_len <= 1 {
             let empty: Vec<f64> = Vec::new();
             let data = n.first().unwrap_or(&empty);
             PyList::new(py, data.as_slice()).unwrap().into_any().unbind()
@@ -779,7 +796,7 @@ impl Axes {
         x: f64,
         y: f64,
         text: Bound<'_, PyAny>,
-        fontsize: Option<i32>,
+        fontsize: Option<f64>,
         color: Option<String>,
         c: Option<String>,
         family: Option<String>,
@@ -792,16 +809,14 @@ impl Axes {
         // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters，
         // 使用实际字体家族名称（而非 "sans-serif"），确保只影响指定文字。
         let font_family = family.and_then(|family_name| {
-            if let Ok(resolver_mod) = py.import("rsplotlib._font_resolver") {
-                if let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,)) {
-                    if let Ok(Some(path)) = path_obj.extract::<Option<String>>() {
-                        if let Ok(font_data) = std::fs::read(&path) {
-                            let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                            let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
-                            return Some(family_name);
-                        }
-                    }
-                }
+            if let Ok(resolver_mod) = py.import("rsplotlib.utils._font_resolver")
+                && let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,))
+                && let Ok(Some(path)) = path_obj.extract::<Option<String>>()
+                && let Ok(font_data) = std::fs::read(&path)
+            {
+                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+                let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
+                return Some(family_name);
             }
             None
         });
@@ -809,7 +824,7 @@ impl Axes {
             x,
             y,
             text: text_str,
-            fontsize: fontsize.unwrap_or(12),
+            fontsize: fontsize.unwrap_or(12.0),
             color: col,
             font_family,
         });
@@ -1381,7 +1396,7 @@ impl Axes {
         let mut axis = Axis::new();
         axis.which = "x".to_string();
         axis.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, axis)?)
+        Py::new(py, axis)
     }
 
     #[getter]
@@ -1389,7 +1404,7 @@ impl Axes {
         let mut axis = Axis::new();
         axis.which = "y".to_string();
         axis.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, axis)?)
+        Py::new(py, axis)
     }
 
     #[getter]
@@ -1397,7 +1412,7 @@ impl Axes {
         let mut patch = Patch::new();
         patch.facecolor = self.facecolor.clone();
         patch.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, patch)?)
+        Py::new(py, patch)
     }
 
     #[getter]
@@ -1413,7 +1428,7 @@ impl Axes {
             }
         }
         sd.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
-        Ok(Py::new(py, sd)?)
+        Py::new(py, sd)
     }
 }
 
@@ -1421,7 +1436,7 @@ impl Axes {
     pub fn compute_bounds(&self) -> ((f64, f64), (f64, f64)) {
         let xlog = self.xscale == "log";
         let ylog = self.yscale == "log";
-        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) = crate::axes_bounds::compute_bounds(
+        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) = crate::figure::axes_bounds::compute_bounds(
             &self.elements, self.xlim, self.ylim, xlog, ylog,
         );
         // 应用轴反转
@@ -1465,7 +1480,7 @@ impl Axes {
         let ylog = self.yscale == "log";
 
         // 计算主/副刻度
-        let ticks_info = crate::axes_mesh::compute_ticks(
+        let ticks_info = crate::figure::axes_mesh::compute_ticks(
             py,
             &self.xticks_val,
             &self.yticks_val,
@@ -1479,7 +1494,7 @@ impl Axes {
         );
 
         // 计算网格线颜色/线宽/样式
-        let grid_style = crate::axes_mesh::compute_grid_style(
+        let grid_style = crate::figure::axes_mesh::compute_grid_style(
             &self.grid_color, self.grid_linewidth, &self.grid_linestyle,
             &self.minor_grid_color, self.minor_grid_linewidth, &self.minor_grid_linestyle,
         );
@@ -1488,16 +1503,18 @@ impl Axes {
         {
             let frame_color = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
             let frame_lw = self.spine_linewidth.round().max(1.0) as u32;
-            let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw).into();
+            let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw);
             let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
+            let axis_desc_family = font_stack::select_family(&self.xlabel);
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
                 .x_labels(ticks_info.xticks.len().max(2))
                 .y_labels(ticks_info.yticks.len().max(2))
-                .x_label_style(("sans-serif", label_size))
-                .y_label_style(("sans-serif", label_size))
+                .x_label_style(("sans-serif", label_size).into_font().color(&BLACK))
+                .y_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .x_desc(self.xlabel.clone())
                 .y_desc(self.ylabel.clone())
+                .axis_desc_style((axis_desc_family.as_str(), label_size).into_font().color(&BLACK))
                 .bold_line_style(frame_style);
 
             if xlog {
@@ -1506,8 +1523,8 @@ impl Axes {
             if ylog {
                 mesh_builder.y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
             } else {
-                mesh_builder.y_label_formatter(&|v| crate::axes_mesh::format_linear_tick(*v));
-                mesh_builder.x_label_formatter(&|v| crate::axes_mesh::format_linear_tick(*v));
+                mesh_builder.y_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
+                mesh_builder.x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
             }
 
             if !self.spine_bottom && !self.spine_top {
@@ -1536,7 +1553,7 @@ impl Axes {
             let spine_col = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
             let spine_rgb = to_plotters_color(spine_col);
             let spine_lw = self.spine_linewidth.round().max(1.0) as u32;
-            let spine_style: ShapeStyle = spine_rgb.stroke_width(spine_lw).into();
+            let spine_style: ShapeStyle = spine_rgb.stroke_width(spine_lw);
             if self.spine_top {
                 chart.draw_series(std::iter::once(PathElement::new(
                     vec![(x_min, y_max), (x_max, y_max)], spine_style,
@@ -1553,14 +1570,14 @@ impl Axes {
         if self.grid_visible {
             let major_ls = grid_style.major_ls.as_deref();
             if self.grid_axis == "both" || self.grid_axis == "x" {
-                crate::axes_grid::draw_grid_lines(
+                crate::figure::axes_grid::draw_grid_lines(
                     chart, true, &ticks_info.xticks,
                     grid_style.major_color, grid_style.major_lw, major_ls,
                     font_scale, x_min, x_max, y_min, y_max,
                 )?;
             }
             if self.grid_axis == "both" || self.grid_axis == "y" {
-                crate::axes_grid::draw_grid_lines(
+                crate::figure::axes_grid::draw_grid_lines(
                     chart, false, &ticks_info.yticks,
                     grid_style.major_color, grid_style.major_lw, major_ls,
                     font_scale, x_min, x_max, y_min, y_max,
@@ -1573,52 +1590,50 @@ impl Axes {
             let minor_ls = grid_style.minor_ls.as_deref();
             // 过滤掉与主刻度位置重叠的副刻度，避免副网格线覆盖主网格线
             let xmin_filtered = ticks_info.xminor.as_ref().map(|minor| {
-                crate::axes_grid::filter_minor_ticks(minor, &ticks_info.xticks)
+                crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.xticks)
             });
             let ymin_filtered = ticks_info.yminor.as_ref().map(|minor| {
-                crate::axes_grid::filter_minor_ticks(minor, &ticks_info.yticks)
+                crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.yticks)
             });
-            let show_x_minor = self.minor_grid_x_visible
-                || (!self.minor_grid_x_visible && !self.minor_grid_y_visible);
-            let show_y_minor = self.minor_grid_y_visible
-                || (!self.minor_grid_x_visible && !self.minor_grid_y_visible);
-            if show_x_minor {
-                if let Some(ref ticks) = xmin_filtered {
-                    crate::axes_grid::draw_grid_lines(
-                        chart, true, ticks,
-                        grid_style.minor_color, grid_style.minor_lw, minor_ls,
-                        font_scale, x_min, x_max, y_min, y_max,
-                    )?;
-                }
+            let show_x_minor = self.minor_grid_x_visible || !self.minor_grid_y_visible;
+            let show_y_minor = self.minor_grid_y_visible || !self.minor_grid_x_visible;
+            if show_x_minor
+                && let Some(ref ticks) = xmin_filtered
+            {
+                crate::figure::axes_grid::draw_grid_lines(
+                    chart, true, ticks,
+                    grid_style.minor_color, grid_style.minor_lw, minor_ls,
+                    font_scale, x_min, x_max, y_min, y_max,
+                )?;
             }
-            if show_y_minor {
-                if let Some(ref ticks) = ymin_filtered {
-                    crate::axes_grid::draw_grid_lines(
-                        chart, false, ticks,
-                        grid_style.minor_color, grid_style.minor_lw, minor_ls,
-                        font_scale, x_min, x_max, y_min, y_max,
-                    )?;
-                }
-            }
-        }
-
-        // 渲染所有数据元素（线、散点、柱状图、填充、误差棒、饼图等）
-        crate::axes_render_elements::render_elements(
-            chart, &self.elements, font_scale, xlog, ylog,
-            x_min, x_max, y_min, y_max,
-        )?;
-
-        if let Some(loc) = &self.legend_loc.clone() {
-            if !self.legend_labels.is_empty() {
-                crate::axes_legend::draw_legend(
-                    chart, Some(loc), &self.legend_labels, font_scale,
-                    x_min, x_max, y_min, y_max,
+            if show_y_minor
+                && let Some(ref ticks) = ymin_filtered
+            {
+                crate::figure::axes_grid::draw_grid_lines(
+                    chart, false, ticks,
+                    grid_style.minor_color, grid_style.minor_lw, minor_ls,
+                    font_scale, x_min, x_max, y_min, y_max,
                 )?;
             }
         }
 
+        // 渲染所有数据元素（线、散点、柱状图、填充、误差棒、饼图等）
+        crate::figure::axes_render_elements::render_elements(
+            chart, &self.elements, font_scale, xlog, ylog,
+            x_min, x_max, y_min, y_max,
+        )?;
+
+        if let Some(loc) = &self.legend_loc.clone()
+            && !self.legend_labels.is_empty()
+        {
+            crate::figure::axes_legend::draw_legend(
+                chart, Some(loc), &self.legend_labels, font_scale,
+                x_min, x_max, y_min, y_max,
+            )?;
+        }
+
         // 渲染 axes 标题（在数据区域上方的 margin_top 区域内）
-        crate::axes_title::draw_title(
+        crate::figure::axes_title::draw_title(
             chart, &self.title, self.title_fontsize, font_scale,
             x_min, x_max, y_min, y_max,
         )?;
@@ -1631,7 +1646,7 @@ impl Axes {
             if lst.is_empty() {
                 return Ok(Vec::new());
             }
-            if let Ok(_) = lst[0].extract::<f64>() {
+            if lst[0].extract::<f64>().is_ok() {
                 let flat: Vec<f64> = lst.iter().map(|item| item.extract::<f64>())
                     .collect::<Result<Vec<f64>, _>>()
                     .map_err(|e| PyValueError::new_err(format!("hist data parse error: {}", e)))?;
@@ -1662,7 +1677,7 @@ impl Axes {
                 Ok(result)
             }
         } else {
-            Ok((0..expected_len).map(|i| default_color_str(i)).collect())
+            Ok((0..expected_len).map(default_color_str).collect())
         }
     }
 }

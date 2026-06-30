@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 
-use crate::colors::{RgbColor, to_plotters_color};
+use crate::core::colors::{RgbColor, to_plotters_color};
 
 /// 过滤掉与主刻度位置重叠的副刻度
 ///
@@ -73,7 +73,7 @@ where
     let ph = dim.1 as f64;
     let x_per_pix_p = (x_max - x_min) / pw;
     let y_per_pix_p = (y_max - y_min) / ph;
-    let mut paths: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut paths: Vec<Vec<(f64, f64)>> = Vec::with_capacity(ticks.len());
     for &tick in ticks {
         if vertical {
             if tick >= x_min && tick <= x_max {
@@ -197,7 +197,7 @@ where
     // 为获得 3 px 视觉效果，需要 half_w_adj ≈ 1.0-1.1
     // 使用 half_w_adj = half_w - 0.5 来精确控制像素宽度
     let half_w_adj = (half_w - 0.5).max(0.0);
-    let fill: ShapeStyle = rgb.filled().into();
+    let fill: ShapeStyle = rgb.filled();
     for win in points.windows(2) {
         let (x1, y1) = win[0];
         let (x2, y2) = win[1];

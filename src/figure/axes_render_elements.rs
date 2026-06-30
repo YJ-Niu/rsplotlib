@@ -13,12 +13,12 @@ use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 
-use crate::axes::scale_font;
-use crate::colormap::{autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color, viridis_color, winter_color};
-use crate::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
-use crate::elements::PlotElement;
-use crate::marker::draw_marker;
-// 注：所有文本直接使用原文，所有间距由 plotters 和字体自身的 h_advance 决定。
+use crate::figure::axes::scale_font;
+use crate::core::colormap::{autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color, viridis_color, winter_color};
+use crate::core::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
+use crate::core::elements::PlotElement;
+use crate::core::marker::draw_marker;
+use crate::utils::font_stack;
 
 /// 绘制单条线段（用于 axhline/axvline/stem 等）
 pub fn draw_single_line<DB: DrawingBackend>(
@@ -70,24 +70,31 @@ where
     for el in elements {
         match el {
             PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, markersize, .. } => {
-                let col = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
+                let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
-                if x.len() >= 1 && x.len() == y.len() {
+                // 折线线宽增加 50%
+                let lw_scaled = *linewidth * 1.5;
+                let linewidth = &lw_scaled;
+                // plotters 的坐标映射对屏幕像素取 floor，会让点整体偏高约 0.5 像素。
+                // 向下偏移半个像素，等效为四舍五入，使线/marker 的中心落在坐标点上。
+                let y_half_px = {
+                    let dim = chart.plotting_area().dim_in_pixel();
+                    let ph = dim.1 as f64;
+                    if ph > 0.0 { (y_max - y_min) / ph * 0.5 } else { 0.0 }
+                };
+                if !x.is_empty() && x.len() == y.len() {
                     // 构建连续有效数据段（被 None 分隔）
                     let mut segments: Vec<Vec<(f64, f64)>> = Vec::new();
                     {
                         let mut current: Vec<(f64, f64)> = Vec::new();
                         for (xv, yv) in x.iter().zip(y.iter()) {
-                            match (xv, yv) {
-                                (Some(xv), Some(yv)) => {
-                                    let txv = tx(*xv);
-                                    let tyv = ty(*yv);
-                                    if txv.is_finite() && tyv.is_finite() {
-                                        current.push((txv, tyv));
-                                        continue;
-                                    }
+                            if let (Some(xv), Some(yv)) = (xv, yv) {
+                                let txv = tx(*xv);
+                                let tyv = ty(*yv);
+                                if txv.is_finite() && tyv.is_finite() {
+                                    current.push((txv, tyv - y_half_px));
+                                    continue;
                                 }
-                                _ => {}
                             }
                             // 遇到 None 或不合法值，结束当前段
                             if current.len() >= 2 {
@@ -106,7 +113,7 @@ where
                         // matplotlib 通过 AA 在 0.5-1.5pt 量级产生柔和的 1-3 像素宽线。
                         // plotters 无 AA，使用四舍五入以获得接近 mpl 的视觉粗细。
                         let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
-                        let _style: ShapeStyle = rgb.stroke_width(lw_px).into();
+                        let _style: ShapeStyle = rgb.stroke_width(lw_px);
                         // 对于虚线样式，使用分段绘制模拟
                         if linestyle == "--" {
                             let dash_len = *linewidth * 4.0;
@@ -257,71 +264,34 @@ where
                                 }
                             }
                         } else {
-                            // 实线：使用 plotters 原生 stroke_width
-                            // plotters BitMapBackend stroke_width(n) 实际渲染近似 n-1 像素（带 AA 边框）。
-                            // matplotlib 通过 AA 在 1pt 量级产生 2-3 像素宽线。
-                            // 公式: stroke = max(1, lw_px - 1) 是最接近 mpl 的折中：
-                            //   lw=0.5: lw_px=1, stroke=1 → 1px (mpl 1px) ✓
-                            //   lw=1.0: lw_px=2, stroke=1 → 1px (mpl 3px) - 略薄
-                            //   lw=1.5: lw_px=3, stroke=2 → 3-5px (mpl 4px) ✓
-                            //   lw=2.0: lw_px=4, stroke=3 → 5-7px (mpl 5px) ✓
-                            //   lw=3.0: lw_px=6, stroke=5 → 9-11px (mpl 8px) ✓
-                            let stroke_w = (lw_px as i32).max(1) as u32;
-                            let style_native: ShapeStyle = rgb.stroke_width(stroke_w).into();
-                            // 像素中心对齐修正：plotters 在渲染水平线时，线中心对应像素下边缘，
-                            // 而 matplotlib 使用像素中心。这导致 rsp 的水平线比 mpl 偏高 1 像素。
-                            // 修正方法：将所有 y 坐标向下偏移半像素（half a pixel）。
-                            let area = chart.plotting_area();
-                            let dim = area.dim_in_pixel();
-                            let ph = dim.1 as f64;
-                            if ph > 0.0 {
-                                let y_per_pix = (y_max - y_min) / ph;
-                                let y_shift = y_per_pix * 0.5;
-                                let shifted_points: Vec<(f64, f64)> = points.iter()
-                                    .map(|(px, py)| (*px, *py - y_shift))
-                                    .collect();
-                                chart.draw_series(std::iter::once(PathElement::new(shifted_points, style_native)))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
-                            } else {
-                                chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
-                            }
-                            // 端点形状 (solid_capstyle)：
-                            // plotters 0.3.7 原生不支持 linecap，因此手动在首末端绘制
-                            // 装饰图形。cap 只与有线段（marker 为空）的实线情况相关，
-                            // 虚线/点线场景下端点不连续，跳过以免破坏节奏。
-                            //
-                            // 重要：cap 端点必须与已绘制的线段几何对齐：
-                            //   1) 实际渲染线宽 = stroke_w - 1 像素，cap 直径等于这个值
-                            //   2) 实线已经过 0.5 像素 y 中心对齐，cap 也要应用同样的 y_shift
-                            //   3) cap 圆心 = 线段端点（与 shift 后的位置一致）
-                            if linestyle == "-" && marker.as_ref().map_or(true, |m| m.is_empty()) {
-                                // plotters BitMapBackend 的 stroke_width(w) 实际渲染为 2w-1 像素
-                                // （中间 w-1 像素实色 + 两侧各 0.5 像素 AA），所以端点圆盘的
-                                // 直径必须与线段**实际渲染宽度**严格相等，才能"完全契合"。
-                                // 端点圆心 = 像素中心对齐后的线段端点（与线段几何一致）。
+                            // 实线：使用 plotters 原生 stroke_width。
+                            // points 已在构造时整体下移半像素（见 y_half_px），中心已对齐坐标点。
+                            // plotters 把宽线扩成多边形，半宽 r = stroke_w/2，顶点取整后：
+                            //   stroke_w 为偶数 → 像素带 [Y-r, Y+r] 关于 Y 对称，中心恰在坐标点；
+                            //   stroke_w 为奇数 → 截断后变为 [Y-r-0.5, Y+r-0.5]，中心偏上 0.5 像素，
+                            //                     且偏移量随线宽奇偶变化，造成"线宽不同中心不同"。
+                            // 因此当 stroke_w>1 时强制取偶数，保证任意线宽下线的中心都落在坐标点上。
+                            let stroke_w0 = (lw_px as i32 - 1).max(1) as u32;
+                            let stroke_w = if stroke_w0 > 1 && stroke_w0 % 2 == 1 { stroke_w0 + 1 } else { stroke_w0 };
+                            let style_native: ShapeStyle = rgb.stroke_width(stroke_w);
+                            chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
+                                .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
+                            // 端点形状 (solid_capstyle)：plotters 0.3.7 不支持 linecap，手动补端点圆盘。
+                            // points 已含半像素偏移，cap 圆心与端点重合，cap_y_shift 取 0。
+                            if linestyle == "-" && marker.as_ref().is_none_or(|m| m.is_empty()) {
                                 let cap_lw_px = (stroke_w as i32).max(1) as f64; // 与线段渲染宽度一致
-                                // **关键：cap_y_shift 必须与上面的 y_shift 严格相同**，
-                                // 这样 cap 圆心和线段端点经过 plotters coord.translate 时
-                                // 走完全相同的截断路径，得到的 (i32, i32) 屏幕像素完全一致。
-                                // 之前的 +0.2 是临时 hack，会让 cap 偏移 0.2/y_per_pix 像素。
-                                let cap_y_shift = {
-                                    let area2 = chart.plotting_area();
-                                    let dim2 = area2.dim_in_pixel();
-                                    let ph2 = dim2.1 as f64;
-                                    if ph2 > 0.0 { (y_max - y_min) / ph2 * 0.5 } else { 0.0 }
-                                };
-                                draw_solid_caps(chart, &points, &rgb, solid_capstyle, *linewidth, font_scale,
-                                                x_min, x_max, y_min, y_max, cap_lw_px, cap_y_shift)?;
+                                draw_solid_caps(chart, points, &rgb, solid_capstyle, *linewidth, font_scale,
+                                                x_min, x_max, y_min, y_max, cap_lw_px, 0.0)?;
                             }
                         }
                         }
                     }
                 }
-                if let Some(marker_name) = marker {
-                    if !marker_name.is_empty() && x.len() == y.len() {
-                        let col2 = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
-                        let rgb = to_plotters_color(col2);
+                if let Some(marker_name) = marker
+                    && !marker_name.is_empty() && x.len() == y.len()
+                {
+                    let col2 = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
+                    let rgb = to_plotters_color(col2);
                         // matplotlib markersize 单位是 points（近似直径）；直径(像素) = markersize * dpi/72
                         // 在 144dpi 下，markersize=6 (mpl 默认) 直径约为 12 像素。
                         // "." 是 matplotlib 的 1 像素点 marker，需要保持极小以免覆盖线条
@@ -344,18 +314,17 @@ where
                         for (xv, yv) in x.iter().zip(y.iter()) {
                             if let (Some(xv), Some(yv)) = (xv, yv) {
                                 let txv = tx(*xv);
-                                let tyv = ty(*yv);
+                                let tyv = ty(*yv) - y_half_px;
                                 if txv.is_finite() && tyv.is_finite() {
                                     draw_marker(chart, marker_name, txv, tyv, marker_size, rgb)
                                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw marker: {}", e)))?;
                                 }
                             }
                         }
-                    }
                 }
             }
             PlotElement::Scatter { x, y, s, c, marker, color_idx, .. } => {
-                let col = parse_color(c, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
+                let col = parse_color(c, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
                 let size = s.sqrt() * 0.4;
                 for (&xv, &yv) in x.iter().zip(y.iter()) {
@@ -375,9 +344,9 @@ where
                     if !txv.is_finite() || !tyv.is_finite() { continue; }
                     let c_str = c_list.as_ref().and_then(|c| c.get(i).cloned()).unwrap_or_default();
                     let col = if c_str.is_empty() {
-                        parse_color("", *color_idx).unwrap_or_else(|_| default_color(*color_idx + i))
+                        parse_color("", *color_idx).unwrap_or(default_color(*color_idx + i))
                     } else {
-                        parse_color(&c_str, *color_idx + i).unwrap_or_else(|_| default_color(*color_idx + i))
+                        parse_color(&c_str, *color_idx + i).unwrap_or(default_color(*color_idx + i))
                     };
                     let rgb = to_plotters_color(col);
                     let size = s_list.as_ref()
@@ -389,9 +358,9 @@ where
                 }
             }
             PlotElement::Bar { x, height, width, color, color_idx, .. } => {
-                let col = parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
+                let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
-                let fill_style: ShapeStyle = rgb.filled().into();
+                let fill_style: ShapeStyle = rgb.filled();
                 for (&xv, &h) in x.iter().zip(height.iter()) {
                     let txv = tx(xv);
                     let th = ty(h);
@@ -407,7 +376,7 @@ where
             PlotElement::BarH { y, width, height, color, color_idx, .. } => {
                 let c = if color.is_empty() { default_color(*color_idx) } else { parse_color(color, *color_idx)? };
                 let rgb = to_plotters_color(c);
-                let fill_style: ShapeStyle = rgb.filled().into();
+                let fill_style: ShapeStyle = rgb.filled();
                 for (&yv, &wv) in y.iter().zip(width.iter()) {
                     let tyv = ty(yv);
                     let twv = tx(wv);
@@ -445,10 +414,10 @@ where
                 for (di, dataset) in data_all.iter().enumerate() {
                     if dataset.is_empty() { continue; }
                     let col_str = colors.get(di).map(|s| s.as_str()).unwrap_or("");
-                    let col = parse_color(col_str, *color_idx + di).unwrap_or_else(|_| default_color(*color_idx + di));
+                    let col = parse_color(col_str, *color_idx + di).unwrap_or(default_color(*color_idx + di));
                     let rgb = to_plotters_color(col);
-                    let fill_style: ShapeStyle = rgb.mix(*alpha).filled().into();
-                    let outline_style: ShapeStyle = rgb.mix(*alpha).stroke_width(1).into();
+                    let fill_style: ShapeStyle = rgb.mix(*alpha).filled();
+                    let outline_style: ShapeStyle = rgb.mix(*alpha).stroke_width(1);
                     let mut counts = vec![0usize; effective_bins];
                     for &val in dataset {
                         if val < global_min || val > global_max { continue; }
@@ -491,9 +460,9 @@ where
                         let rgb = match cmap.as_str() {
                             "gray" | "grey" => { let v = (normalized * 255.0) as u8; RGBColor(v, v, v) }
                             "hot" => {
-                                let r = (normalized * 3.0).min(1.0).max(0.0);
-                                let g = (normalized * 3.0 - 1.0).min(1.0).max(0.0);
-                                let b = (normalized * 3.0 - 2.0).min(1.0).max(0.0);
+                                let r = (normalized * 3.0).clamp(0.0, 1.0);
+                                let g = (normalized * 3.0 - 1.0).clamp(0.0, 1.0);
+                                let b = (normalized * 3.0 - 2.0).clamp(0.0, 1.0);
                                 RGBColor((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
                             }
                             "plasma" => plasma_color(normalized),
@@ -517,15 +486,14 @@ where
                 let txv = tx(*x);
                 let tyv = ty(*y);
                 if !txv.is_finite() || !tyv.is_finite() { continue; }
-                let fs = scale_font(*fontsize as f64, font_scale);
-                let family_name = font_family.as_deref().unwrap_or("sans-serif");
-                let font: FontDesc = (family_name, fs).into();
+                let fs = scale_font(*fontsize, font_scale);
+                let family_name = font_stack::resolve_font_family(text, font_family.as_deref());
+                let font: FontDesc = (family_name.as_str(), fs).into();
                 let colored_font = font.color(&to_plotters_color(*color));
                 // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
                 // 与 axhline/axvline 在同一坐标时的视觉位置一致。
-                let text_style: TextStyle = colored_font
-                    .pos(Pos::new(HPos::Left, VPos::Center))
-                    .into();
+                let text_style = colored_font
+                    .pos(Pos::new(HPos::Left, VPos::Center));
                 chart.draw_series(std::iter::once(plotters::element::Text::new(
                     text.to_string(),
                     (txv, tyv),
@@ -535,20 +503,20 @@ where
             PlotElement::HLine { y, color, linewidth, color_idx, .. } => {
                 let tyv = ty(*y);
                 if !tyv.is_finite() { continue; }
-                let col = parse_color(color, *color_idx).unwrap_or_else(|_| RgbColor(0, 0, 0));
+                let col = parse_color(color, *color_idx).unwrap_or(RgbColor(0, 0, 0));
                 draw_single_line(chart, x_min, tyv, x_max, tyv, col, *linewidth, font_scale)?;
             }
             PlotElement::VLine { x, color, linewidth, color_idx, .. } => {
                 let txv = tx(*x);
                 if !txv.is_finite() { continue; }
-                let col = parse_color(color, *color_idx).unwrap_or_else(|_| RgbColor(0, 0, 0));
+                let col = parse_color(color, *color_idx).unwrap_or(RgbColor(0, 0, 0));
                 draw_single_line(chart, txv, y_min, txv, y_max, col, *linewidth, font_scale)?;
             }
             PlotElement::HSpan { y1, y2, color, alpha } => {
                 let ty1 = ty(*y1);
                 let ty2 = ty(*y2);
                 if !ty1.is_finite() || !ty2.is_finite() { continue; }
-                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(128, 128, 128));
+                let col = parse_color(color, 0).unwrap_or(RgbColor(128, 128, 128));
                 let rgb = to_plotters_color(col);
                 let top = ty1.max(ty2);
                 let bottom = ty1.min(ty2);
@@ -561,7 +529,7 @@ where
                 let tx1 = tx(*x1);
                 let tx2 = tx(*x2);
                 if !tx1.is_finite() || !tx2.is_finite() { continue; }
-                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(128, 128, 128));
+                let col = parse_color(color, 0).unwrap_or(RgbColor(128, 128, 128));
                 let rgb = to_plotters_color(col);
                 let left = tx1.min(tx2);
                 let right = tx1.max(tx2);
@@ -571,7 +539,7 @@ where
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw axvspan: {}", e)))?;
             }
             PlotElement::AxLine { xy1, xy2, color, linestyle, linewidth } => {
-                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(0, 0, 0));
+                let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let tx1 = tx(xy1.0);
                 let ty1 = ty(xy1.1);
                 let tx2 = tx(xy2.0);
@@ -582,7 +550,7 @@ where
                 }
             }
             PlotElement::Arrow { x1, y1, x2, y2, color, linewidth, head_size } => {
-                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(0, 0, 0));
+                let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let tx1 = tx(*x1);
                 let ty1 = ty(*y1);
                 let tx2 = tx(*x2);
@@ -617,7 +585,7 @@ where
                     let angle_rad = angle.to_radians();
                     let end_angle = current_angle + angle_rad;
                     let col = if let Some(ref pc) = pie_colors {
-                        let ci = parse_color(pc.get(i).unwrap_or(&""), i).unwrap_or_else(|_| default_color(i));
+                        let ci = parse_color(pc.get(i).unwrap_or(&""), i).unwrap_or(default_color(i));
                         to_plotters_color(ci)
                     } else {
                         to_plotters_color(default_color(i))
@@ -632,19 +600,20 @@ where
                         vertices, col.mix(0.85).filled(),
                     ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie: {}", e)))?;
                     let mid_angle = current_angle + angle_rad / 2.0;
-                    if let Some(lbls) = labels {
-                        if let Some(l) = lbls.get(i) {
-                            let label_r = 1.3;
-                            let lx = mid_angle.cos() * label_r;
-                            let ly = mid_angle.sin() * label_r;
-                            // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
-                            let pie_label_style: TextStyle = FontDesc::from(("sans-serif", scale_font(12.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
-                            chart.draw_series(std::iter::once(plotters::element::Text::new(
-                                l.to_string(), (lx, ly), pie_label_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie label: {}", e)))?;
-                        }
+                    if let Some(lbls) = labels
+                        && let Some(l) = lbls.get(i)
+                    {
+                        let label_r = 1.3;
+                        let lx = mid_angle.cos() * label_r;
+                        let ly = mid_angle.sin() * label_r;
+                        // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
+                        let pie_family = font_stack::select_family(l);
+                        let pie_label_style: TextStyle = FontDesc::from((pie_family.as_str(), scale_font(12.0, font_scale)))
+                            .color(&BLACK)
+                            .pos(Pos::new(HPos::Center, VPos::Center));
+                        chart.draw_series(std::iter::once(plotters::element::Text::new(
+                            l.to_string(), (lx, ly), pie_label_style,
+                        ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie label: {}", e)))?;
                     }
                     if let Some(fmt) = autopct {
                         let pct = val / total * 100.0;
@@ -658,7 +627,8 @@ where
                         let text_r = 0.7;
                         let tx = mid_angle.cos() * text_r;
                         let ty = mid_angle.sin() * text_r;
-                        let autopct_style: TextStyle = FontDesc::from(("sans-serif", scale_font(11.0, font_scale)))
+                        let autopct_family = font_stack::select_family(&text);
+                        let autopct_style: TextStyle = FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))
                             .color(&BLACK)
                             .pos(Pos::new(HPos::Center, VPos::Center));
                         chart.draw_series(std::iter::once(plotters::element::Text::new(
@@ -669,7 +639,7 @@ where
                 }
             }
             PlotElement::FillBetween { x, y1, y2, color, alpha, .. } => {
-                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(0, 128, 0));
+                let col = parse_color(color, 0).unwrap_or(RgbColor(0, 128, 0));
                 let rgb = to_plotters_color(col);
                 if x.len() != y1.len() || x.is_empty() { continue; }
                 let mut points: Vec<(f64, f64)> = Vec::with_capacity(x.len() * 2);
@@ -698,7 +668,7 @@ where
                         .and_then(|c| c.get(si).cloned())
                         .unwrap_or_default();
                     let col = parse_color(&color_str, 0)
-                        .unwrap_or_else(|_| default_color(si));
+                        .unwrap_or(default_color(si));
                     let rgb = to_plotters_color(col);
                     // 构造当前层的上下边界点
                     let mut points: Vec<(f64, f64)> = Vec::with_capacity(x.len() * 2);
@@ -725,9 +695,9 @@ where
             }
             PlotElement::ErrorBar { x, y, yerr, xerr, fmt, color, capsize, .. } => {
                 let idx = 0;
-                let col = parse_color(color, idx).unwrap_or_else(|_| default_color(idx));
+                let col = parse_color(color, idx).unwrap_or(default_color(idx));
                 let rgb = to_plotters_color(col);
-                let line_style: ShapeStyle = rgb.stroke_width(1).into();
+                let line_style: ShapeStyle = rgb.stroke_width(1);
                 let cap_half = capsize / 2.0;
                 for (i, (&xv, &yv)) in x.iter().zip(y.iter()).enumerate() {
                     let txv = tx(xv);
@@ -778,7 +748,7 @@ where
                 let baseline = ty(0.0);
                 if linefmt == "-" || linefmt.is_empty() {
                     let lw_px = (1.0 * font_scale).round().max(1.0) as u32;
-                    let line_style: ShapeStyle = rgb.stroke_width(lw_px).into();
+                    let line_style: ShapeStyle = rgb.stroke_width(lw_px);
                     for (&xv, &yv) in x.iter().zip(y.iter()) {
                         let txv = tx(xv);
                         let tyv = ty(yv);
@@ -805,7 +775,7 @@ where
             }
             PlotElement::Step { x, y, where_, color, linestyle: _, linewidth, .. } => {
                 let idx = 0;
-                let col = parse_color(color, idx).unwrap_or_else(|_| default_color(idx));
+                let col = parse_color(color, idx).unwrap_or(default_color(idx));
                 if x.len() < 2 || x.len() != y.len() { continue; }
                 let mut points = Vec::new();
                 match where_.as_str() {
@@ -852,7 +822,7 @@ where
                 }
                 if points.len() < 2 { continue; }
                 let lw_px = ((*linewidth) * font_scale).round().max(1.0) as u32;
-                let style: ShapeStyle = to_plotters_color(col).stroke_width(lw_px).into();
+                let style: ShapeStyle = to_plotters_color(col).stroke_width(lw_px);
                 chart.draw_series(LineSeries::new(points, style))
                     .map_err(|e| PyRuntimeError::new_err(format!("Step draw: {}", e)))?;
             }
@@ -889,8 +859,8 @@ where
                     if !tq1.is_finite() || !tq3.is_finite() || !tmed.is_finite() || !tlower.is_finite() || !tupper.is_finite() { continue; }
                     let cx = (i + 1) as f64;
                     let col = to_plotters_color(default_color(i));
-                    let fill_style: ShapeStyle = col.mix(0.3).filled().into();
-                    let line_style: ShapeStyle = col.stroke_width(2).into();
+                    let fill_style: ShapeStyle = col.mix(0.3).filled();
+                    let line_style: ShapeStyle = col.stroke_width(2);
                     chart.draw_series(std::iter::once(PathElement::new(
                         vec![(cx, tlower), (cx, tupper)], line_style,
                     ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot whisker: {}", e)))?;
@@ -910,20 +880,21 @@ where
                     chart.draw_series(std::iter::once(PathElement::new(
                         vec![(cx - box_width / 4.0, tupper), (cx + box_width / 4.0, tupper)], line_style,
                     ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot cap: {}", e)))?;
-                    if let Some(lbls) = labels {
-                        if let Some(l) = lbls.get(i) {
-                            let box_label_style: TextStyle = FontDesc::from(("sans-serif", scale_font(11.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
-                            chart.draw_series(std::iter::once(plotters::element::Text::new(
-                                l.to_string(), (cx, -0.3), box_label_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot label: {}", e)))?;
-                        }
+                    if let Some(lbls) = labels
+                        && let Some(l) = lbls.get(i)
+                    {
+                        let box_family = font_stack::select_family(l);
+                        let box_label_style: TextStyle = FontDesc::from((box_family.as_str(), scale_font(11.0, font_scale)))
+                            .color(&BLACK)
+                            .pos(Pos::new(HPos::Center, VPos::Center));
+                        chart.draw_series(std::iter::once(plotters::element::Text::new(
+                            l.to_string(), (cx, -0.3), box_label_style,
+                        ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot label: {}", e)))?;
                     }
                 }
             }
             PlotElement::Annotate { text, xy, xytext, fontsize, color } => {
-                let col = parse_color(color, 0).unwrap_or_else(|_| RgbColor(0, 0, 0));
+                let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let rgb = to_plotters_color(col);
                 let (txy_x, txy_y) = xytext.unwrap_or((xy.0, xy.1));
                 let txy_x = tx(txy_x);
@@ -931,11 +902,12 @@ where
                 let txy_xy_x = tx(xy.0);
                 let txy_xy_y = ty(xy.1);
                 if !txy_x.is_finite() || !txy_y.is_finite() || !txy_xy_x.is_finite() || !txy_xy_y.is_finite() { continue; }
-                let arrow_style: ShapeStyle = rgb.stroke_width(1).into();
+                let arrow_style: ShapeStyle = rgb.stroke_width(1);
                 chart.draw_series(std::iter::once(PathElement::new(
                     vec![(txy_x, txy_y), (txy_xy_x, txy_xy_y)], arrow_style,
                 ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate arrow: {}", e)))?;
-                let anno_style: TextStyle = FontDesc::from(("sans-serif", scale_font(*fontsize, font_scale)))
+                let anno_family = font_stack::select_family(text);
+                let anno_style: TextStyle = FontDesc::from((anno_family.as_str(), scale_font(*fontsize, font_scale)))
                     .color(&rgb)
                     .pos(Pos::new(HPos::Center, VPos::Center));
                 chart.draw_series(std::iter::once(plotters::element::Text::new(

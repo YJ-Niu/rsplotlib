@@ -10,8 +10,8 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, VPos, Pos};
 
-use crate::axes::scale_font;
-// 注：标题直接使用原始文本，所有间距由 plotters 和字体自身的 h_advance 决定。
+use crate::figure::axes::scale_font;
+use crate::utils::font_stack;
 
 /// 渲染 axes 标题
 ///
@@ -47,10 +47,11 @@ where
     // 使用用户指定的 fontsize；若未指定则取 matplotlib 默认 12pt
     let title_size = if title_fontsize > 0.0 { title_fontsize } else { 12.0 };
     // plotters 的 ab_glyph 字体可见字符高度约 0.94em，而 matplotlib DejaVu Sans 约 1.13em。
-    // 为匹配 matplotlib 视觉高度，乘以 1.10 补偿。
-    let font: FontDesc = ("sans-serif", scale_font(title_size * 1.10, font_scale)).into();
+    // 为匹配 matplotlib 视觉高度，乘以 1.40 补偿。
+    let title_family = font_stack::select_family(title);
+    let font: FontDesc = (title_family.as_str(), scale_font(title_size * 1.25, font_scale)).into();
     let colored_font = font.color(&BLACK);
-    let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom)).into();
+    let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom));
     chart.draw_series(std::iter::once(plotters::element::Text::new(
         title.to_string(),
         (title_x, title_y),

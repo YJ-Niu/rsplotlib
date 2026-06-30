@@ -28,7 +28,11 @@ Thumbs.db
 
 # Data / plots
 testing/
+test/
+test*.py
+*.png
 main*.py
+debug.txt
 out/
 wheelhouse/
 N237S NB.csv

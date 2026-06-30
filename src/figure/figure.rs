@@ -1,13 +1,18 @@
 use std::sync::Mutex;
-use std::io::BufWriter;
 use std::fs::File;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 use plotters::prelude::*;
 
-use crate::axes::Axes;
+use crate::figure::axes::Axes;
+use crate::utils::font_stack;
 // colors not needed directly in this module
+
+/// 默认图形尺寸（英寸），与 matplotlib 默认一致 (12.0, 9.0)
+pub const DEFAULT_FIGSIZE: (f64, f64) = (12.0, 9.0);
+/// 默认 DPI
+pub const DEFAULT_DPI: f64 = 100.0;
 
 pub(crate) static CURRENT_FIGURE: Mutex<Option<Py<Figure>>> = Mutex::new(None);
 
@@ -46,10 +51,18 @@ pub struct Figure {
     pub subplot_top: f64,
 }
 
+impl Default for Figure {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl Figure {
     #[new]
     pub fn new() -> Self {
+        let w = (DEFAULT_FIGSIZE.0 * DEFAULT_DPI).round() as u32;
+        let h = (DEFAULT_FIGSIZE.1 * DEFAULT_DPI).round() as u32;
         // matplotlib 兼容的默认 subplots_adjust 边距
         // matplotlib 默认: left=0.125, right=0.9, bottom=0.11, top=0.88
         Figure {
@@ -57,9 +70,9 @@ impl Figure {
             nrows: 1,
             ncols: 1,
             suptitle: String::new(),
-            width: 640,
-            height: 480,
-            dpi: 100.0,
+            width: w,
+            height: h,
+            dpi: DEFAULT_DPI,
             axes_positions: Vec::new(),
             facecolor: "white".to_string(),
             subplot_left: 0.125,
@@ -118,7 +131,7 @@ impl Figure {
     #[pyo3(signature = (spec))]
     #[allow(unused_variables)]
     fn add_subplot(&mut self, py: Python, spec: &Bound<'_, PyAny>) -> PyResult<Py<Axes>> {
-        let (left, right, bottom, top) = if let Ok(_) = spec.getattr("rowStart") {
+        let (left, right, bottom, top) = if spec.getattr("rowStart").is_ok() {
             let num_rows: f64 = spec.getattr("numRows")?.extract::<i32>().map(|v| v as f64).unwrap_or(100.0);
             let num_cols: f64 = spec.getattr("numCols")?.extract::<i32>().map(|v| v as f64).unwrap_or(100.0);
             let row_start: f64 = spec.getattr("rowStart")?.extract::<i32>().map(|v| v as f64).unwrap_or(0.0);
@@ -137,7 +150,7 @@ impl Figure {
         };
         let ax = Axes::new();
         let ax_py = Py::new(py, ax)?;
-        crate::pyfuncs::init_axes_self_py(&ax_py, py);
+        crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
         self.axes_positions.push((left, right, bottom, top));
         Ok(ax_py)
@@ -158,16 +171,12 @@ impl Figure {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
             self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
 
-            // 写入 PNG 并嵌入 DPI 信息
+            // 写入 PNG 并嵌入 DPI 信息（PNG encoder 内部已做缓冲，无需额外 BufWriter）
             let file = File::create(filename)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
-            let ref mut w = BufWriter::new(file);
-            let mut encoder = png::Encoder::new(w, self.width, self.height);
+            let mut encoder = png::Encoder::new(file, self.width, self.height);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
-            // png 0.18 API:
-            //   - Compression: 用 High（最接近旧版 Best 的最高档）
-            //   - Filter:       用 Filter::Adaptive（替代旧版 AdaptiveFilterType::Adaptive）
             encoder.set_compression(png::Compression::High);
             encoder.set_filter(png::Filter::Adaptive);
             let ppm = (used_dpi / 0.0254).round() as u32;
@@ -195,8 +204,8 @@ impl Figure {
                 // plotters SVGBackend 输出 width="pixel_width" height="pixel_height"
                 // 替换为英寸单位
                 let content = content
-                    .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{}in\"", format!("{:.4}", width_in)), 1)
-                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{}in\"", format!("{:.4}", height_in)), 1);
+                    .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{:.4}in\"", width_in), 1)
+                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", height_in), 1);
                 let _ = std::fs::write(filename, content);
             }
             Ok(())
@@ -245,7 +254,9 @@ impl Figure {
         let _ncols = self.ncols;
 
         if !self.suptitle.is_empty() {
-            let _ = root.titled(&self.suptitle, ("sans-serif", 21.0 * font_scale));
+            let sup_family = font_stack::select_family(&self.suptitle);
+            let sup_size = 21.0 * 1.30 * font_scale;
+            let _ = root.titled(&self.suptitle, (sup_family.as_str(), sup_size));
         }
 
         let total_w = actual_w as f64;
@@ -273,10 +284,10 @@ impl Figure {
             let plot_bottom_frac = bottom * usable_h + margin_b;
             let plot_top_frac = top * usable_h + margin_b;
 
-            let x0 = (plot_left * total_w) as f64;
-            let y0 = ((1.0 - plot_top_frac) * total_h) as f64;
-            let sub_w = ((plot_right - plot_left) * total_w) as f64;
-            let sub_h = ((plot_top_frac - plot_bottom_frac) * total_h) as f64;
+            let x0 = plot_left * total_w;
+            let y0 = (1.0 - plot_top_frac) * total_h;
+            let sub_w = (plot_right - plot_left) * total_w;
+            let sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
 
             if sub_w <= 0.0 || sub_h <= 0.0 {
                 drop(ax);
@@ -284,7 +295,7 @@ impl Figure {
             }
 
             // 计算 tick/label 区域大小
-            let tick_label_size = (ax.tick_labelsize * font_scale).ceil() as u32;
+            let tick_label_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale).ceil() as u32;
 
             // 估算 y/x tick label 区域大小（容纳最长的 tick 数字 + 少量 padding）
             let y_tick_area = tick_label_size + 6;
@@ -349,12 +360,12 @@ impl Figure {
             // 限制扩展不超过 figure 边界（最左侧/最上侧子图可扩展到边）
             let chart_x0 = (x0 - y_label_actual as f64).max(0.0);
             let chart_y0 = (y0 - margin_top_actual as f64).max(0.0);
-            let chart_w = (sub_w + y_label_actual as f64) as f64;
-            let chart_h = (sub_h + x_label_actual as f64) as f64;
+            let chart_w = sub_w + y_label_actual as f64;
+            let chart_h = sub_h + x_label_actual as f64;
 
             // 防止超出 figure 右/下边界
-            let chart_w = chart_w.min((total_w - chart_x0) as f64).max(1.0);
-            let chart_h = chart_h.min((total_h - chart_y0) as f64).max(1.0);
+            let chart_w = chart_w.min(total_w - chart_x0).max(1.0);
+            let chart_h = chart_h.min(total_h - chart_y0).max(1.0);
 
             let chart_area = root.clone().shrink(
                 (chart_x0 as i32, chart_y0 as i32),
@@ -389,7 +400,7 @@ impl Figure {
                 let (ux_min, ux_max) = if twin.is_twin_x { (tx_min, tx_max) } else { (x_min, x_max) };
                 let (uy_min, uy_max) = if twin.is_twin_y { (ty_min, ty_max) } else { (y_min, y_max) };
                 // twin axes 使用与主轴相同的 chart_area，但 label area 在右侧/顶部
-                let twin_tick_size = (twin.tick_labelsize * font_scale).ceil() as u32;
+                let twin_tick_size = crate::figure::axes::scale_font(twin.tick_labelsize, font_scale).ceil() as u32;
                 let twin_y_label_area = twin_tick_size + 6;
                 let twin_x_label_area = twin_tick_size + 6;
                 let mut twin_chart = ChartBuilder::on(&chart_area)
@@ -411,4 +422,16 @@ impl Figure {
 
         Ok(())
     }
+}
+
+/// 返回默认图形尺寸 (width, height)
+#[pyfunction]
+pub fn get_default_figsize() -> (f64, f64) {
+    DEFAULT_FIGSIZE
+}
+
+/// 返回默认 DPI
+#[pyfunction]
+pub fn get_default_dpi() -> f64 {
+    DEFAULT_DPI
 }

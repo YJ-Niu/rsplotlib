@@ -4,9 +4,9 @@
 """
 
 # 使用别名导入原始模块，避免与包装函数重名
-from . import rsplotlib as _rsplotlib
+from .. import rsplotlib as _rsplotlib
 # 导入原始类
-from .rsplotlib import Figure, Axes
+from ..rsplotlib import Figure, Axes
 import warnings as _warnings
 
 
@@ -230,7 +230,7 @@ def imshow(x, cmap='gray', aspect='auto'):
 
 def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians=True):
     """绘制小提琴图
-    
+
     Args:
         dataset: 数据集，可以是数组列表或 2D 数组
         positions: 位置数组 (默认: None)
@@ -247,7 +247,7 @@ def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians
 
 def hexbin(x, y, gridsize=100, cmap='hot', bins='log', mincnt=1):
     """绘制六边形分箱图
-    
+
     Args:
         x: x 坐标数组
         y: y 坐标数组
@@ -265,7 +265,7 @@ def hexbin(x, y, gridsize=100, cmap='hot', bins='log', mincnt=1):
 
 def contour(X, Y, Z, levels=None, colors=None, linestyles=None):
     """绘制等高线图
-    
+
     Args:
         X: x 坐标网格
         Y: y 坐标网格
@@ -283,7 +283,7 @@ def contour(X, Y, Z, levels=None, colors=None, linestyles=None):
 
 def contourf(X, Y, Z, levels=None, cmap='coolwarm', alpha=1.0):
     """绘制填充等高线图
-    
+
     Args:
         X: x 坐标网格
         Y: y 坐标网格
@@ -310,7 +310,7 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
         alpha: 透明度 (默认: 1.0)
     """
     y_data = list(args) if args else []
-    if len(y_data) == 1 and isinstance(y_data[0], (list, tuple)) and y_data[0] and isinstance(y_data[0][0], (list, tuple)):
+    if y_data and len(y_data) == 1 and isinstance(y_data[0], (list, tuple)) and isinstance(y_data[0][0], (list, tuple)):
         y_data = list(y_data[0])
     return _rsplotlib.stackplot(_to_list(x), y_data, labels, colors, alpha)
 
@@ -319,7 +319,7 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
 
 def text(x, y, text, fontsize=None, color=None):
     """添加文本
-    
+
     Args:
         x: x 位置
         y: y 位置
@@ -332,7 +332,7 @@ def text(x, y, text, fontsize=None, color=None):
 
 def axhline(y=None, color=None, linestyle=None, linewidth=None):
     """添加水平参考线
-    
+
     Args:
         y: y 位置 (默认: None, 0)
         color: 颜色 (默认: None)
@@ -344,7 +344,7 @@ def axhline(y=None, color=None, linestyle=None, linewidth=None):
 
 def axvline(x=None, color=None, linestyle=None, linewidth=None):
     """添加垂直参考线
-    
+
     Args:
         x: x 位置 (默认: None, 0)
         color: 颜色 (默认: None)
@@ -413,7 +413,7 @@ def title(text):
 
 def grid(visible=True):
     """显示/隐藏网格
-    
+
     Args:
         visible: 是否显示网格 (默认: True)
     """
@@ -422,7 +422,7 @@ def grid(visible=True):
 
 def legend(loc='best'):
     """显示图例
-    
+
     Args:
         loc: 位置 (默认: 'best', 可选: 'upper right', 'upper left',
               'lower right', 'lower left', 'upper center')
@@ -432,7 +432,7 @@ def legend(loc='best'):
 
 def xlim(left, right):
     """设置 x 轴范围
-    
+
     Args:
         left: 左边界
         right: 右边界
@@ -442,7 +442,7 @@ def xlim(left, right):
 
 def ylim(bottom, top):
     """设置 y 轴范围
-    
+
     Args:
         bottom: 下边界
         top: 上边界
@@ -452,7 +452,7 @@ def ylim(bottom, top):
 
 def xticks(ticks=None, labels=None):
     """设置 x 轴刻度
-    
+
     Args:
         ticks: 刻度位置列表 (默认: None)
         labels: 刻度标签列表 (默认: None)
@@ -462,7 +462,7 @@ def xticks(ticks=None, labels=None):
 
 def yticks(ticks=None, labels=None):
     """设置 y 轴刻度
-    
+
     Args:
         ticks: 刻度位置列表 (默认: None)
         labels: 刻度标签列表 (默认: None)
@@ -474,11 +474,11 @@ def yticks(ticks=None, labels=None):
 
 def subplots(nrows=1, ncols=1):
     """创建子图网格
-    
+
     Args:
         nrows: 行数 (默认: 1)
         ncols: 列数 (默认: 1)
-    
+
     Returns:
         tuple: (Figure, axes_list)
     """
@@ -487,12 +487,12 @@ def subplots(nrows=1, ncols=1):
 
 def subplot(nrows, ncols, index):
     """创建单个子图
-    
+
     Args:
         nrows: 总行数
         ncols: 总列数
         index: 子图索引 (从1开始)
-    
+
     Returns:
         Axes: 创建的子图
     """
@@ -506,7 +506,7 @@ def tight_layout():
 
 def set_size(width, height):
     """设置图形尺寸
-    
+
     Args:
         width: 宽度 (像素)
         height: 高度 (像素)
@@ -516,7 +516,7 @@ def set_size(width, height):
 
 def twinx():
     """创建共享 x 轴的双 y 轴
-    
+
     Returns:
         Axes: 新的 y 轴
     """
@@ -525,7 +525,7 @@ def twinx():
 
 def twiny():
     """创建共享 y 轴的双 x 轴
-    
+
     Returns:
         Axes: 新的 x 轴
     """
@@ -564,7 +564,7 @@ def figure(num=None, figsize=None, dpi=None):
 
 def savefig(filename):
     """保存图形
-    
+
     Args:
         filename: 文件名 (支持 .svg 和 .png)
     """
@@ -578,7 +578,7 @@ def show():
 
 def gca():
     """获取当前 Axes
-    
+
     Returns:
         Axes: 当前坐标轴
     """
@@ -587,7 +587,7 @@ def gca():
 
 def gcf():
     """获取当前 Figure
-    
+
     Returns:
         Figure: 当前图形对象
     """
@@ -660,7 +660,7 @@ def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=
 
 def use(backend):
     """选择后端 (兼容 matplotlib API)
-    
+
     Args:
         backend: 后端名称 (如 'Agg', 'SVG')
     """

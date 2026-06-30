@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use crate::axes::Axes;
+use crate::figure::axes::Axes;
 
 #[pyclass]
 pub struct Axis {
@@ -20,6 +20,12 @@ pub struct Axis {
     pub minor_locator_py: Option<Py<PyAny>>,
     pub parent: Option<Py<PyAny>>,
     pub which: String,
+}
+
+impl Default for Axis {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[pymethods]
@@ -57,27 +63,27 @@ impl Axis {
             self.grid_linewidth = lw;
             self.grid_linestyle = ls.map(|s| s.to_string());
         }
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let mut ax = ax_bound.borrow_mut();
-                if "minor".eq_ignore_ascii_case(which) || "both".eq_ignore_ascii_case(which) {
-                    ax.minor_grid_visible = true;
-                    ax.minor_grid_color = c.map(|s| s.to_string());
-                    ax.minor_grid_linewidth = lw;
-                    ax.minor_grid_linestyle = ls.map(|s| s.to_string());
-                    if self.which == "x" {
-                        ax.minor_grid_x_visible = true;
-                    } else {
-                        ax.minor_grid_y_visible = true;
-                    }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            if "minor".eq_ignore_ascii_case(which) || "both".eq_ignore_ascii_case(which) {
+                ax.minor_grid_visible = true;
+                ax.minor_grid_color = c.map(|s| s.to_string());
+                ax.minor_grid_linewidth = lw;
+                ax.minor_grid_linestyle = ls.map(|s| s.to_string());
+                if self.which == "x" {
+                    ax.minor_grid_x_visible = true;
+                } else {
+                    ax.minor_grid_y_visible = true;
                 }
-                if "major".eq_ignore_ascii_case(which) || "both".eq_ignore_ascii_case(which) {
-                    ax.grid_color = c.map(|s| s.to_string());
-                    ax.grid_linewidth = lw;
-                    ax.grid_linestyle = ls.map(|s| s.to_string());
-                    if visible.unwrap_or(true) {
-                        ax.grid_visible = true;
-                    }
+            }
+            if "major".eq_ignore_ascii_case(which) || "both".eq_ignore_ascii_case(which) {
+                ax.grid_color = c.map(|s| s.to_string());
+                ax.grid_linewidth = lw;
+                ax.grid_linestyle = ls.map(|s| s.to_string());
+                if visible.unwrap_or(true) {
+                    ax.grid_visible = true;
                 }
             }
         }
@@ -86,14 +92,14 @@ impl Axis {
     fn set_major_locator(&mut self, py: Python<'_>, locator: &Bound<'_, PyAny>) {
         // 保存 locator 引用（用于 Python 端反射以及 Axes 端 tick 计算）
         self.major_locator_py = Some(locator.clone().unbind());
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let mut ax = ax_bound.borrow_mut();
-                if self.which == "x" {
-                    ax.xaxis_major_locator = Some(locator.clone().unbind());
-                } else {
-                    ax.yaxis_major_locator = Some(locator.clone().unbind());
-                }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            if self.which == "x" {
+                ax.xaxis_major_locator = Some(locator.clone().unbind());
+            } else {
+                ax.yaxis_major_locator = Some(locator.clone().unbind());
             }
         }
     }
@@ -101,14 +107,14 @@ impl Axis {
     fn set_minor_locator(&mut self, py: Python<'_>, locator: &Bound<'_, PyAny>) {
         // 保存 locator 引用
         self.minor_locator_py = Some(locator.clone().unbind());
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let mut ax = ax_bound.borrow_mut();
-                if self.which == "x" {
-                    ax.xaxis_minor_locator = Some(locator.clone().unbind());
-                } else {
-                    ax.yaxis_minor_locator = Some(locator.clone().unbind());
-                }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            if self.which == "x" {
+                ax.xaxis_minor_locator = Some(locator.clone().unbind());
+            } else {
+                ax.yaxis_minor_locator = Some(locator.clone().unbind());
             }
         }
     }
@@ -119,17 +125,17 @@ impl Axis {
             return Some(loc.bind(py).clone());
         }
         // 回退到 parent Axes 上的 locator
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let ax = ax_bound.borrow();
-                let stored = if self.which == "x" {
-                    ax.xaxis_major_locator.as_ref()
-                } else {
-                    ax.yaxis_major_locator.as_ref()
-                };
-                if let Some(loc) = stored {
-                    return Some(loc.bind(py).clone());
-                }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let ax = ax_bound.borrow();
+            let stored = if self.which == "x" {
+                ax.xaxis_major_locator.as_ref()
+            } else {
+                ax.yaxis_major_locator.as_ref()
+            };
+            if let Some(loc) = stored {
+                return Some(loc.bind(py).clone());
             }
         }
         None
@@ -141,17 +147,17 @@ impl Axis {
             return Some(loc.bind(py).clone());
         }
         // 回退到 parent Axes 上的 locator
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let ax = ax_bound.borrow();
-                let stored = if self.which == "x" {
-                    ax.xaxis_minor_locator.as_ref()
-                } else {
-                    ax.yaxis_minor_locator.as_ref()
-                };
-                if let Some(loc) = stored {
-                    return Some(loc.bind(py).clone());
-                }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let ax = ax_bound.borrow();
+            let stored = if self.which == "x" {
+                ax.xaxis_minor_locator.as_ref()
+            } else {
+                ax.yaxis_minor_locator.as_ref()
+            };
+            if let Some(loc) = stored {
+                return Some(loc.bind(py).clone());
             }
         }
         None
@@ -163,6 +169,12 @@ pub struct Patch {
     pub facecolor: String,
     pub edgecolor: String,
     pub parent: Option<Py<PyAny>>,
+}
+
+impl Default for Patch {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[pymethods]
@@ -178,11 +190,11 @@ impl Patch {
 
     fn set_facecolor(&mut self, color: &str, py: Python<'_>) {
         self.facecolor = color.to_string();
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let mut ax = ax_bound.borrow_mut();
-                ax.facecolor = color.to_string();
-            }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            ax.facecolor = color.to_string();
         }
     }
 
@@ -201,11 +213,17 @@ pub struct SpineDict {
     pub parent: Option<Py<PyAny>>,
 }
 
+impl Default for SpineDict {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl SpineDict {
     #[new]
     pub fn new() -> Self {
-        let names = vec!["top", "bottom", "left", "right"];
+        let names = ["top", "bottom", "left", "right"];
         SpineDict {
             spines: names.iter().map(|n| Spine { name: n.to_string(), visible: true, parent: None }).collect(),
             parent: None,
@@ -246,16 +264,16 @@ impl Clone for Spine {
 impl Spine {
     fn set_visible(&mut self, visible: bool, py: Python<'_>) {
         self.visible = visible;
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let mut ax = ax_bound.borrow_mut();
-                match self.name.as_str() {
-                    "top" => ax.spine_top = visible,
-                    "bottom" => ax.spine_bottom = visible,
-                    "left" => ax.spine_left = visible,
-                    "right" => ax.spine_right = visible,
-                    _ => {}
-                }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            match self.name.as_str() {
+                "top" => ax.spine_top = visible,
+                "bottom" => ax.spine_bottom = visible,
+                "left" => ax.spine_left = visible,
+                "right" => ax.spine_right = visible,
+                _ => {}
             }
         }
     }
@@ -269,20 +287,20 @@ impl Spine {
     }
 
     fn set_color(&mut self, color: &str, py: Python<'_>) {
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let mut ax = ax_bound.borrow_mut();
-                ax.spine_color = color.to_string();
-            }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            ax.spine_color = color.to_string();
         }
     }
 
     fn set_linewidth(&mut self, lw: f64, py: Python<'_>) {
-        if let Some(parent) = &self.parent {
-            if let Ok(ax_bound) = parent.bind(py).cast::<Axes>() {
-                let mut ax = ax_bound.borrow_mut();
-                ax.spine_linewidth = lw;
-            }
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            ax.spine_linewidth = lw;
         }
     }
 }

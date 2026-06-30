@@ -4,29 +4,54 @@ use pyo3::types::{PyList, PyTuple, PyAny};
 
 use plotters::style::{register_font, FontStyle};
 
-use crate::axes::Axes;
-use crate::figure::{get_current_figure, set_current_figure, Figure};
+use crate::figure::axes::Axes;
+use crate::figure::figure::{get_current_figure, set_current_figure, Figure, DEFAULT_DPI, DEFAULT_FIGSIZE};
+use crate::utils::font_stack;
 
-/// 从文件路径注册一个字体到 "sans-serif" family。
+/// 从文件路径注册一个字体到字体系统。
 ///
-/// 这样 Python 端 `plt.rcParams["font.sans-serif"] = ["Arial Unicode MS"]`
-/// 设置的字体可以真正驱动 plotters 的文本渲染。
+/// 该方法执行以下操作：
+/// 1. 读取字体文件到内存
+/// 2. 如果传入了 family_name，直接使用；否则从字体文件中提取真实家族名称
+/// 3. 用家族名称注册到 plotters 字体数据库
+/// 4. 将字体数据推入全局 `font_stack`，用于后续 glyph 覆盖检测
+///
+/// 这样 Python 端 `plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial Unicode MS"]`
+/// 设置的多个字体可以形成"字体栈"，渲染时根据文本字符自动选择最佳字体。
 ///
 /// # 参数
 /// - `path`: 字体文件路径（.ttf/.otf/.ttc）
+/// - `family_name`: 可选的字体族名。如果提供，直接使用；否则从字体文件中提取。
 ///
 /// # 返回
 /// - 成功返回 Ok(())
 /// - 文件不存在或字体解析失败返回 Err
 #[pyfunction]
-pub fn register_sans_serif_font(py: Python, path: String) -> PyResult<()> {
+#[pyo3(signature = (path, family_name=None))]
+pub fn register_sans_serif_font(py: Python, path: String, family_name: Option<String>) -> PyResult<()> {
     let font_data = std::fs::read(&path).map_err(|e| {
         PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e))
     })?;
+
+    // 优先使用传入的 family_name，否则从字体文件中提取
+    let family = match family_name {
+        Some(name) if !name.is_empty() => name,
+        _ => font_stack::extract_family_name(&font_data)
+            .unwrap_or_else(|| "sans-serif".to_string()),
+    };
+
+    // 用家族名称注册到 plotters
     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-    register_font("sans-serif", FontStyle::Normal, font_ref).map_err(|_| {
+    register_font(&family, FontStyle::Normal, font_ref).map_err(|_| {
         PyValueError::new_err(format!("Failed to register font from '{}'", path))
     })?;
+
+    // 推入字体栈（重新读取，因为 font_data 已被 Box::leak 消耗）
+    let font_data2 = std::fs::read(&path).map_err(|e| {
+        PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e))
+    })?;
+    font_stack::push_font(family, font_data2);
+
     let _ = py; // suppress unused warning
     Ok(())
 }
@@ -51,6 +76,7 @@ pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
 fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
     let mut fig = Figure::new();
     fig.axes_list.clear();
+    fig.axes_positions.clear();
     let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
     let ax_py = Py::new(py, ax)?;
@@ -58,6 +84,18 @@ fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
     fig_py.borrow_mut(py).axes_list.push(ax_py.clone_ref(py));
     fig_py.borrow_mut(py).axes_positions.push((0.0, 1.0, 0.0, 1.0));
     Ok((fig_py, ax_py))
+}
+
+/// 宏：消除创建 figure+axes 并返回 PyTuple 的样板代码
+macro_rules! make_fig_ax {
+    ($py:expr, |$ax:ident| $($body:tt)*) => {{
+        let mut $ax = Axes::new();
+        $($body)*
+        let (fig_py, ax_py) = _make_fig_ax($py, $ax)?;
+        let fig_obj = fig_py.bind($py).as_any().clone();
+        let ax_obj = ax_py.bind($py).as_any().clone();
+        PyTuple::new($py, [fig_obj, ax_obj])
+    }};
 }
 
 #[pyfunction]
@@ -122,12 +160,9 @@ pub fn scatter<'a>(
     label: Option<String>,
     alpha: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.scatter(py, x, y, s, c, marker, label, alpha)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.scatter(py, x, y, s, c, marker, label, alpha)?;
+    })
 }
 
 #[pyfunction]
@@ -143,12 +178,9 @@ pub fn scatter_multi<'a>(
     label: Option<String>,
     alpha: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
+    })
 }
 
 #[pyfunction]
@@ -161,12 +193,9 @@ pub fn bar<'a>(
     color: Option<String>,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.bar(py, x, height, width, color, label)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.bar(py, x, height, width, color, label)?;
+    })
 }
 
 #[pyfunction]
@@ -183,12 +212,9 @@ pub fn hist<'py>(
     align: Option<String>,
     histtype: Option<String>,
 ) -> PyResult<Bound<'py, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.hist(py, x, bins, density, label, alpha, color, facecolor, align, histtype)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.hist(py, x, bins, density, label, alpha, color, facecolor, align, histtype)?;
+    })
 }
 
 #[pyfunction]
@@ -202,12 +228,9 @@ pub fn fill_between<'a>(
     alpha: f64,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.fill_between(py, x, y1, y2, color, alpha, label)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.fill_between(py, x, y1, y2, color, alpha, label)?;
+    })
 }
 
 #[pyfunction]
@@ -220,12 +243,9 @@ pub fn stackplot<'a>(
     colors: Option<Vec<String>>,
     alpha: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.stackplot(py, x, args, labels, colors, alpha)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.stackplot(py, x, args, labels, colors, alpha)?;
+    })
 }
 
 #[pyfunction]
@@ -241,12 +261,9 @@ pub fn errorbar<'a>(
     label: Option<String>,
     capsize: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.errorbar(py, x, y, yerr, xerr, fmt, color, label, capsize)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.errorbar(py, x, y, yerr, xerr, fmt, color, label, capsize)?;
+    })
 }
 
 #[pyfunction]
@@ -259,12 +276,9 @@ pub fn stem<'a>(
     markerfmt: &'a str,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.stem(py, x, y, linefmt, markerfmt, label)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.stem(py, x, y, linefmt, markerfmt, label)?;
+    })
 }
 
 #[pyfunction]
@@ -279,32 +293,25 @@ pub fn step<'a>(
     linestyle: &'a str,
     linewidth: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.step(py, x, y, where_, label, color, linestyle, linewidth)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.step(py, x, y, where_, label, color, linestyle, linewidth)?;
+    })
 }
 
 #[pyfunction]
 #[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
 pub fn imshow<'a>(py: Python<'a>, x: Bound<'a, PyAny>, cmap: &'a str, aspect: &'a str) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    // 将 Python 对象转换为 Vec<Vec<f64>>
-    let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
-        v
-    } else if x.hasattr("tolist")? {
-        let list = x.call_method0("tolist")?;
-        list.extract::<Vec<Vec<f64>>>()?
-    } else {
-        x.extract::<Vec<Vec<f64>>>()?
-    };
-    ax.imshow(data, cmap, aspect);
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
+            v
+        } else if x.hasattr("tolist")? {
+            let list = x.call_method0("tolist")?;
+            list.extract::<Vec<Vec<f64>>>()?
+        } else {
+            x.extract::<Vec<Vec<f64>>>()?
+        };
+        ax.imshow(data, cmap, aspect);
+    })
 }
 
 #[pyfunction]
@@ -317,21 +324,17 @@ pub fn pie<'a>(
     autopct: Option<String>,
     startangle: f64,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    // 将 Python 对象转换为 Vec<f64>
-    let x_vec = if let Ok(v) = x.extract::<Vec<f64>>() {
-        v
-    } else if x.hasattr("tolist")? {
-        let list = x.call_method0("tolist")?;
-        list.extract::<Vec<f64>>()?
-    } else {
-        x.extract::<Vec<f64>>()?
-    };
-    ax.pie(x_vec, labels, colors, autopct, startangle);
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        let x_vec = if let Ok(v) = x.extract::<Vec<f64>>() {
+            v
+        } else if x.hasattr("tolist")? {
+            let list = x.call_method0("tolist")?;
+            list.extract::<Vec<f64>>()?
+        } else {
+            x.extract::<Vec<f64>>()?
+        };
+        ax.pie(x_vec, labels, colors, autopct, startangle);
+    })
 }
 
 #[pyfunction]
@@ -342,12 +345,9 @@ pub fn boxplot<'a>(
     labels: Option<Vec<String>>,
     vert: bool,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.boxplot(py, x, labels, vert)?;
-    let (fig_py, ax_py) = _make_fig_ax(py, ax)?;
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.boxplot(py, x, labels, vert)?;
+    })
 }
 
 #[pyfunction]
@@ -357,7 +357,7 @@ pub fn text(
     x: f64,
     y: f64,
     text: Bound<'_, PyAny>,
-    fontsize: Option<i32>,
+    fontsize: Option<f64>,
     color: Option<String>,
     c: Option<String>,
     family: Option<String>,
@@ -442,7 +442,7 @@ pub fn cla(py: Python) -> PyResult<()> {
 
 #[pyfunction]
 pub fn close(_py: Python) -> PyResult<()> {
-    if let Ok(mut current) = crate::figure::CURRENT_FIGURE.lock() {
+    if let Ok(mut current) = crate::figure::figure::CURRENT_FIGURE.lock() {
         *current = None;
     }
     Ok(())
@@ -515,11 +515,13 @@ pub fn subplots(
     dpi: Option<f64>,
 ) -> PyResult<Bound<'_, PyTuple>> {
     let total = nrows * ncols;
-    let dpi_val = dpi.unwrap_or(100.0);
+    let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
     let (width, height) = if let Some((w, h)) = figsize {
         ((w * dpi_val).round() as u32, (h * dpi_val).round() as u32)
     } else {
-        ((ncols as f64 * 4.0 * dpi_val).round() as u32, (nrows as f64 * 3.0 * dpi_val).round() as u32)
+        let w = (DEFAULT_FIGSIZE.0 * dpi_val).round() as u32;
+        let h = (DEFAULT_FIGSIZE.1 * dpi_val).round() as u32;
+        (w, h)
     };
 
     let mut fig = Figure::new();
@@ -581,26 +583,9 @@ pub fn plot<'a>(
     markeredgewidth: Option<f64>,
     solid_capstyle: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
+    })
 }
 
 #[pyfunction]
@@ -652,26 +637,9 @@ pub fn clf(py: Python) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (y, width, height=0.8, color=None, label=None))]
 pub fn barh<'a>(py: Python<'a>, y: Bound<'a, PyAny>, width: Bound<'a, PyAny>, height: f64, color: Option<String>, label: Option<String>) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.barh(py, y, width, height, color, label)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.barh(py, y, width, height, color, label)?;
+    })
 }
 
 #[pyfunction]
@@ -687,29 +655,12 @@ pub fn semilogx<'a>(
     marker: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.set_xscale("log");
-    let ls = linestyle.as_deref().unwrap_or("-");
-    let lw = linewidth.unwrap_or(1.5);
-    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.set_xscale("log");
+        let ls = linestyle.as_deref().unwrap_or("-");
+        let lw = linewidth.unwrap_or(1.5);
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+    })
 }
 
 #[pyfunction]
@@ -725,29 +676,12 @@ pub fn semilogy<'a>(
     marker: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.set_yscale("log");
-    let ls = linestyle.as_deref().unwrap_or("-");
-    let lw = linewidth.unwrap_or(1.5);
-    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.set_yscale("log");
+        let ls = linestyle.as_deref().unwrap_or("-");
+        let lw = linewidth.unwrap_or(1.5);
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+    })
 }
 
 #[pyfunction]
@@ -763,29 +697,13 @@ pub fn loglog<'a>(
     marker: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
-    let mut ax = Axes::new();
-    ax.set_xscale("log");
-    ax.set_yscale("log");
-    let ls = linestyle.as_deref().unwrap_or("-");
-    let lw = linewidth.unwrap_or(1.5);
-    ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
-
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
-    let ax_py = Py::new(py, ax)?;
-    init_axes_self_py(&ax_py, py);
-    {
-        let mut fig_ref = fig_py.borrow_mut(py);
-        fig_ref.axes_list.push(ax_py.clone_ref(py));
-        fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
-    }
-
-    let fig_obj = fig_py.bind(py).as_any().clone();
-    let ax_obj = ax_py.bind(py).as_any().clone();
-    PyTuple::new(py, [fig_obj, ax_obj])
+    make_fig_ax!(py, |ax| {
+        ax.set_xscale("log");
+        ax.set_yscale("log");
+        let ls = linestyle.as_deref().unwrap_or("-");
+        let lw = linewidth.unwrap_or(1.5);
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+    })
 }
 
 #[pyfunction]
