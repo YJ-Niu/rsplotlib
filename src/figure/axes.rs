@@ -90,9 +90,9 @@ use crate::figure::axis::{Axis, Patch, SpineDict};
 
 /// 字体大小缩放并四舍五入到1位小数
 /// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
-/// 通过 * 15.0 将字号放大到与 matplotlib 一致。
+/// 通过 * 14.5 将字号放大到与 matplotlib 一致。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
-    (size * font_scale * 15.0).round() / 10.0
+    (size * font_scale * 14.5).round() / 10.0
 }
 
 #[pyclass(skip_from_py_object)]

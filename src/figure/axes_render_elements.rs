@@ -75,11 +75,12 @@ where
                 // 折线线宽增加 50%
                 let lw_scaled = *linewidth * 1.5;
                 let linewidth = &lw_scaled;
-                // 整条折线在 y 方向向下平移 2 像素（换算为数据坐标偏移）
-                let y_shift_2px = {
+                // plotters 的坐标映射对屏幕像素取 floor，会让点整体偏高约 0.5 像素。
+                // 向下偏移半个像素，等效为四舍五入，使线/marker 的中心落在坐标点上。
+                let y_half_px = {
                     let dim = chart.plotting_area().dim_in_pixel();
                     let ph = dim.1 as f64;
-                    if ph > 0.0 { (y_max - y_min) / ph * 2.0 } else { 0.0 }
+                    if ph > 0.0 { (y_max - y_min) / ph * 0.5 } else { 0.0 }
                 };
                 if !x.is_empty() && x.len() == y.len() {
                     // 构建连续有效数据段（被 None 分隔）
@@ -91,7 +92,7 @@ where
                                 let txv = tx(*xv);
                                 let tyv = ty(*yv);
                                 if txv.is_finite() && tyv.is_finite() {
-                                    current.push((txv, tyv - y_shift_2px));
+                                    current.push((txv, tyv - y_half_px));
                                     continue;
                                 }
                             }
@@ -263,62 +264,24 @@ where
                                 }
                             }
                         } else {
-                            // 实线：使用 plotters 原生 stroke_width
-                            // plotters BitMapBackend stroke_width(n) 实际渲染近似 n-1 像素（带 AA 边框）。
-                            // matplotlib 通过 AA 在 1pt 量级产生 2-3 像素宽线。
-                            // 公式: stroke = max(1, lw_px - 1) 是最接近 mpl 的折中：
-                            //   lw=0.5: lw_px=1, stroke=1 → 1px (mpl 1px) ✓
-                            //   lw=1.0: lw_px=2, stroke=1 → 1px (mpl 3px) - 略薄
-                            //   lw=1.5: lw_px=3, stroke=2 → 3-5px (mpl 4px) ✓
-                            //   lw=2.0: lw_px=4, stroke=3 → 5-7px (mpl 5px) ✓
-                            //   lw=3.0: lw_px=6, stroke=5 → 9-11px (mpl 8px) ✓
-                            let stroke_w = (lw_px as i32 - 1).max(1) as u32;
+                            // 实线：使用 plotters 原生 stroke_width。
+                            // points 已在构造时整体下移半像素（见 y_half_px），中心已对齐坐标点。
+                            // plotters 把宽线扩成多边形，半宽 r = stroke_w/2，顶点取整后：
+                            //   stroke_w 为偶数 → 像素带 [Y-r, Y+r] 关于 Y 对称，中心恰在坐标点；
+                            //   stroke_w 为奇数 → 截断后变为 [Y-r-0.5, Y+r-0.5]，中心偏上 0.5 像素，
+                            //                     且偏移量随线宽奇偶变化，造成"线宽不同中心不同"。
+                            // 因此当 stroke_w>1 时强制取偶数，保证任意线宽下线的中心都落在坐标点上。
+                            let stroke_w0 = (lw_px as i32 - 1).max(1) as u32;
+                            let stroke_w = if stroke_w0 > 1 && stroke_w0 % 2 == 1 { stroke_w0 + 1 } else { stroke_w0 };
                             let style_native: ShapeStyle = rgb.stroke_width(stroke_w);
-                            // 像素中心对齐修正：plotters 在渲染水平线时，线中心对应像素下边缘，
-                            // 而 matplotlib 使用像素中心。这导致 rsp 的水平线比 mpl 偏高 1 像素。
-                            // 修正方法：将所有 y 坐标向下偏移半像素（half a pixel）。
-                            let area = chart.plotting_area();
-                            let dim = area.dim_in_pixel();
-                            let ph = dim.1 as f64;
-                            if ph > 0.0 {
-                                let y_per_pix = (y_max - y_min) / ph;
-                                let y_shift = y_per_pix * 0.5;
-                                let shifted_points: Vec<(f64, f64)> = points.iter()
-                                    .map(|(px, py)| (*px, *py - y_shift))
-                                    .collect();
-                                chart.draw_series(std::iter::once(PathElement::new(shifted_points, style_native)))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
-                            } else {
-                                chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
-                            }
-                            // 端点形状 (solid_capstyle)：
-                            // plotters 0.3.7 原生不支持 linecap，因此手动在首末端绘制
-                            // 装饰图形。cap 只与有线段（marker 为空）的实线情况相关，
-                            // 虚线/点线场景下端点不连续，跳过以免破坏节奏。
-                            //
-                            // 重要：cap 端点必须与已绘制的线段几何对齐：
-                            //   1) 实际渲染线宽 = stroke_w - 1 像素，cap 直径等于这个值
-                            //   2) 实线已经过 0.5 像素 y 中心对齐，cap 也要应用同样的 y_shift
-                            //   3) cap 圆心 = 线段端点（与 shift 后的位置一致）
+                            chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
+                                .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
+                            // 端点形状 (solid_capstyle)：plotters 0.3.7 不支持 linecap，手动补端点圆盘。
+                            // points 已含半像素偏移，cap 圆心与端点重合，cap_y_shift 取 0。
                             if linestyle == "-" && marker.as_ref().is_none_or(|m| m.is_empty()) {
-                                // plotters BitMapBackend 的 stroke_width(w) 实际渲染为 2w-1 像素
-                                // （中间 w-1 像素实色 + 两侧各 0.5 像素 AA），所以端点圆盘的
-                                // 直径必须与线段**实际渲染宽度**严格相等，才能"完全契合"。
-                                // 端点圆心 = 像素中心对齐后的线段端点（与线段几何一致）。
                                 let cap_lw_px = (stroke_w as i32).max(1) as f64; // 与线段渲染宽度一致
-                                // **关键：cap_y_shift 必须与上面的 y_shift 严格相同**，
-                                // 这样 cap 圆心和线段端点经过 plotters coord.translate 时
-                                // 走完全相同的截断路径，得到的 (i32, i32) 屏幕像素完全一致。
-                                // 之前的 +0.2 是临时 hack，会让 cap 偏移 0.2/y_per_pix 像素。
-                                let cap_y_shift = {
-                                    let area2 = chart.plotting_area();
-                                    let dim2 = area2.dim_in_pixel();
-                                    let ph2 = dim2.1 as f64;
-                                    if ph2 > 0.0 { (y_max - y_min) / ph2 * 0.5 } else { 0.0 }
-                                };
                                 draw_solid_caps(chart, points, &rgb, solid_capstyle, *linewidth, font_scale,
-                                                x_min, x_max, y_min, y_max, cap_lw_px, cap_y_shift)?;
+                                                x_min, x_max, y_min, y_max, cap_lw_px, 0.0)?;
                             }
                         }
                         }
@@ -351,7 +314,7 @@ where
                         for (xv, yv) in x.iter().zip(y.iter()) {
                             if let (Some(xv), Some(yv)) = (xv, yv) {
                                 let txv = tx(*xv);
-                                let tyv = ty(*yv) - y_shift_2px;
+                                let tyv = ty(*yv) - y_half_px;
                                 if txv.is_finite() && tyv.is_finite() {
                                     draw_marker(chart, marker_name, txv, tyv, marker_size, rgb)
                                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw marker: {}", e)))?;
