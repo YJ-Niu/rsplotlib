@@ -12,7 +12,6 @@ use plotters::style::text_anchor::{HPos, VPos};
 use crate::figure::axes::scale_font;
 use crate::core::colors::{RgbColor, to_plotters_color};
 use crate::core::marker::draw_marker;
-use crate::core::text_utils::normalize_text;
 use crate::utils::font_stack;
 
 /// 渲染图例（如果设置了 `legend_loc` 且 `legend_labels` 非空）
@@ -196,7 +195,7 @@ where
                 .color(&BLACK)
                 .into();
             chart.draw_series(std::iter::once(plotters::element::Text::new(
-                normalize_text(label),
+                label.to_string(),
                 (x_text, y_pos),
                 legend_font,
             ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e)))?;

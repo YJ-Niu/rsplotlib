@@ -11,7 +11,6 @@ use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, VPos, Pos};
 
 use crate::figure::axes::scale_font;
-use crate::core::text_utils::normalize_text;
 use crate::utils::font_stack;
 
 /// 渲染 axes 标题
@@ -48,13 +47,13 @@ where
     // 使用用户指定的 fontsize；若未指定则取 matplotlib 默认 12pt
     let title_size = if title_fontsize > 0.0 { title_fontsize } else { 12.0 };
     // plotters 的 ab_glyph 字体可见字符高度约 0.94em，而 matplotlib DejaVu Sans 约 1.13em。
-    // 为匹配 matplotlib 视觉高度，乘以 1.20 补偿。
+    // 为匹配 matplotlib 视觉高度，乘以 1.40 补偿。
     let title_family = font_stack::select_family(title);
-    let font: FontDesc = (title_family.as_str(), scale_font(title_size * 1.20, font_scale)).into();
+    let font: FontDesc = (title_family.as_str(), scale_font(title_size * 1.25, font_scale)).into();
     let colored_font = font.color(&BLACK);
     let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom));
     chart.draw_series(std::iter::once(plotters::element::Text::new(
-        normalize_text(title),
+        title.to_string(),
         (title_x, title_y),
         text_style,
     ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw title: {}", e)))?;
