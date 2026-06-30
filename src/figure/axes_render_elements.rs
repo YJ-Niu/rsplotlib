@@ -73,6 +73,15 @@ where
             PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, markersize, .. } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
+                // 折线线宽增加 50%
+                let lw_scaled = *linewidth * 1.5;
+                let linewidth = &lw_scaled;
+                // 整条折线在 y 方向向下平移 2 像素（换算为数据坐标偏移）
+                let y_shift_2px = {
+                    let dim = chart.plotting_area().dim_in_pixel();
+                    let ph = dim.1 as f64;
+                    if ph > 0.0 { (y_max - y_min) / ph * 2.0 } else { 0.0 }
+                };
                 if !x.is_empty() && x.len() == y.len() {
                     // 构建连续有效数据段（被 None 分隔）
                     let mut segments: Vec<Vec<(f64, f64)>> = Vec::new();
@@ -83,7 +92,7 @@ where
                                 let txv = tx(*xv);
                                 let tyv = ty(*yv);
                                 if txv.is_finite() && tyv.is_finite() {
-                                    current.push((txv, tyv));
+                                    current.push((txv, tyv - y_shift_2px));
                                     continue;
                                 }
                             }
@@ -343,7 +352,7 @@ where
                         for (xv, yv) in x.iter().zip(y.iter()) {
                             if let (Some(xv), Some(yv)) = (xv, yv) {
                                 let txv = tx(*xv);
-                                let tyv = ty(*yv);
+                                let tyv = ty(*yv) - y_shift_2px;
                                 if txv.is_finite() && tyv.is_finite() {
                                     draw_marker(chart, marker_name, txv, tyv, marker_size, rgb)
                                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw marker: {}", e)))?;
