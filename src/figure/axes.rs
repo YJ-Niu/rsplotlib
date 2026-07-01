@@ -1457,6 +1457,7 @@ impl Axes {
         (y_min, y_max): (f64, f64),
         font_scale: f64,
         fill_bg: bool,
+        bitmap: bool,
         _subplot_info: Option<&(f64, f64, f64, f64)>,
     ) -> PyResult<()>
     where
@@ -1620,7 +1621,7 @@ impl Axes {
         // 渲染所有数据元素（线、散点、柱状图、填充、误差棒、饼图等）
         crate::figure::axes_render_elements::render_elements(
             chart, &self.elements, font_scale, xlog, ylog,
-            x_min, x_max, y_min, y_max,
+            x_min, x_max, y_min, y_max, bitmap,
         )?;
 
         if let Some(loc) = &self.legend_loc.clone()

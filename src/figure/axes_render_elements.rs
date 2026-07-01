@@ -41,6 +41,278 @@ where
     Ok(())
 }
 
+/// 绘制等宽折线（实线）。
+///
+/// 逐段绘制四边形 + 顶点处圆填充，保证任意斜率下线宽一致。
+/// 每个线段在数据坐标中构造精确法线方向的四边形，顶点处用圆形成 round join，
+/// 避免 plotters 原生粗线对法线偏移取整导致的粗细不均问题。
+fn draw_thick_polyline<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    points: &[(f64, f64)],
+    rgb: &plotters::style::RGBColor,
+    width_px: f64,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    if points.len() < 2 {
+        return Ok(());
+    }
+    let (pw, ph) = {
+        let dim = chart.plotting_area().dim_in_pixel();
+        (dim.0 as f64, dim.1 as f64)
+    };
+    let x_per_pix = if pw > 0.0 { (x_max - x_min) / pw } else { 1.0 };
+    let y_per_pix = if ph > 0.0 { (y_max - y_min) / ph } else { 1.0 };
+    let half = width_px / 2.0;
+    let style: ShapeStyle = rgb.filled();
+
+    let n = points.len();
+
+    // 计算每个线段的单位方向（屏幕空间）和法线
+    let mut seg_dirs: Vec<(f64, f64)> = Vec::with_capacity(n - 1);
+    for i in 0..n - 1 {
+        let dx_data = points[i + 1].0 - points[i].0;
+        let dy_data = points[i + 1].1 - points[i].1;
+        let dx_px = if x_per_pix != 0.0 { dx_data / x_per_pix } else { 0.0 };
+        let dy_px = if y_per_pix != 0.0 { dy_data / y_per_pix } else { 0.0 };
+        let len = (dx_px * dx_px + dy_px * dy_px).sqrt();
+        if len < 1e-9 {
+            seg_dirs.push((1.0, 0.0));
+        } else {
+            seg_dirs.push((dx_px / len, dy_px / len));
+        }
+    }
+
+    // 计算每个线段的四个顶点（四边形），在数据坐标中构造
+    // 法线方向：(-ty, tx)，即左侧法线
+    let mut quads: Vec<Vec<(f64, f64)>> = Vec::with_capacity(n - 1);
+    for i in 0..n - 1 {
+        let (tx, ty) = seg_dirs[i];
+        let nx = -ty;
+        let ny = tx;
+        let (x0, y0) = points[i];
+        let (x1, y1) = points[i + 1];
+
+        let dx_n = nx * half * x_per_pix;
+        let dy_n = ny * half * y_per_pix;
+
+        quads.push(vec![
+            (x0 + dx_n, y0 + dy_n),
+            (x1 + dx_n, y1 + dy_n),
+            (x1 - dx_n, y1 - dy_n),
+            (x0 - dx_n, y0 - dy_n),
+        ]);
+    }
+
+    // 绘制所有线段四边形
+    chart
+        .draw_series(quads.iter().map(|v| Polygon::new(v.clone(), style)))
+        .map_err(|e| PyRuntimeError::new_err(format!("Thick polyline segs: {}", e)))?;
+
+    // 在每个顶点处绘制填充圆，形成 round join 并填补相邻四边形之间的缝隙。
+    // plotters 的 Circle 半径以「像素」为单位（与 marker 一致），因此直接用 half，
+    // 半径正好等于线的半宽，圆不会超出 ribbon 宽度，保证线宽处处一致。
+    chart
+        .draw_series(points.iter().map(|&(x, y)| Circle::new((x, y), half, style)))
+        .map_err(|e| PyRuntimeError::new_err(format!("Thick polyline joins: {}", e)))?;
+
+    Ok(())
+}
+
+/// 抗锯齿等宽折线渲染（仅位图后端）。
+///
+/// 对折线包围盒内的每个像素，计算像素中心到线段的距离，用覆盖率（coverage）
+/// 做 alpha 混合。这样任意斜率下线宽都严格一致、边缘平滑，从根本上消除
+/// 无抗锯齿多边形填充导致的"阶梯状粗细不均"。相邻线段用 clamped 距离自然
+/// 形成圆角连接（round join）；两端按 capstyle 处理 butt/round/projecting。
+#[allow(clippy::too_many_arguments)]
+fn draw_thick_polyline_aa<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    points: &[(f64, f64)],
+    rgb: &plotters::style::RGBColor,
+    width_px: f64,
+    capstyle: &str,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    if points.len() < 2 {
+        return Ok(());
+    }
+    let (pw, ph) = {
+        let dim = chart.plotting_area().dim_in_pixel();
+        (dim.0 as f64, dim.1 as f64)
+    };
+    if pw < 1.0 || ph < 1.0 {
+        return Ok(());
+    }
+    let x_per_pix = (x_max - x_min) / pw;
+    let y_per_pix = (y_max - y_min) / ph;
+    if x_per_pix == 0.0 || y_per_pix == 0.0 {
+        return Ok(());
+    }
+    // 数据坐标 -> 绘图区局部连续像素坐标（y 轴翻转：y_max 对应 v=0）
+    let to_px = |p: (f64, f64)| -> (f64, f64) {
+        ((p.0 - x_min) / x_per_pix, (y_max - p.1) / y_per_pix)
+    };
+    let pts: Vec<(f64, f64)> = points.iter().map(|&p| to_px(p)).collect();
+
+    let half = width_px / 2.0;
+    // 每个像素用 SS×SS 子采样估计"被线覆盖的面积占比"作为覆盖率（真·面积抗锯齿）。
+    // 单点采样（按中心到线距离取覆盖）对倾斜线会产生 ±0.3px 的周期性质心抖动，
+    // 表现为"偶尔 1 像素错位"。面积覆盖与 matplotlib(Agg) 一致，抖动降到 <0.1px。
+    const SS: usize = 8;
+    let inv_ss = 1.0 / SS as f64;
+    let ss2 = (SS * SS) as f32;
+    let reach = half + 1.0;
+
+    let pw_u = pw as usize;
+    let ph_u = ph as usize;
+    // 每像素用一个 u64 位掩码记录 SS×SS 个子采样是否被"任一线段"覆盖，
+    // 段间按位或 = 折线笔画的真·并集覆盖。避免逐段取覆盖率最大值在拐点处
+    // 把"一侧 50% + 另一侧 50%"错误合成为 50%，从而消除折线顶点处线宽被
+    // 掐细成 1px 的可见拐折。SS=8 → 64 个子采样正好放入一个 u64。
+    let mut mask = vec![0u64; pw_u * ph_u];
+    let mut bx0 = pw_u;
+    let mut bx1 = 0usize;
+    let mut by0 = ph_u;
+    let mut by1 = 0usize;
+
+    let cap_round = capstyle.eq_ignore_ascii_case("round");
+    let cap_proj = capstyle.eq_ignore_ascii_case("projecting");
+
+    let n = pts.len();
+    for i in 0..n - 1 {
+        let (ax, ay) = pts[i];
+        let (bx, by) = pts[i + 1];
+        let dx = bx - ax;
+        let dy = by - ay;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-9 {
+            continue;
+        }
+        let ux = dx / len;
+        let uy = dy / len;
+        let start_cap = i == 0;
+        let end_cap = i == n - 2;
+
+        let min_x = (ax.min(bx) - reach).floor().max(0.0) as usize;
+        let max_x = (ax.max(bx) + reach).ceil().min(pw - 1.0) as usize;
+        let min_y = (ay.min(by) - reach).floor().max(0.0) as usize;
+        let max_y = (ay.max(by) + reach).ceil().min(ph - 1.0) as usize;
+
+        // 任意采样点到本段的距离（含端点 cap / 内部 round join 处理）
+        let dist_at = |px: f64, py: f64| -> f64 {
+            let s = (px - ax) * ux + (py - ay) * uy;
+            let perp = ((px - ax) * (-uy) + (py - ay) * ux).abs();
+            if s < 0.0 {
+                if start_cap {
+                    if cap_round {
+                        (s * s + perp * perp).sqrt()
+                    } else if cap_proj {
+                        if s >= -half { perp } else { f64::INFINITY }
+                    } else {
+                        f64::INFINITY // butt：垂直切断
+                    }
+                } else {
+                    (s * s + perp * perp).sqrt() // 内部连接：round join
+                }
+            } else if s > len {
+                let over = s - len;
+                if end_cap {
+                    if cap_round {
+                        (over * over + perp * perp).sqrt()
+                    } else if cap_proj {
+                        if over <= half { perp } else { f64::INFINITY }
+                    } else {
+                        f64::INFINITY
+                    }
+                } else {
+                    (over * over + perp * perp).sqrt()
+                }
+            } else {
+                perp
+            }
+        };
+
+        for yy in min_y..=max_y {
+            let cy = yy as f64 + 0.5;
+            for xx in min_x..=max_x {
+                let cx = xx as f64 + 0.5;
+                // 快速剔除：胶囊（round，对 butt 为超集；proj 轴向扩展 half）外包围
+                let s = (cx - ax) * ux + (cy - ay) * uy;
+                let (lo, hi) = if cap_proj { (-half, len + half) } else { (0.0, len) };
+                let sc = s.clamp(lo, hi);
+                let ex = cx - (ax + sc * ux);
+                let ey = cy - (ay + sc * uy);
+                if ex * ex + ey * ey > (half + 1.0) * (half + 1.0) {
+                    continue;
+                }
+
+                // 快速接受：完全落在线体内部（远离端点/连接）→ 所有子采样置位
+                let perp_c = ((cx - ax) * (-uy) + (cy - ay) * ux).abs();
+                let bits: u64 = if perp_c <= half - 0.75 && s >= 0.75 && s <= len - 0.75 {
+                    u64::MAX
+                } else {
+                    let mut b: u64 = 0;
+                    for sj in 0..SS {
+                        let sy = yy as f64 + (sj as f64 + 0.5) * inv_ss;
+                        for si in 0..SS {
+                            let sx = xx as f64 + (si as f64 + 0.5) * inv_ss;
+                            if dist_at(sx, sy) <= half {
+                                b |= 1u64 << (sj * SS + si);
+                            }
+                        }
+                    }
+                    if b == 0 {
+                        continue;
+                    }
+                    b
+                };
+
+                let idx = yy * pw_u + xx;
+                mask[idx] |= bits;
+                if xx < bx0 { bx0 = xx; }
+                if xx > bx1 { bx1 = xx; }
+                if yy < by0 { by0 = yy; }
+                if yy > by1 { by1 = yy; }
+            }
+        }
+    }
+
+    if bx1 < bx0 || by1 < by0 {
+        return Ok(());
+    }
+    // 直接以「后端整数像素」坐标绘制，绕过 plotters 的数据->像素映射
+    // （其 floor(actual*logic+1e-3) 会偶发把两个相邻局部像素映射到同一图像
+    // 列、留空相邻列，造成"偶尔 1 像素错位"）。strip_coord_spec 给出的
+    // Shift 坐标是「加上绘图区左上角原点」的纯平移，局部像素 (xx,yy) 精确
+    // 对应后端像素，与覆盖率所用的局部网格一一对应。
+    let area = chart.plotting_area().strip_coord_spec();
+    for yy in by0..=by1 {
+        for xx in bx0..=bx1 {
+            let bits = mask[yy * pw_u + xx];
+            if bits == 0 {
+                continue;
+            }
+            let c = bits.count_ones() as f32 / ss2;
+            let color = rgb.mix(c as f64);
+            area.draw_pixel((xx as i32, yy as i32), &color)
+                .map_err(|e| PyRuntimeError::new_err(format!("AA polyline: {}", e)))?;
+        }
+    }
+    Ok(())
+}
+
 /// 渲染所有 PlotElement
 ///
 /// # 参数
@@ -49,6 +321,7 @@ where
 /// - `font_scale`: 字体缩放系数
 /// - `xlog`, `ylog`: 是否对数刻度
 /// - `x_min`, `x_max`, `y_min`, `y_max`: 数据范围
+#[allow(clippy::too_many_arguments)]
 pub fn render_elements<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     elements: &[PlotElement],
@@ -59,6 +332,7 @@ pub fn render_elements<DB: DrawingBackend>(
     x_max: f64,
     y_min: f64,
     y_max: f64,
+    bitmap: bool,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
@@ -264,24 +538,34 @@ where
                                 }
                             }
                         } else {
-                            // 实线：使用 plotters 原生 stroke_width。
-                            // points 已在构造时整体下移半像素（见 y_half_px），中心已对齐坐标点。
-                            // plotters 把宽线扩成多边形，半宽 r = stroke_w/2，顶点取整后：
-                            //   stroke_w 为偶数 → 像素带 [Y-r, Y+r] 关于 Y 对称，中心恰在坐标点；
-                            //   stroke_w 为奇数 → 截断后变为 [Y-r-0.5, Y+r-0.5]，中心偏上 0.5 像素，
-                            //                     且偏移量随线宽奇偶变化，造成"线宽不同中心不同"。
-                            // 因此当 stroke_w>1 时强制取偶数，保证任意线宽下线的中心都落在坐标点上。
-                            let stroke_w0 = (lw_px as i32 - 1).max(1) as u32;
-                            let stroke_w = if stroke_w0 > 1 && stroke_w0 % 2 == 1 { stroke_w0 + 1 } else { stroke_w0 };
-                            let style_native: ShapeStyle = rgb.stroke_width(stroke_w);
-                            chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
-                                .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
-                            // 端点形状 (solid_capstyle)：plotters 0.3.7 不支持 linecap，手动补端点圆盘。
-                            // points 已含半像素偏移，cap 圆心与端点重合，cap_y_shift 取 0。
-                            if linestyle == "-" && marker.as_ref().is_none_or(|m| m.is_empty()) {
-                                let cap_lw_px = (stroke_w as i32).max(1) as f64; // 与线段渲染宽度一致
-                                draw_solid_caps(chart, points, &rgb, solid_capstyle, *linewidth, font_scale,
-                                                x_min, x_max, y_min, y_max, cap_lw_px, 0.0)?;
+                            // 实线：自行绘制等宽 ribbon，规避 plotters 对每段四边形顶点
+                            // 取整（as i32）导致的"线宽随斜率忽粗忽细"。points 已含
+                            // 半像素偏移（见 y_half_px），中心已对齐坐标点。
+                            let width_px = (lw_px as i32 - 1).max(1) as f64;
+                            if bitmap {
+                                // 位图后端：逐像素覆盖率抗锯齿渲染，任意斜率线宽严格一致、
+                                // 边缘平滑。AA 内部已含 round join 与端点处理，无需再补 cap。
+                                draw_thick_polyline_aa(chart, points, &rgb, width_px.max(1.0),
+                                                       solid_capstyle,
+                                                       x_min, x_max, y_min, y_max)?;
+                            } else {
+                                // SVG 矢量后端：本就平滑，用四边形 ribbon + 端点补齐。
+                                if width_px <= 1.0 {
+                                    // 1 像素线：用 plotters 原生 AA 直线，观感更平滑
+                                    let style_native: ShapeStyle = rgb.stroke_width(1);
+                                    chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
+                                        .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
+                                } else {
+                                    draw_thick_polyline(chart, points, &rgb, width_px,
+                                                        x_min, x_max, y_min, y_max)?;
+                                }
+                                // 端点形状 (solid_capstyle)：plotters 0.3.7 不支持 linecap，手动补端点。
+                                // points 已含半像素偏移，cap 圆心与端点重合，cap_y_shift 取 0。
+                                if linestyle == "-" && marker.as_ref().is_none_or(|m| m.is_empty()) {
+                                    let cap_lw_px = width_px.max(1.0); // 与线段渲染宽度一致
+                                    draw_solid_caps(chart, points, &rgb, solid_capstyle, *linewidth, font_scale,
+                                                    x_min, x_max, y_min, y_max, cap_lw_px, 0.0)?;
+                                }
                             }
                         }
                         }
