@@ -343,7 +343,7 @@ impl Axes {
         }
     }
 
-    #[pyo3(signature = (x, y, label=None, color=None, linestyle="-", marker=None, linewidth=1.5, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, solid_capstyle=None))]
+    #[pyo3(signature = (x, y, label=None, color=None, linestyle="-", marker=None, linewidth=1.5, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn plot(
         &mut self,
@@ -360,6 +360,8 @@ impl Axes {
         ls: Option<String>,
         markersize: Option<f64>,
         markeredgewidth: Option<f64>,
+        markerfacecolor: Option<String>,
+        markeredgecolor: Option<String>,
         solid_capstyle: Option<String>,
     ) -> PyResult<()> {
         // matplotlib 兼容：解析格式字符串
@@ -420,6 +422,8 @@ impl Axes {
             color_idx: idx,
             solid_capstyle: solid_capstyle.unwrap_or_else(|| "butt".to_string()),
             markersize,
+            markerfacecolor,
+            markeredgecolor,
         });
         if let Some(lbl) = actual_label {
             let c = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));

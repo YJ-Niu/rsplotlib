@@ -14,6 +14,12 @@ pub const DEFAULT_FIGSIZE: (f64, f64) = (12.0, 9.0);
 /// 默认 DPI
 pub const DEFAULT_DPI: f64 = 100.0;
 
+/// savefig 位图输出的超采样倍数：先按此倍数放大渲染（2× 边长 = 4× 像素），
+/// 再用盒式滤波（box filter）平均缩回目标尺寸。等效于 2×2 超采样抗锯齿（SSAA），
+/// 让文字、marker、曲线边缘平滑，明显优于无抗锯齿；相比 4×4 只渲染 1/4 像素，
+/// savefig 速度约为 4×4 的 2.7 倍，是画质与速度的平衡点。
+pub const SUPERSAMPLE: u32 = 2;
+
 pub(crate) static CURRENT_FIGURE: Mutex<Option<Py<Figure>>> = Mutex::new(None);
 
 pub fn set_current_figure(fig: Py<Figure>) {
@@ -162,34 +168,25 @@ impl Figure {
         let used_dpi = dpi.unwrap_or(self.dpi);
         let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            let buf_size = (self.width as usize) * (self.height as usize) * 3;
-            let mut buffer = vec![0u8; buf_size];
-            let backend: BitMapBackend<'_, plotters::backend::RGBPixel> = BitMapBackend::with_buffer_and_format(
-                &mut buffer,
-                (self.width, self.height),
-            )
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
-            self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
-            self.write_rgb_png(filename, &buffer, used_dpi)
+            // SSAA 超采样：先按 SUPERSAMPLE 倍边长渲染，再盒式滤波缩回目标尺寸，随后写索引 PNG。
+            // 降采样后量化到 256 色调色板：文件体积约为真彩的 1/3~1/4，画质近乎无损。
+            let rgb = self.render_downsampled_rgb(py, font_scale)?;
+            self.write_rgb_png_indexed(filename, &rgb, used_dpi)
         } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
-            let backend = BitMapBackend::new(filename, (self.width, self.height));
-            self.render_to_backend(py, backend, self.width, self.height, true, font_scale)
+            let rgb = self.render_downsampled_rgb(py, font_scale)?;
+            self.write_rgb_jpg(filename, &rgb)
         } else {
             // 使用完整像素尺寸作为SVG坐标空间，确保字体大小正确
-            let backend = SVGBackend::new(filename, (self.width, self.height));
-            self.render_to_backend(py, backend, self.width, self.height, false, font_scale)?;
+            let mut content = self.render_svg_string(py, font_scale)?;
             // 后处理：设置SVG物理尺寸为英寸单位，与matplotlib一致
-            if let Ok(content) = std::fs::read_to_string(filename) {
-                let width_in = self.width as f64 / used_dpi;
-                let height_in = self.height as f64 / used_dpi;
-                // plotters SVGBackend 输出 width="pixel_width" height="pixel_height"
-                // 替换为英寸单位
-                let content = content
-                    .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{:.4}in\"", width_in), 1)
-                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", height_in), 1)
-                    .replace("<polyline ", "<polyline stroke-linejoin=\"round\" stroke-linecap=\"round\" ");
-                let _ = std::fs::write(filename, content);
-            }
+            let width_in = self.width as f64 / used_dpi;
+            let height_in = self.height as f64 / used_dpi;
+            // plotters SVGBackend 输出 width="pixel_width" height="pixel_height"，替换为英寸单位
+            content = content
+                .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{:.4}in\"", width_in), 1)
+                .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", height_in), 1);
+            std::fs::write(filename, content)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write SVG: {}", e)))?;
             Ok(())
         }
     }
@@ -214,30 +211,133 @@ impl Figure {
 }
 
 impl Figure {
-    /// 将 RGB 像素缓冲写入 PNG 文件, 内嵌 DPI 元数据。
+    /// 用 SVG 矢量后端把整张图渲染为 SVG 字符串（坐标空间为像素尺寸）。
     ///
-    /// 输出为 8-bit 索引(调色板)PNG: 每像素 1 字节 + 调色板, 体积约为直接 RGB 的 1/4。
-    fn write_rgb_png(&self, filename: &str, rgb: &[u8], dpi: f64) -> PyResult<()> {
+    /// savefig(".svg") 用此入口，再把 width/height 改成英寸后落盘。
+    ///
+    /// 只注入 stroke-linejoin="round"（让折线拐角平滑，与位图 AA 的 round join 一致），
+    /// **不注入** stroke-linecap="round"：dash 段用 matplotlib 默认的 butt 平头端点。
+    /// 若强制 round 端点，每段短划 / 点会被两端半圆撑大且半圆朝向随切线变化，
+    /// 视觉上呈现"方向杂乱、不沿整体方向"——正是要避免的。默认 butt 端点使 dash
+    /// 段严格沿线方向、点保持短促，与位图路径 (draw_thick_polyline_aa, "butt") 一致。
+    fn render_svg_string(&self, py: Python, font_scale: f64) -> PyResult<String> {
+        use crate::figure::axes_render_elements::{clear_svg_dash_injects, take_svg_dash_injects};
+        // 渲染前清空收集表，避免上一次渲染残留的注入信息。
+        clear_svg_dash_injects();
+        let mut svg = String::new();
+        {
+            let backend = SVGBackend::with_string(&mut svg, (self.width, self.height));
+            self.render_to_backend(py, backend, self.width, self.height, false, font_scale)?;
+        }
+        // 虚线在 SVG 分支被画成整条连续 polyline；此处按收集到的 (颜色, 首点, dasharray)
+        // 精确定位每条并注入原生 stroke-dasharray + butt 端点，使各段 dash 相位连续、
+        // 像素形状规律一致。必须在下面 linejoin 替换之前做（那次替换会在 `<polyline `
+        // 之后再插入 linejoin，两属性并存、互不影响）。
+        let injects = take_svg_dash_injects();
+        Self::inject_dash(&mut svg, &injects);
+        let svg = svg.replace("<polyline ", "<polyline stroke-linejoin=\"round\" ");
+        Ok(svg)
+    }
+
+    /// 给 SVG 中的虚线 polyline 注入原生 `stroke-dasharray`（及 butt 端点）。
+    ///
+    /// plotters 的 SVG 后端不支持 dasharray，虚线在渲染阶段被画成一条**完整连续**的
+    /// polyline，同时把 (stroke 颜色 hex, 首点整数像素坐标, dasharray 字符串) 记录到线程
+    /// 本地收集表。这里用「颜色 + 首点坐标」在生成的 SVG 里唯一定位对应 polyline，
+    /// 在 `<polyline ` 之后插入 `stroke-dasharray="..." stroke-linecap="butt" `。
+    ///
+    /// plotters draw_path 输出的属性顺序固定为
+    /// `<polyline fill="none" opacity="1" stroke="#RRGGBB" stroke-width="N" points="X0,Y0 ..."/>`，
+    /// 故用 `stroke="{color}" stroke-width="` 作为锚点定位标签，再核对 `points="X0,Y0 `
+    /// 前缀确认是目标虚线。已注入过 dasharray 的标签会被跳过，避免重复注入。
+    fn inject_dash(svg: &mut String, injects: &[(String, i32, i32, String)]) {
+        for (color, x0, y0, darr) in injects {
+            let color_needle = format!("stroke=\"{}\" stroke-width=\"", color);
+            let pts_prefix = format!("{},{} ", x0, y0);
+            let mut from = 0usize;
+            while let Some(rel) = svg[from..].find(&color_needle) {
+                let cpos = from + rel;
+                let tag_start = match svg[..cpos].rfind('<') {
+                    Some(p) => p,
+                    None => { from = cpos + color_needle.len(); continue; }
+                };
+                if svg[tag_start..].starts_with("<polyline")
+                    && let Some(prel) = svg[cpos..].find("points=\"")
+                {
+                    let ppos = cpos + prel + "points=\"".len();
+                    if svg[ppos..].starts_with(&pts_prefix) {
+                        if !svg[tag_start..ppos].contains("stroke-dasharray") {
+                            let attr = format!(
+                                "stroke-dasharray=\"{}\" stroke-linecap=\"butt\" ",
+                                darr
+                            );
+                            svg.insert_str(tag_start + "<polyline ".len(), &attr);
+                        }
+                        break;
+                    }
+                }
+                from = cpos + color_needle.len();
+            }
+        }
+    }
+
+    /// 以 SUPERSAMPLE 倍边长渲染整张图到 RGB 缓冲，再盒式滤波缩回目标尺寸。
+    ///
+    /// 等效 SUPERSAMPLE×SUPERSAMPLE 超采样抗锯齿：在 (width*ss, height*ss) 的大画布上光栅化，
+    /// 每 ss×ss 个源像素取平均得到一个目标像素，使文字、marker、曲线边缘更平滑。
+    /// 返回长度 width*height*3 的 RGB 缓冲（行主序，每像素 R,G,B）。
+    fn render_downsampled_rgb(&self, py: Python, font_scale: f64) -> PyResult<Vec<u8>> {
+        let ss = SUPERSAMPLE;
+        let sw = self.width * ss;
+        let sh = self.height * ss;
+        let mut hi = vec![0u8; (sw as usize) * (sh as usize) * 3];
+        {
+            let backend: BitMapBackend<'_, plotters::backend::RGBPixel> =
+                BitMapBackend::with_buffer_and_format(&mut hi, (sw, sh))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
+            // 传 actual_w/h = 超采样尺寸（render_to_backend 据此算出 ss 并放大各布局常量），
+            // font_scale 也乘以 ss，让字体/线宽在放大画布上同比放大。
+            self.render_to_backend(py, backend, sw, sh, true, font_scale * ss as f64)?;
+        }
+        Ok(downsample_box(&hi, sw, sh, ss))
+    }
+
+    /// 将 RGB 像素缓冲量化为至多 256 色调色板后写入索引（8-bit indexed）PNG 文件, 内嵌 DPI 元数据。
+    ///
+    /// 超采样降采样后的图含上万种颜色（多为抗锯齿混合色），真彩 PNG 每像素 3 字节、
+    /// 文件较大。用八叉树（octree）量化出至多 256 色调色板、每像素只存 1 字节索引，
+    /// 文件体积约为真彩的 1/3~1/4，且绘图内容（少数纯色 + 边缘混合色）用 256 色足以
+    /// 近乎无损重现。八叉树映射只需 O(树深) 遍历，比 NeuQuant 快一个量级。
+    fn write_rgb_png_indexed(&self, filename: &str, rgb: &[u8], dpi: f64) -> PyResult<()> {
+        // palette: 长度 = 3*色数 的 RGB 连续调色板；indices: 每像素调色板下标。
+        let (palette, indices) = quantize_octree(rgb, 256);
+
         let ppm = (dpi / 0.0254).round() as u32;
         let dims = png::PixelDimensions { xppu: ppm, yppu: ppm, unit: png::Unit::Meter };
         let file = File::create(filename)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
-        let npx = (self.width as usize) * (self.height as usize);
-        let (palette, indices) = rgb_to_indexed(rgb, npx);
         let mut encoder = png::Encoder::new(file, self.width, self.height);
         encoder.set_color(png::ColorType::Indexed);
         encoder.set_depth(png::BitDepth::Eight);
         encoder.set_palette(palette);
-        // 索引数据以大面积同值游程为主。刻意采用较轻的压缩（zlib level 1 + Sub 行滤波），
-        // 使输出文件体积约为默认 Balanced(level 6) 的 1.5 倍——按需求保留更宽裕的落盘体积；
-        // level 1 编码更快，故 savefig 速度不受影响。图像内容无损、逐像素一致。
-        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
-        encoder.set_filter(png::Filter::Sub);
         encoder.set_pixel_dims(Some(dims));
+        // PNG 无损：Fast(fdeflate) 编码极快，索引数据本就小，压缩比也很好。
+        encoder.set_compression(png::Compression::Fast);
         let mut writer = encoder.write_header()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
         writer.write_image_data(&indices)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+        Ok(())
+    }
+
+    /// 将 RGB 像素缓冲编码为 JPEG（质量 90）写入文件。
+    fn write_rgb_jpg(&self, filename: &str, rgb: &[u8]) -> PyResult<()> {
+        use jpeg_encoder::{ColorType, Encoder};
+        let encoder = Encoder::new_file(filename, 90)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create JPEG encoder: {}", e)))?;
+        encoder
+            .encode(rgb, self.width as u16, self.height as u16, ColorType::Rgb)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to encode JPEG: {}", e)))?;
         Ok(())
     }
 
@@ -247,10 +347,22 @@ impl Figure {
     {
         let root = backend.into_drawing_area();
 
+        // 超采样倍数：位图 savefig 会以 self.width*ss × self.height*ss 的画布渲染
+        // （actual_w = self.width*ss），再盒式滤波缩回原尺寸。ss>1 时所有尺寸
+        // （字体/线宽已由 font_scale 体现、marker、以及下面的固定像素常量）都要
+        // 同步放大，否则超采样画布上的布局比例会失真。SVG/普通位图 ss=1。
+        let ss = (actual_w as f64 / (self.width.max(1) as f64)).max(1.0);
+
         // marker 尺寸单位是 points，其像素大小取决于图形真实分辨率 (self.dpi)，
         // 与 savefig 传入的 font_scale (影响字体/线宽) 解耦：markersize 只调整
-        // marker 大小，不随字体/线宽缩放变化。
-        let marker_scale = self.dpi / 72.0;
+        // marker 大小，不随字体/线宽缩放变化。超采样时需乘以 ss 才能在放大画布上
+        // 保持正确的相对大小。
+        let marker_scale = (self.dpi / 72.0) * ss;
+
+        // tick/label 区域里除字体外的固定像素 padding，超采样时按 ss 放大。
+        let pad6 = (6.0 * ss).round() as u32;
+        let pad2 = (2.0 * ss).round() as u32;
+        let title_gap = (4.0 * ss).round() as u32;
 
         // 仅位图后端填充白色背景，避免在SVG中产生额外的背景rect，
         // 保持与matplotlib的SVG输出一致（matplotlib SVG仅在axes区域内有白色背景）
@@ -312,8 +424,8 @@ impl Figure {
             let tick_label_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale).ceil() as u32;
 
             // 估算 y/x tick label 区域大小（容纳最长的 tick 数字 + 少量 padding）
-            let y_tick_area = tick_label_size + 6;
-            let x_tick_area = tick_label_size + 6;
+            let y_tick_area = tick_label_size + pad6;
+            let x_tick_area = tick_label_size + pad6;
 
             // 检测 y 轴是否有可见的 tick 标签或 ylabel
             // 条件：ylabel 非空 或 (yticks_val 未被设为空 且 tick_left 或 tick_right 为真)
@@ -330,18 +442,18 @@ impl Figure {
             // plotters 会把 y_desc 放在 y_label_area 中心，tick label 放在 y_label_area 右边缘
             // 如果没有 label 和 tick，最小保留 2px 以确保 plotters 正确绘制边界 spine
             let y_label_area = if !y_has_labels {
-                2u32
+                pad2
             } else if ax.ylabel.is_empty() {
                 y_tick_area
             } else {
-                y_tick_area + tick_label_size + 6
+                y_tick_area + tick_label_size + pad6
             };
             let x_label_area = if !x_has_labels {
-                2u32
+                pad2
             } else if ax.xlabel.is_empty() {
                 x_tick_area
             } else {
-                x_tick_area + tick_label_size + 6
+                x_tick_area + tick_label_size + pad6
             };
             // 抑制未使用变量警告
             let _ = y_has_ticks;
@@ -350,7 +462,7 @@ impl Figure {
             // 顶部边距：ax.title 是通过 chart.draw_series(Text) 渲染的，
             // 文字在数据区顶部 y_max 处向上延伸 (VPos::Bottom)，所以不需要 plotters margin_top
             // 保留少量 margin_top 作为 title 与数据区之间的视觉间距
-            let margin_top_internal = if ax.title.is_empty() { 0u32 } else { 4u32 };
+            let margin_top_internal = if ax.title.is_empty() { 0u32 } else { title_gap };
 
             // 关键修复：chart 区域向左侧/上扩展，使 plotters 的 y_label_area 和 margin_top
             // 容纳在子图外部，最终 data area 正好等于 subplot 区域（与 matplotlib 一致）
@@ -415,8 +527,8 @@ impl Figure {
                 let (uy_min, uy_max) = if twin.is_twin_y { (ty_min, ty_max) } else { (y_min, y_max) };
                 // twin axes 使用与主轴相同的 chart_area，但 label area 在右侧/顶部
                 let twin_tick_size = crate::figure::axes::scale_font(twin.tick_labelsize, font_scale).ceil() as u32;
-                let twin_y_label_area = twin_tick_size + 6;
-                let twin_x_label_area = twin_tick_size + 6;
+                let twin_y_label_area = twin_tick_size + pad6;
+                let twin_x_label_area = twin_tick_size + pad6;
                 let mut twin_chart = ChartBuilder::on(&chart_area)
                     .margin_top(0)
                     .margin_right(0)
@@ -450,96 +562,453 @@ pub fn get_default_dpi() -> f64 {
     DEFAULT_DPI
 }
 
-/// 24-bit 颜色键的乘法散列: 单次乘法即完成混合, 远快于默认 SipHash,
-/// 用于在百万像素上统计颜色频次。
-#[derive(Default)]
-struct ColorHasher(u64);
-impl std::hash::Hasher for ColorHasher {
-    #[inline]
-    fn finish(&self) -> u64 {
-        self.0
+/// 盒式滤波下采样：把 (sw, sh) 的 RGB 缓冲按 factor×factor 块求平均，
+/// 缩到 (sw/factor, sh/factor)。用于 savefig 的超采样抗锯齿。
+///
+/// 每个目标像素 = 对应 factor×factor 源像素各通道的算术平均（带 +area/2 四舍五入）。
+/// 要求 sw、sh 均为 factor 的整数倍（render_downsampled_rgb 保证：sw=width*ss）。
+///
+/// 输出按目标行水平切块，用 std::thread::scope 并行填充：各线程读取源缓冲的
+/// 只读切片、写各自独立的输出行段，无数据竞争。大图（16× 像素）下明显提速。
+fn downsample_box(src: &[u8], sw: u32, sh: u32, factor: u32) -> Vec<u8> {
+    let dw = (sw / factor) as usize;
+    let dh = (sh / factor) as usize;
+    let sw = sw as usize;
+    let mut out = vec![0u8; dw * dh * 3];
+    if dh == 0 || dw == 0 {
+        return out;
     }
-    #[inline]
-    fn write(&mut self, bytes: &[u8]) {
-        let mut h = self.0;
-        for &b in bytes {
-            h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+    let nthreads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(dh)
+        .min(8);
+    if nthreads <= 1 {
+        downsample_rows(src, &mut out, 0, dh, dw, sw, factor as usize);
+        return out;
+    }
+    let rows_per = dh.div_ceil(nthreads);
+    std::thread::scope(|scope| {
+        let mut rest = out.as_mut_slice();
+        let mut start = 0usize;
+        while start < dh {
+            let end = (start + rows_per).min(dh);
+            let take = (end - start) * dw * 3;
+            let (chunk, tail) = rest.split_at_mut(take);
+            rest = tail;
+            scope.spawn(move || {
+                downsample_rows(src, chunk, start, end, dw, sw, factor as usize);
+            });
+            start = end;
         }
-        self.0 = h;
-    }
-    #[inline]
-    fn write_u32(&mut self, i: u32) {
-        self.0 = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    });
+    out
+}
+
+/// 对目标行区间 [dy_start, dy_end) 做盒式平均，结果写入 `dst`（dst 从该区间起始行开始，
+/// 局部下标从 0 计）。供 downsample_box 单线程或并行分块调用。
+fn downsample_rows(src: &[u8], dst: &mut [u8], dy_start: usize, dy_end: usize, dw: usize, sw: usize, f: usize) {
+    let area = (f * f) as u32;
+    let half = area / 2;
+    let stride = sw * 3;
+    for dy in dy_start..dy_end {
+        let row_base = dy * f * stride;
+        let dst_row = (dy - dy_start) * dw * 3;
+        for dx in 0..dw {
+            let mut r = 0u32;
+            let mut g = 0u32;
+            let mut b = 0u32;
+            let mut base = row_base + dx * f * 3;
+            for _ in 0..f {
+                let mut idx = base;
+                for _ in 0..f {
+                    // SAFETY: 调用方保证 sw、sh 均为 f 的整数倍，故 dy*f+j < sh、dx*f+k < sw，
+                    // 因此 idx+2 < src.len()、o+2 < dst.len()，全部索引恒在界内。用 get_unchecked
+                    // 消除逐像素边界检查，让这段热循环可被自动向量化。
+                    unsafe {
+                        r += *src.get_unchecked(idx) as u32;
+                        g += *src.get_unchecked(idx + 1) as u32;
+                        b += *src.get_unchecked(idx + 2) as u32;
+                    }
+                    idx += 3;
+                }
+                base += stride;
+            }
+            let o = dst_row + dx * 3;
+            unsafe {
+                *dst.get_unchecked_mut(o) = ((r + half) / area) as u8;
+                *dst.get_unchecked_mut(o + 1) = ((g + half) / area) as u8;
+                *dst.get_unchecked_mut(o + 2) = ((b + half) / area) as u8;
+            }
+        }
     }
 }
 
-/// 将 RGB 缓冲转换为 8-bit 索引 + 调色板 (RGB 三元组)。
+/// 八叉树深度：RGB 各 8 bit，最多 8 层细分。
+const OCTREE_LEVELS: usize = 8;
+/// children 中"无子节点"的哨兵值（节点存于 arena 的下标，u32::MAX 表示空）。
+const OCTREE_NONE: u32 = u32::MAX;
+
+/// 八叉树节点。内部节点只做路由（children 指向子节点，累加量为 0）；
+/// 叶子节点累计落入该颜色区域的像素数与各通道分量之和，用于算平均色。
+struct OctreeNode {
+    is_leaf: bool,
+    pixel_count: u64,
+    r_sum: u64,
+    g_sum: u64,
+    b_sum: u64,
+    children: [u32; 8],
+    palette_index: u16,
+}
+
+impl OctreeNode {
+    fn new(is_leaf: bool) -> Self {
+        OctreeNode {
+            is_leaf,
+            pixel_count: 0,
+            r_sum: 0,
+            g_sum: 0,
+            b_sum: 0,
+            children: [OCTREE_NONE; 8],
+            palette_index: 0,
+        }
+    }
+}
+
+/// Gervautz–Purgathofer 八叉树颜色量化器。
 ///
-/// - 颜色数 ≤256: 无损索引化。
-/// - 颜色数 >256: 保留出现频次最高的 256 色 (精确无损, 覆盖绝大多数像素),
-///   其余稀有颜色映射到最近的保留色。相比神经网络量化 (NeuQuant) 更快且更接近无损:
-///   常见色 (背景/线条/主要抗锯齿灰阶) 完全保真, 仅极少数边缘杂色被就近合并。
-fn rgb_to_indexed(rgb: &[u8], npx: usize) -> (Vec<u8>, Vec<u8>) {
-    use std::collections::HashMap;
-    use std::hash::BuildHasherDefault;
+/// 每种颜色按 RGB 比特位从高到低逐层选子节点插入，到第 8 层落成叶子。叶子数超过
+/// 上限时，从最深可归约层取一个内部节点，把它的（此时必为叶子的）子节点合并进它、
+/// 自身变叶子，从而减少颜色数。映射时同样按比特位下行到叶子取调色板下标，O(树深)。
+struct Octree {
+    nodes: Vec<OctreeNode>,
+    /// reducible[level] = 该层所有"内部节点"的 arena 下标；归约时优先取最深层。
+    reducible: Vec<Vec<u32>>,
+    leaf_count: usize,
+    max_colors: usize,
+}
+
+impl Octree {
+    fn new(max_colors: usize) -> Self {
+        let mut nodes = Vec::with_capacity(2048);
+        nodes.push(OctreeNode::new(false)); // 根节点（内部节点），下标 0
+        Octree {
+            nodes,
+            reducible: vec![Vec::new(); OCTREE_LEVELS],
+            leaf_count: 0,
+            max_colors,
+        }
+    }
+
+    /// 第 `level` 层用哪个 bit 选子节点（0 层用最高位 bit7）。
     #[inline(always)]
-    fn key(c: &[u8]) -> u32 {
-        ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | (c[2] as u32)
+    fn child_index(r: u32, g: u32, b: u32, level: usize) -> usize {
+        let bit = 7 - level;
+        ((((r >> bit) & 1) << 2) | (((g >> bit) & 1) << 1) | ((b >> bit) & 1)) as usize
     }
-    // 统计每种颜色出现频次 (单遍扫描)。颜色键为 24-bit 整数, 用乘法散列避免
-    // SipHash 在百万像素上的高开销。
-    let mut counts: HashMap<u32, u32, BuildHasherDefault<ColorHasher>> = HashMap::default();
-    for px in rgb.chunks_exact(3) {
-        *counts.entry(key(px)).or_insert(0) += 1;
+
+    /// 插入一种颜色（`weight` = 该颜色的像素数）：下行到叶子并按权累加，
+    /// 之后按需归约到颜色上限内。加权累加使叶子平均色为像素加权质心，
+    /// 画质与"逐像素插入"完全等价，但只需按唯一色调用一次。
+    fn add_color(&mut self, r: u8, g: u8, b: u8, weight: u64) {
+        let (r, g, b) = (r as u32, g as u32, b as u32);
+        let mut nid = 0usize;
+        for level in 0..OCTREE_LEVELS {
+            if self.nodes[nid].is_leaf {
+                break;
+            }
+            let ci = Self::child_index(r, g, b, level);
+            let child = self.nodes[nid].children[ci];
+            nid = if child == OCTREE_NONE {
+                let new_id = self.nodes.len();
+                let make_leaf = level + 1 >= OCTREE_LEVELS;
+                self.nodes.push(OctreeNode::new(make_leaf));
+                self.nodes[nid].children[ci] = new_id as u32;
+                if make_leaf {
+                    self.leaf_count += 1;
+                } else {
+                    self.reducible[level + 1].push(new_id as u32);
+                }
+                new_id
+            } else {
+                child as usize
+            };
+        }
+        let node = &mut self.nodes[nid];
+        node.pixel_count += weight;
+        node.r_sum += r as u64 * weight;
+        node.g_sum += g as u64 * weight;
+        node.b_sum += b as u64 * weight;
+
+        while self.leaf_count > self.max_colors {
+            self.reduce();
+        }
     }
-    // 选取最多 256 种颜色作为调色板 (按频次降序; ≤256 时即全部, 无损)。
-    let over = counts.len() > 256;
-    let palette_keys: Vec<u32> = if over {
-        let mut pairs: Vec<(u32, u32)> = counts.iter().map(|(&k, &n)| (k, n)).collect();
-        pairs.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-        pairs.into_iter().take(256).map(|(k, _)| k).collect()
-    } else {
-        counts.keys().copied().collect()
-    };
-    let mut palette: Vec<u8> = Vec::with_capacity(palette_keys.len() * 3);
-    for &k in &palette_keys {
-        palette.push((k >> 16) as u8);
-        palette.push((k >> 8) as u8);
-        palette.push(k as u8);
+
+    /// 归约一次：取最深可归约层的一个内部节点，合并其子叶子、自身变叶子。
+    ///
+    /// 因为总是取最深非空层，被归约节点的子节点必然都已是叶子（若有内部子节点，
+    /// 它会登记在更深层，与"最深非空"矛盾），故可直接累加子节点的分量和。
+    fn reduce(&mut self) {
+        let mut level = OCTREE_LEVELS - 1;
+        while level > 0 && self.reducible[level].is_empty() {
+            level -= 1;
+        }
+        let nid = match self.reducible[level].pop() {
+            Some(id) => id as usize,
+            None => return,
+        };
+        let children = self.nodes[nid].children;
+        let mut r = 0u64;
+        let mut g = 0u64;
+        let mut b = 0u64;
+        let mut cnt = 0u64;
+        let mut merged = 0usize;
+        for c in children {
+            if c != OCTREE_NONE {
+                let child = &self.nodes[c as usize];
+                r += child.r_sum;
+                g += child.g_sum;
+                b += child.b_sum;
+                cnt += child.pixel_count;
+                merged += 1;
+            }
+        }
+        let node = &mut self.nodes[nid];
+        node.is_leaf = true;
+        node.r_sum = r;
+        node.g_sum = g;
+        node.b_sum = b;
+        node.pixel_count = cnt;
+        node.children = [OCTREE_NONE; 8];
+        self.leaf_count -= merged;
+        self.leaf_count += 1;
     }
-    // 24-bit 颜色 -> 调色板索引 的直接查找表: 逐像素映射用数组下标代替哈希, 显著提速。
-    let mut lut = vec![0u8; 1 << 24];
-    if over {
-        // 为每种出现过的颜色定位最近的保留色 (保留色命中自身, 提前退出)。
-        for &k in counts.keys() {
-            let r = (k >> 16) as i32 & 0xff;
-            let g = (k >> 8) as i32 & 0xff;
-            let b = k as i32 & 0xff;
-            let mut best = 0usize;
-            let mut best_d = u32::MAX;
-            for (i, &pk) in palette_keys.iter().enumerate() {
-                let dr = r - ((pk >> 16) as i32 & 0xff);
-                let dg = g - ((pk >> 8) as i32 & 0xff);
-                let db = b - (pk as i32 & 0xff);
-                let d = (dr * dr + dg * dg + db * db) as u32;
-                if d < best_d {
-                    best_d = d;
-                    best = i;
-                    if d == 0 {
-                        break;
+
+    /// 遍历所有叶子生成 RGB 调色板（叶子平均色），同时把调色板下标写回叶子节点。
+    fn build_palette(&mut self) -> Vec<u8> {
+        let mut palette = Vec::with_capacity(self.leaf_count * 3);
+        let mut idx: u16 = 0;
+        let mut stack = vec![0u32];
+        while let Some(nid) = stack.pop() {
+            let nid = nid as usize;
+            if self.nodes[nid].is_leaf {
+                let cnt = self.nodes[nid].pixel_count.max(1);
+                palette.push((self.nodes[nid].r_sum / cnt) as u8);
+                palette.push((self.nodes[nid].g_sum / cnt) as u8);
+                palette.push((self.nodes[nid].b_sum / cnt) as u8);
+                self.nodes[nid].palette_index = idx;
+                idx += 1;
+            } else {
+                let children = self.nodes[nid].children;
+                for c in children {
+                    if c != OCTREE_NONE {
+                        stack.push(c);
                     }
                 }
             }
-            lut[k as usize] = best as u8;
+        }
+        palette
+    }
+
+    /// 把一种颜色映射到调色板下标：按比特位下行到叶子取 palette_index。
+    #[inline]
+    fn index_of(&self, r: u8, g: u8, b: u8) -> u8 {
+        let (r, g, b) = (r as u32, g as u32, b as u32);
+        let mut nid = 0usize;
+        for level in 0..OCTREE_LEVELS {
+            let node = &self.nodes[nid];
+            if node.is_leaf {
+                return node.palette_index as u8;
+            }
+            let ci = Self::child_index(r, g, b, level);
+            let child = node.children[ci];
+            if child == OCTREE_NONE {
+                return node.palette_index as u8; // 防御：映射的颜色均已插入过，理论上不会走到
+            }
+            nid = child as usize;
+        }
+        self.nodes[nid].palette_index as u8
+    }
+}
+
+/// Fibonacci 散列常数（2^32 / 黄金比例），用于去重哈希表。
+const DEDUP_HASH_MUL: u32 = 0x9E37_79B1;
+
+/// 单个像素条带（band）去重结果。
+struct BandDedup {
+    /// local id -> 24-bit 颜色（首次出现顺序）
+    keys: Vec<u32>,
+    /// local id -> 该颜色在本条带内的像素数
+    cnt: Vec<u32>,
+    /// 本条带每像素的 local id（长度 = 条带像素数）
+    ids: Vec<u32>,
+}
+
+/// 对一段连续 RGB 像素做颜色去重：返回条带内唯一色（首次出现顺序）、各色像素数、
+/// 及每像素的条带内 local id。开放寻址哈希表（2 的幂容量、Fibonacci 散列、线性探测）
+/// + "上一像素颜色"缓存吃掉大片同色区。供 quantize_octree 单线程或并行分块调用。
+fn dedup_band(rgb: &[u8]) -> BandDedup {
+    let npix = rgb.len() / 3;
+    let mut bits = 14u32; // 每条带初始 16384 槽，驻留 CPU 缓存
+    let mut slots = vec![u32::MAX; 1usize << bits];
+    let mut mask = slots.len() - 1;
+    let mut keys: Vec<u32> = Vec::new();
+    let mut cnt: Vec<u32> = Vec::new();
+    let mut ids = vec![0u32; npix];
+    let mut prev_key = u32::MAX;
+    let mut prev_id = 0u32;
+    for i in 0..npix {
+        let key = ((rgb[i * 3] as u32) << 16) | ((rgb[i * 3 + 1] as u32) << 8) | (rgb[i * 3 + 2] as u32);
+        let id = if key == prev_key {
+            prev_id
+        } else {
+            let mut slot = (key.wrapping_mul(DEDUP_HASH_MUL) >> (32 - bits)) as usize;
+            loop {
+                let s = slots[slot];
+                if s == u32::MAX {
+                    let id = keys.len() as u32;
+                    slots[slot] = id;
+                    keys.push(key);
+                    cnt.push(0);
+                    // 装载率 > 3/4 时翻倍重散列（极少触发）。
+                    if keys.len() * 4 >= slots.len() * 3 {
+                        bits += 1;
+                        slots = vec![u32::MAX; 1usize << bits];
+                        mask = slots.len() - 1;
+                        for (uid, &k) in keys.iter().enumerate() {
+                            let mut sl = (k.wrapping_mul(DEDUP_HASH_MUL) >> (32 - bits)) as usize;
+                            while slots[sl] != u32::MAX {
+                                sl = (sl + 1) & mask;
+                            }
+                            slots[sl] = uid as u32;
+                        }
+                    }
+                    break id;
+                } else if keys[s as usize] == key {
+                    break s;
+                }
+                slot = (slot + 1) & mask;
+            }
+        };
+        prev_key = key;
+        prev_id = id;
+        ids[i] = id;
+        cnt[id as usize] += 1;
+    }
+    BandDedup { keys, cnt, ids }
+}
+
+/// 八叉树颜色量化：把 RGB 缓冲量化到至多 `max_colors` 种颜色。
+///
+/// 返回 `(palette, indices)`：palette 为 RGB 三元组连续排列（长度 = 3 * 色数），
+/// indices 为每像素的调色板下标（长度 = 像素数）。用于把真彩缓冲写成索引 PNG，
+/// 文件体积约降到真彩的 1/3~1/4，且映射为 O(树深)、确定性、对纯色保留极好。
+///
+/// 去重是最重的一步（要扫描全部像素）。将像素按条带切分、多线程各自建局部去重表，
+/// 再按**固定的条带顺序**合并为全局唯一色（保证结果确定、可复现），最后按条带并行
+/// 回填每像素索引。建树/求调色板只处理去重后的少量颜色（典型上万），成本很小。
+fn quantize_octree(rgb: &[u8], max_colors: usize) -> (Vec<u8>, Vec<u8>) {
+    let npix = rgb.len() / 3;
+
+    // ---- 并行去重 ----
+    // 绘图图像颜色种类通常只有上万种（远少于像素数），但抗锯齿边缘会产生大量混合色。
+    // 各线程处理一段像素、产出局部唯一色 + 每像素 local id，避免对上百万像素串行走哈希。
+    let nthreads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(8);
+    let bands: Vec<BandDedup> = if nthreads <= 1 || npix < 200_000 {
+        vec![dedup_band(rgb)]
+    } else {
+        let pix_per = npix.div_ceil(nthreads);
+        std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            let mut start = 0usize;
+            while start < npix {
+                let end = (start + pix_per).min(npix);
+                let slice = &rgb[start * 3..end * 3];
+                handles.push(scope.spawn(move || dedup_band(slice)));
+                start = end;
+            }
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        })
+    };
+
+    // ---- 合并各条带唯一色为全局唯一色 ----
+    // 按 band 顺序、band 内首次出现顺序插入全局哈希表，结果确定、可复现。
+    // 全局表按各条带唯一色总数一次性开够（装载率 < 3/4），合并中不再重散列。
+    let total_local: usize = bands.iter().map(|b| b.keys.len()).sum();
+    let mut gbits = 15u32;
+    while (1usize << gbits) * 3 < total_local.saturating_mul(4).max(1) {
+        gbits += 1;
+    }
+    let mut gslots = vec![u32::MAX; 1usize << gbits];
+    let gmask = gslots.len() - 1;
+    let mut uniq_key: Vec<u32> = Vec::new();
+    let mut uniq_cnt: Vec<u32> = Vec::new();
+    // 每条带 local id -> 全局 id 的重映射表
+    let mut remaps: Vec<Vec<u32>> = Vec::with_capacity(bands.len());
+    for b in &bands {
+        let mut remap = vec![0u32; b.keys.len()];
+        for (lid, &key) in b.keys.iter().enumerate() {
+            let mut slot = (key.wrapping_mul(DEDUP_HASH_MUL) >> (32 - gbits)) as usize;
+            let gid = loop {
+                let s = gslots[slot];
+                if s == u32::MAX {
+                    let gid = uniq_key.len() as u32;
+                    gslots[slot] = gid;
+                    uniq_key.push(key);
+                    uniq_cnt.push(0);
+                    break gid;
+                } else if uniq_key[s as usize] == key {
+                    break s;
+                }
+                slot = (slot + 1) & gmask;
+            };
+            remap[lid] = gid;
+            uniq_cnt[gid as usize] += b.cnt[lid];
+        }
+        remaps.push(remap);
+    }
+
+    // ---- 建树 ----
+    // 只对每种全局唯一色调用一次 add_color，按其像素数加权，叶子平均色即像素加权质心。
+    let mut tree = Octree::new(max_colors);
+    for (id, &key) in uniq_key.iter().enumerate() {
+        tree.add_color((key >> 16) as u8, (key >> 8) as u8, key as u8, uniq_cnt[id] as u64);
+    }
+    let palette = tree.build_palette();
+
+    // ---- 映射 ----
+    // 每种全局唯一色求一次调色板下标，再按条带并行回填每像素：
+    // 条带内 local id --remap--> 全局 id --uniq_pidx--> 调色板下标（顺序访问、查小表，缓存友好）。
+    let uniq_pidx: Vec<u8> = uniq_key
+        .iter()
+        .map(|&key| tree.index_of((key >> 16) as u8, (key >> 8) as u8, key as u8))
+        .collect();
+    let mut indices = vec![0u8; npix];
+    if bands.len() == 1 {
+        let b = &bands[0];
+        let remap = &remaps[0];
+        for (i, &lid) in b.ids.iter().enumerate() {
+            indices[i] = uniq_pidx[remap[lid as usize] as usize];
         }
     } else {
-        for (i, &k) in palette_keys.iter().enumerate() {
-            lut[k as usize] = i as u8;
-        }
-    }
-    let mut indices: Vec<u8> = Vec::with_capacity(npx);
-    for px in rgb.chunks_exact(3) {
-        indices.push(lut[key(px) as usize]);
+        std::thread::scope(|scope| {
+            let mut rest = indices.as_mut_slice();
+            for (b, remap) in bands.iter().zip(remaps.iter()) {
+                let (chunk, tail) = rest.split_at_mut(b.ids.len());
+                rest = tail;
+                let ids = &b.ids;
+                let up = &uniq_pidx;
+                scope.spawn(move || {
+                    for (j, &lid) in ids.iter().enumerate() {
+                        chunk[j] = up[remap[lid as usize] as usize];
+                    }
+                });
+            }
+        });
     }
     (palette, indices)
 }

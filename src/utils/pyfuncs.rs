@@ -565,7 +565,7 @@ pub fn subplots(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, solid_capstyle=None))]
+#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn plot<'a>(
     py: Python<'a>,
@@ -581,10 +581,12 @@ pub fn plot<'a>(
     ls: Option<String>,
     markersize: Option<f64>,
     markeredgewidth: Option<f64>,
+    markerfacecolor: Option<String>,
+    markeredgecolor: Option<String>,
     solid_capstyle: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
+        ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, markerfacecolor, markeredgecolor, solid_capstyle)?;
     })
 }
 
@@ -659,7 +661,7 @@ pub fn semilogx<'a>(
         ax.set_xscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
     })
 }
 
@@ -680,7 +682,7 @@ pub fn semilogy<'a>(
         ax.set_yscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
     })
 }
 
@@ -702,7 +704,7 @@ pub fn loglog<'a>(
         ax.set_yscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
     })
 }
 
