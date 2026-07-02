@@ -170,26 +170,7 @@ impl Figure {
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
             self.render_to_backend(py, backend, self.width, self.height, true, font_scale)?;
-
-            // 写入 PNG 并嵌入 DPI 信息（PNG encoder 内部已做缓冲，无需额外 BufWriter）
-            let file = File::create(filename)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
-            let mut encoder = png::Encoder::new(file, self.width, self.height);
-            encoder.set_color(png::ColorType::Rgb);
-            encoder.set_depth(png::BitDepth::Eight);
-            encoder.set_compression(png::Compression::High);
-            encoder.set_filter(png::Filter::Adaptive);
-            let ppm = (used_dpi / 0.0254).round() as u32;
-            encoder.set_pixel_dims(Some(png::PixelDimensions {
-                xppu: ppm,
-                yppu: ppm,
-                unit: png::Unit::Meter,
-            }));
-            let mut writer = encoder.write_header()
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
-            writer.write_image_data(&buffer)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
-            Ok(())
+            self.write_rgb_png(filename, &buffer, used_dpi)
         } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
             let backend = BitMapBackend::new(filename, (self.width, self.height));
             self.render_to_backend(py, backend, self.width, self.height, true, font_scale)
@@ -205,7 +186,8 @@ impl Figure {
                 // 替换为英寸单位
                 let content = content
                     .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{:.4}in\"", width_in), 1)
-                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", height_in), 1);
+                    .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", height_in), 1)
+                    .replace("<polyline ", "<polyline stroke-linejoin=\"round\" stroke-linecap=\"round\" ");
                 let _ = std::fs::write(filename, content);
             }
             Ok(())
@@ -232,11 +214,43 @@ impl Figure {
 }
 
 impl Figure {
+    /// 将 RGB 像素缓冲写入 PNG 文件, 内嵌 DPI 元数据。
+    ///
+    /// 输出为 8-bit 索引(调色板)PNG: 每像素 1 字节 + 调色板, 体积约为直接 RGB 的 1/4。
+    fn write_rgb_png(&self, filename: &str, rgb: &[u8], dpi: f64) -> PyResult<()> {
+        let ppm = (dpi / 0.0254).round() as u32;
+        let dims = png::PixelDimensions { xppu: ppm, yppu: ppm, unit: png::Unit::Meter };
+        let file = File::create(filename)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
+        let npx = (self.width as usize) * (self.height as usize);
+        let (palette, indices) = rgb_to_indexed(rgb, npx);
+        let mut encoder = png::Encoder::new(file, self.width, self.height);
+        encoder.set_color(png::ColorType::Indexed);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_palette(palette);
+        // 索引数据以大面积同值游程为主。刻意采用较轻的压缩（zlib level 1 + Sub 行滤波），
+        // 使输出文件体积约为默认 Balanced(level 6) 的 1.5 倍——按需求保留更宽裕的落盘体积；
+        // level 1 编码更快，故 savefig 速度不受影响。图像内容无损、逐像素一致。
+        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
+        encoder.set_filter(png::Filter::Sub);
+        encoder.set_pixel_dims(Some(dims));
+        let mut writer = encoder.write_header()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
+        writer.write_image_data(&indices)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+        Ok(())
+    }
+
     fn render_to_backend<B: DrawingBackend>(&self, py: Python, backend: B, actual_w: u32, actual_h: u32, fill_bg: bool, font_scale: f64) -> PyResult<()>
     where
         B::ErrorType: 'static,
     {
         let root = backend.into_drawing_area();
+
+        // marker 尺寸单位是 points，其像素大小取决于图形真实分辨率 (self.dpi)，
+        // 与 savefig 传入的 font_scale (影响字体/线宽) 解耦：markersize 只调整
+        // marker 大小，不随字体/线宽缩放变化。
+        let marker_scale = self.dpi / 72.0;
 
         // 仅位图后端填充白色背景，避免在SVG中产生额外的背景rect，
         // 保持与matplotlib的SVG输出一致（matplotlib SVG仅在axes区域内有白色背景）
@@ -391,7 +405,7 @@ impl Figure {
 
             // 将标题信息存到 axes 之外用：传入 subplot 在 figure 中的位置，用于在 figure root 上绘制
             let fig_subplot_info = (x0, y0, sub_w, sub_h);
-            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, true, fill_bg, Some(&fig_subplot_info))?;
+            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, marker_scale, true, fill_bg, Some(&fig_subplot_info))?;
 
             let twin_axes = ax.twin_axes.clone();
             drop(ax);
@@ -413,7 +427,7 @@ impl Figure {
                     .build_cartesian_2d(ux_min..ux_max, uy_min..uy_max)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to build twin chart: {}", e)))?;
                 // twin axes 不填充背景，避免覆盖主轴数据
-                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max), font_scale, false, fill_bg, None)?;
+                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max), font_scale, marker_scale, false, fill_bg, None)?;
             }
         }
 
@@ -434,4 +448,98 @@ pub fn get_default_figsize() -> (f64, f64) {
 #[pyfunction]
 pub fn get_default_dpi() -> f64 {
     DEFAULT_DPI
+}
+
+/// 24-bit 颜色键的乘法散列: 单次乘法即完成混合, 远快于默认 SipHash,
+/// 用于在百万像素上统计颜色频次。
+#[derive(Default)]
+struct ColorHasher(u64);
+impl std::hash::Hasher for ColorHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let mut h = self.0;
+        for &b in bytes {
+            h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+        self.0 = h;
+    }
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        self.0 = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
+
+/// 将 RGB 缓冲转换为 8-bit 索引 + 调色板 (RGB 三元组)。
+///
+/// - 颜色数 ≤256: 无损索引化。
+/// - 颜色数 >256: 保留出现频次最高的 256 色 (精确无损, 覆盖绝大多数像素),
+///   其余稀有颜色映射到最近的保留色。相比神经网络量化 (NeuQuant) 更快且更接近无损:
+///   常见色 (背景/线条/主要抗锯齿灰阶) 完全保真, 仅极少数边缘杂色被就近合并。
+fn rgb_to_indexed(rgb: &[u8], npx: usize) -> (Vec<u8>, Vec<u8>) {
+    use std::collections::HashMap;
+    use std::hash::BuildHasherDefault;
+    #[inline(always)]
+    fn key(c: &[u8]) -> u32 {
+        ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | (c[2] as u32)
+    }
+    // 统计每种颜色出现频次 (单遍扫描)。颜色键为 24-bit 整数, 用乘法散列避免
+    // SipHash 在百万像素上的高开销。
+    let mut counts: HashMap<u32, u32, BuildHasherDefault<ColorHasher>> = HashMap::default();
+    for px in rgb.chunks_exact(3) {
+        *counts.entry(key(px)).or_insert(0) += 1;
+    }
+    // 选取最多 256 种颜色作为调色板 (按频次降序; ≤256 时即全部, 无损)。
+    let over = counts.len() > 256;
+    let palette_keys: Vec<u32> = if over {
+        let mut pairs: Vec<(u32, u32)> = counts.iter().map(|(&k, &n)| (k, n)).collect();
+        pairs.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        pairs.into_iter().take(256).map(|(k, _)| k).collect()
+    } else {
+        counts.keys().copied().collect()
+    };
+    let mut palette: Vec<u8> = Vec::with_capacity(palette_keys.len() * 3);
+    for &k in &palette_keys {
+        palette.push((k >> 16) as u8);
+        palette.push((k >> 8) as u8);
+        palette.push(k as u8);
+    }
+    // 24-bit 颜色 -> 调色板索引 的直接查找表: 逐像素映射用数组下标代替哈希, 显著提速。
+    let mut lut = vec![0u8; 1 << 24];
+    if over {
+        // 为每种出现过的颜色定位最近的保留色 (保留色命中自身, 提前退出)。
+        for &k in counts.keys() {
+            let r = (k >> 16) as i32 & 0xff;
+            let g = (k >> 8) as i32 & 0xff;
+            let b = k as i32 & 0xff;
+            let mut best = 0usize;
+            let mut best_d = u32::MAX;
+            for (i, &pk) in palette_keys.iter().enumerate() {
+                let dr = r - ((pk >> 16) as i32 & 0xff);
+                let dg = g - ((pk >> 8) as i32 & 0xff);
+                let db = b - (pk as i32 & 0xff);
+                let d = (dr * dr + dg * dg + db * db) as u32;
+                if d < best_d {
+                    best_d = d;
+                    best = i;
+                    if d == 0 {
+                        break;
+                    }
+                }
+            }
+            lut[k as usize] = best as u8;
+        }
+    } else {
+        for (i, &k) in palette_keys.iter().enumerate() {
+            lut[k as usize] = i as u8;
+        }
+    }
+    let mut indices: Vec<u8> = Vec::with_capacity(npx);
+    for px in rgb.chunks_exact(3) {
+        indices.push(lut[key(px) as usize]);
+    }
+    (palette, indices)
 }

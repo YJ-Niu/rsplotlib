@@ -46,6 +46,7 @@ where
 /// 逐段绘制四边形 + 顶点处圆填充，保证任意斜率下线宽一致。
 /// 每个线段在数据坐标中构造精确法线方向的四边形，顶点处用圆形成 round join，
 /// 避免 plotters 原生粗线对法线偏移取整导致的粗细不均问题。
+#[allow(dead_code)]
 fn draw_thick_polyline<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     points: &[(f64, f64)],
@@ -124,6 +125,17 @@ where
     Ok(())
 }
 
+thread_local! {
+    /// 复用的 AA "到折线笔画最小距离" 缓冲 + 本次写入过的像素下标列表。
+    ///
+    /// dist 缓冲长度覆盖整块绘图区、且始终保持全 +∞（哨兵，表示"未被触及"）；
+    /// 每条折线只写入被覆盖的像素，并把这些像素下标记录到 touched，绘制后逐一
+    /// 复位为 +∞。这样避免了「每个折线元素都重新分配并清零整块绘图区」的巨大
+    /// 开销——单张主图有数百条折线时，这正是渲染的主要瓶颈。
+    static AA_SCRATCH: std::cell::RefCell<(Vec<f32>, Vec<usize>)> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+
 /// 抗锯齿等宽折线渲染（仅位图后端）。
 ///
 /// 对折线包围盒内的每个像素，计算像素中心到线段的距离，用覆盖率（coverage）
@@ -167,25 +179,28 @@ where
     let pts: Vec<(f64, f64)> = points.iter().map(|&p| to_px(p)).collect();
 
     let half = width_px / 2.0;
-    // 每个像素用 SS×SS 子采样估计"被线覆盖的面积占比"作为覆盖率（真·面积抗锯齿）。
-    // 单点采样（按中心到线距离取覆盖）对倾斜线会产生 ±0.3px 的周期性质心抖动，
-    // 表现为"偶尔 1 像素错位"。面积覆盖与 matplotlib(Agg) 一致，抖动降到 <0.1px。
-    const SS: usize = 8;
-    let inv_ss = 1.0 / SS as f64;
-    let ss2 = (SS * SS) as f32;
+    // 覆盖率 = 到折线笔画的距离经过 1px 线性斜坡：cov = clamp(half + 0.5 - dist, 0, 1)。
+    // 对直线段而言，这与"每像素 8×8 子采样求面积占比"在数学上等价（面积覆盖对直边
+    // 就是该线性斜坡），但每像素只需一次距离计算，省去 64× 子采样开销。
+    // 为消除折线顶点处"一侧 50% + 另一侧 50% 被错误合成为 50%"的掐细拐折，
+    // 逐段写入的是「像素中心到该段的距离」，并对所有段取 **最小距离**（= 到整条
+    // 折线笔画的真实距离），拐点自然形成 round join、线宽处处一致。
     let reach = half + 1.0;
+    let cov_reach = half + 0.5; // 距离 >= 此值覆盖率为 0
 
     let pw_u = pw as usize;
     let ph_u = ph as usize;
-    // 每像素用一个 u64 位掩码记录 SS×SS 个子采样是否被"任一线段"覆盖，
-    // 段间按位或 = 折线笔画的真·并集覆盖。避免逐段取覆盖率最大值在拐点处
-    // 把"一侧 50% + 另一侧 50%"错误合成为 50%，从而消除折线顶点处线宽被
-    // 掐细成 1px 的可见拐折。SS=8 → 64 个子采样正好放入一个 u64。
-    let mut mask = vec![0u64; pw_u * ph_u];
-    let mut bx0 = pw_u;
-    let mut bx1 = 0usize;
-    let mut by0 = ph_u;
-    let mut by1 = 0usize;
+    // dist_buf 从线程本地 scratch 借出复用（见 AA_SCRATCH），语义为"到折线笔画的
+    // 最小距离"，哨兵值 +∞ 表示未被本条折线触及。避免每个折线元素都重新分配/清零
+    // 整块绘图区。
+    let (mut dist_buf, mut touched) = AA_SCRATCH.with(|c| {
+        let mut g = c.borrow_mut();
+        (std::mem::take(&mut g.0), std::mem::take(&mut g.1))
+    });
+    if dist_buf.len() < pw_u * ph_u {
+        dist_buf.resize(pw_u * ph_u, f32::INFINITY);
+    }
+    touched.clear();
 
     let cap_round = capstyle.eq_ignore_ascii_case("round");
     let cap_proj = capstyle.eq_ignore_ascii_case("projecting");
@@ -210,7 +225,7 @@ where
         let min_y = (ay.min(by) - reach).floor().max(0.0) as usize;
         let max_y = (ay.max(by) + reach).ceil().min(ph - 1.0) as usize;
 
-        // 任意采样点到本段的距离（含端点 cap / 内部 round join 处理）
+        // 像素中心到本段的距离（含端点 cap / 内部 round join 处理）
         let dist_at = |px: f64, py: f64| -> f64 {
             let s = (px - ax) * ux + (py - ay) * uy;
             let perp = ((px - ax) * (-uy) + (py - ay) * ux).abs();
@@ -246,71 +261,60 @@ where
 
         for yy in min_y..=max_y {
             let cy = yy as f64 + 0.5;
+            let row = yy * pw_u;
             for xx in min_x..=max_x {
                 let cx = xx as f64 + 0.5;
-                // 快速剔除：胶囊（round，对 butt 为超集；proj 轴向扩展 half）外包围
-                let s = (cx - ax) * ux + (cy - ay) * uy;
-                let (lo, hi) = if cap_proj { (-half, len + half) } else { (0.0, len) };
-                let sc = s.clamp(lo, hi);
-                let ex = cx - (ax + sc * ux);
-                let ey = cy - (ay + sc * uy);
-                if ex * ex + ey * ey > (half + 1.0) * (half + 1.0) {
+                let d = dist_at(cx, cy);
+                if d >= cov_reach {
                     continue;
                 }
-
-                // 快速接受：完全落在线体内部（远离端点/连接）→ 所有子采样置位
-                let perp_c = ((cx - ax) * (-uy) + (cy - ay) * ux).abs();
-                let bits: u64 = if perp_c <= half - 0.75 && s >= 0.75 && s <= len - 0.75 {
-                    u64::MAX
-                } else {
-                    let mut b: u64 = 0;
-                    for sj in 0..SS {
-                        let sy = yy as f64 + (sj as f64 + 0.5) * inv_ss;
-                        for si in 0..SS {
-                            let sx = xx as f64 + (si as f64 + 0.5) * inv_ss;
-                            if dist_at(sx, sy) <= half {
-                                b |= 1u64 << (sj * SS + si);
-                            }
-                        }
-                    }
-                    if b == 0 {
-                        continue;
-                    }
-                    b
-                };
-
-                let idx = yy * pw_u + xx;
-                mask[idx] |= bits;
-                if xx < bx0 { bx0 = xx; }
-                if xx > bx1 { bx1 = xx; }
-                if yy < by0 { by0 = yy; }
-                if yy > by1 { by1 = yy; }
+                let idx = row + xx;
+                let df = d as f32;
+                let cur = dist_buf[idx];
+                if cur.is_infinite() {
+                    touched.push(idx);
+                    dist_buf[idx] = df;
+                } else if df < cur {
+                    dist_buf[idx] = df;
+                }
             }
         }
     }
 
-    if bx1 < bx0 || by1 < by0 {
-        return Ok(());
-    }
     // 直接以「后端整数像素」坐标绘制，绕过 plotters 的数据->像素映射
     // （其 floor(actual*logic+1e-3) 会偶发把两个相邻局部像素映射到同一图像
     // 列、留空相邻列，造成"偶尔 1 像素错位"）。strip_coord_spec 给出的
     // Shift 坐标是「加上绘图区左上角原点」的纯平移，局部像素 (xx,yy) 精确
     // 对应后端像素，与覆盖率所用的局部网格一一对应。
+    //
+    // 仅遍历本次写入过的像素（touched），既完成绘制又顺便把 dist_buf 复位为 +∞，
+    // 开销与被覆盖像素数成正比，而非与整块绘图区成正比。复位对每个 touched 下标
+    // 都执行（即使绘制中途出错），以保证 dist_buf 归还 scratch 时仍为全 +∞。
     let area = chart.plotting_area().strip_coord_spec();
-    for yy in by0..=by1 {
-        for xx in bx0..=bx1 {
-            let bits = mask[yy * pw_u + xx];
-            if bits == 0 {
-                continue;
+    let mut draw_res: PyResult<()> = Ok(());
+    let cov_reach_f = cov_reach as f32;
+    for &idx in touched.iter() {
+        let d = dist_buf[idx];
+        dist_buf[idx] = f32::INFINITY;
+        if draw_res.is_ok() {
+            let cov = (cov_reach_f - d).clamp(0.0, 1.0);
+            if cov > 0.0 {
+                let xx = (idx % pw_u) as i32;
+                let yy = (idx / pw_u) as i32;
+                let color = rgb.mix(cov as f64);
+                if let Err(e) = area.draw_pixel((xx, yy), &color) {
+                    draw_res = Err(PyRuntimeError::new_err(format!("AA polyline: {}", e)));
+                }
             }
-            let c = bits.count_ones() as f32 / ss2;
-            let color = rgb.mix(c as f64);
-            area.draw_pixel((xx as i32, yy as i32), &color)
-                .map_err(|e| PyRuntimeError::new_err(format!("AA polyline: {}", e)))?;
         }
     }
-    Ok(())
+    touched.clear();
+    AA_SCRATCH.with(|c| {
+        let mut g = c.borrow_mut();
+        g.0 = std::mem::take(&mut dist_buf);
+        g.1 = std::mem::take(&mut touched);
+    });
+    draw_res
 }
 
 /// 渲染所有 PlotElement
@@ -326,6 +330,7 @@ pub fn render_elements<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     elements: &[PlotElement],
     font_scale: f64,
+    marker_scale: f64,
     xlog: bool,
     ylog: bool,
     x_min: f64,
@@ -549,23 +554,14 @@ where
                                                        solid_capstyle,
                                                        x_min, x_max, y_min, y_max)?;
                             } else {
-                                // SVG 矢量后端：本就平滑，用四边形 ribbon + 端点补齐。
-                                if width_px <= 1.0 {
-                                    // 1 像素线：用 plotters 原生 AA 直线，观感更平滑
-                                    let style_native: ShapeStyle = rgb.stroke_width(1);
-                                    chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
-                                        .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
-                                } else {
-                                    draw_thick_polyline(chart, points, &rgb, width_px,
-                                                        x_min, x_max, y_min, y_max)?;
-                                }
-                                // 端点形状 (solid_capstyle)：plotters 0.3.7 不支持 linecap，手动补端点。
-                                // points 已含半像素偏移，cap 圆心与端点重合，cap_y_shift 取 0。
-                                if linestyle == "-" && marker.as_ref().is_none_or(|m| m.is_empty()) {
-                                    let cap_lw_px = width_px.max(1.0); // 与线段渲染宽度一致
-                                    draw_solid_caps(chart, points, &rgb, solid_capstyle, *linewidth, font_scale,
-                                                    x_min, x_max, y_min, y_max, cap_lw_px, 0.0)?;
-                                }
+                                // SVG 矢量后端：绘制为单条连续描边折线，交由渲染器
+                                // (浏览器 / resvg) 统一描边。线宽处处一致、无逐段接缝，
+                                // 避免此前逐段 ribbon 多边形各自抗锯齿在接头处产生的
+                                // "锯齿 / 粗细不均"（stroke-linejoin/linecap 在导出时统一注入为 round）。
+                                let sw = width_px.round().max(1.0) as u32;
+                                let style_native: ShapeStyle = rgb.stroke_width(sw);
+                                chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
+                                    .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
                             }
                         }
                         }
@@ -576,23 +572,22 @@ where
                 {
                     let col2 = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                     let rgb = to_plotters_color(col2);
-                        // matplotlib markersize 单位是 points（近似直径）；直径(像素) = markersize * dpi/72
-                        // 在 144dpi 下，markersize=6 (mpl 默认) 直径约为 12 像素。
-                        // "." 是 matplotlib 的 1 像素点 marker，需要保持极小以免覆盖线条
-                        let marker_size = if marker_name == "." {
-                            // "." 1pt 像素点：线宽 <=1pt 时取 1 像素，否则 2 像素（保持可见）
-                            if *linewidth <= 1.0 { 1.0 } else { 2.0 }
-                        } else if marker_name == "," {
-                            // "," 1/2 像素点：保持 1 像素
+                        // matplotlib markersize 单位是 points；marker 包围盒边长(像素) = markersize * dpi/72。
+                        // 使用 marker_scale (= 真实 dpi/72) 计算，与字体/线宽的 font_scale 解耦，
+                        // 保证 markersize 只影响 marker 大小。
+                        // draw_marker 收到的 `size` 是「半边长 / 半径」= 包围盒边长 / 2。
+                        let marker_size = if marker_name == "," {
+                            // matplotlib 像素点 marker：约 1 设备像素
                             1.0
+                        } else if marker_name == "." {
+                            // matplotlib 点 marker：直径 = 0.5 * markersize（point_size_reduction=0.5），
+                            // 故半径 = 0.25 * markersize_px
+                            let ms = markersize.unwrap_or(6.0_f64).max(0.01);
+                            0.25 * ms * marker_scale
                         } else {
                             // markersize: None => matplotlib 默认 6
                             let ms = markersize.unwrap_or(6.0_f64).max(0.01);
-                            // 直径(像素) ≈ markersize * font_scale
-                            // plotters Circle::new 的半径转 i32 会截断，因此 6*2=12 → radius=6
-                            // 渲染直径 = 2*6+1 = 13px（与 mpl ~13px 接近）
-                            let diameter_px = ms * font_scale;
-                            // draw_marker 中半径 = s
+                            let diameter_px = ms * marker_scale;
                             diameter_px / 2.0
                         };
                         for (xv, yv) in x.iter().zip(y.iter()) {
@@ -1222,6 +1217,7 @@ where
 /// - `cap_y_shift`：线段 y 中心对齐偏移，cap 应用同样的偏移以保持端点对齐
 ///
 /// 仅在实线 (`-`) 且无 marker 时调用；虚线/点线场景下端点不连续，跳过。
+#[allow(dead_code)]
 fn draw_solid_caps<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     points: &[(f64, f64)],
