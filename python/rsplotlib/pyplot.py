@@ -747,7 +747,7 @@ def _font_props(fontdict, kwargs):
     return family, size, color
 
 
-def xlabel(text, fontdict=None, **kwargs):
+def xlabel(text, fontdict=None, loc=None, **kwargs):
     """设置 x 轴标签文本，并可通过 fontdict / 关键字参数自定义字体属性。
 
     支持的字体属性 (fontdict 的键或直接关键字参数, 关键字参数优先):
@@ -755,28 +755,34 @@ def xlabel(text, fontdict=None, **kwargs):
         size / fontsize: 字号 (points)
         color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
 
+    loc: 标签水平位置，可选 'left'、'center'、'right'，默认 'center'。
+
     用法:
         plt.xlabel("x - label")
         plt.xlabel("x 轴", fontdict={"family": "STHeiti Light", "size": 16, "color": "b"})
+        plt.xlabel("x 轴", loc="left")
     """
     family, size, color = _font_props(fontdict, kwargs)
-    return _rsplotlib.xlabel(text, color, size, family)
+    return _rsplotlib.xlabel(text, color, size, family, loc)
 
 
-def ylabel(text, fontdict=None, **kwargs):
+def ylabel(text, fontdict=None, loc=None, **kwargs):
     """设置 y 轴标签文本，并可通过 fontdict / 关键字参数自定义字体属性。
 
     支持的字体属性同 xlabel（family / size / color，关键字参数优先于 fontdict）。
 
+    loc: 标签垂直位置，可选 'bottom'、'center'、'top'，默认 'center'。
+
     用法:
         plt.ylabel("y - label")
         plt.ylabel("y 轴", fontdict={"family": "STHeiti Light", "size": 16, "color": "g"})
+        plt.ylabel("y 轴", loc="top")
     """
     family, size, color = _font_props(fontdict, kwargs)
-    return _rsplotlib.ylabel(text, color, size, family)
+    return _rsplotlib.ylabel(text, color, size, family, loc)
 
 
-def title(label, fontdict=None, **kwargs):
+def title(label, fontdict=None, loc=None, **kwargs):
     """设置图表标题文本，并可通过 fontdict / 关键字参数自定义字体属性。
 
     支持的字体属性 (fontdict 的键或直接关键字参数, 关键字参数优先):
@@ -785,14 +791,17 @@ def title(label, fontdict=None, **kwargs):
         size / fontsize: 字号 (points)
         color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
 
+    loc: 标题水平位置，可选 'left'、'center'、'right'，默认 'center'。
+
     用法:
         plt.title("标题")
         plt.title("标题", fontdict={"family": "Courier", "size": 18, "color": "red"})
         plt.title("标题", fontsize=18, color='b')
+        plt.title("标题", loc="left")
     """
     family, size, color = _font_props(fontdict, kwargs)
     # 字体族名的解析与注册由 Rust 层的 set_title 统一处理。
-    return _rsplotlib.title(label, color, size, family)
+    return _rsplotlib.title(label, color, size, family, loc)
 
 
 def grid(visible=True, **kwargs):

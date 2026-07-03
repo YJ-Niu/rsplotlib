@@ -519,6 +519,38 @@ impl Figure {
             let fig_subplot_info = (x0, y0, sub_w, sub_h);
             ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, marker_scale, true, fill_bg, Some(&fig_subplot_info))?;
 
+            // 非居中的 xlabel/ylabel：plotters 的 x_desc/y_desc 只能居中，
+            // Axes::render 已在 loc 非居中时禁用内置 desc，这里用绝对像素在 root 上手动绘制。
+            // 数据区四边的绝对像素坐标（与 plotters 布局一致）：
+            //   data_left = chart_x0 + y_label_area, data_right = chart_x0 + chart_w
+            //   data_top  = chart_y0 + margin_top,   data_bottom = chart_y0 + chart_h - x_label_area
+            if !ax.xlabel.is_empty() && ax.xlabel_loc != "center" {
+                let tick_px = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
+                let data_left = chart_x0 + y_label_actual as f64;
+                let data_right = chart_x0 + chart_w;
+                let xsize = if ax.xlabel_fontsize > 0.0 {
+                    crate::figure::axes::scale_font(ax.xlabel_fontsize, font_scale)
+                } else { 0.0 };
+                crate::figure::axes_title::draw_xlabel_manual(
+                    &root, &ax.xlabel, &ax.xlabel_loc, xsize, tick_px,
+                    ax.xlabel_color, ax.xlabel_family.as_deref(),
+                    data_left, data_right, chart_y0 + chart_h,
+                )?;
+            }
+            if !ax.ylabel.is_empty() && ax.ylabel_loc != "center" {
+                let tick_px = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
+                let data_top = chart_y0 + margin_top as f64;
+                let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
+                let ysize = if ax.ylabel_fontsize > 0.0 {
+                    crate::figure::axes::scale_font(ax.ylabel_fontsize, font_scale)
+                } else { 0.0 };
+                crate::figure::axes_title::draw_ylabel_manual(
+                    &root, &ax.ylabel, &ax.ylabel_loc, ysize, tick_px,
+                    ax.ylabel_color, ax.ylabel_family.as_deref(),
+                    chart_x0, data_top, data_bottom,
+                )?;
+            }
+
             let twin_axes = ax.twin_axes.clone();
             drop(ax);
             for twin in &twin_axes {

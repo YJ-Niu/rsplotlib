@@ -114,29 +114,29 @@ macro_rules! make_fig_ax {
 }
 
 #[pyfunction]
-#[pyo3(signature = (text, color=None, fontsize=None, family=None))]
-pub fn xlabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>) -> PyResult<()> {
+#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+pub fn xlabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
-    Axes::set_xlabel(&mut ax_ref, py, text, color, fontsize, family);
+    Axes::set_xlabel(&mut ax_ref, py, text, color, fontsize, family, loc);
     Ok(())
 }
 
 #[pyfunction]
-#[pyo3(signature = (text, color=None, fontsize=None, family=None))]
-pub fn ylabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>) -> PyResult<()> {
+#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+pub fn ylabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
-    Axes::set_ylabel(&mut ax_ref, py, text, color, fontsize, family);
+    Axes::set_ylabel(&mut ax_ref, py, text, color, fontsize, family, loc);
     Ok(())
 }
 
 #[pyfunction]
-#[pyo3(signature = (text, color=None, fontsize=None, family=None))]
-pub fn title(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>) -> PyResult<()> {
+#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+pub fn title(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
-    Axes::set_title(&mut ax_ref, py, text, color, fontsize, family);
+    Axes::set_title(&mut ax_ref, py, text, color, fontsize, family, loc);
     Ok(())
 }
 

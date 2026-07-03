@@ -126,13 +126,16 @@ pub struct Axes {
     pub xlabel_fontsize: f64,
     pub xlabel_color: RgbColor,
     pub xlabel_family: Option<String>,
+    pub xlabel_loc: String,
     pub ylabel_fontsize: f64,
     pub ylabel_color: RgbColor,
     pub ylabel_family: Option<String>,
+    pub ylabel_loc: String,
     pub title: String,
     pub title_fontsize: f64,
     pub title_color: RgbColor,
     pub title_family: Option<String>,
+    pub title_loc: String,
     pub xlim: Option<(f64, f64)>,
     pub ylim: Option<(f64, f64)>,
     pub grid_visible: bool,
@@ -189,13 +192,16 @@ impl Clone for Axes {
             xlabel_fontsize: self.xlabel_fontsize,
             xlabel_color: self.xlabel_color,
             xlabel_family: self.xlabel_family.clone(),
+            xlabel_loc: self.xlabel_loc.clone(),
             ylabel_fontsize: self.ylabel_fontsize,
             ylabel_color: self.ylabel_color,
             ylabel_family: self.ylabel_family.clone(),
+            ylabel_loc: self.ylabel_loc.clone(),
             title: self.title.clone(),
             title_fontsize: self.title_fontsize,
             title_color: self.title_color,
             title_family: self.title_family.clone(),
+            title_loc: self.title_loc.clone(),
             xlim: self.xlim,
             ylim: self.ylim,
             grid_visible: self.grid_visible,
@@ -335,13 +341,16 @@ impl Axes {
             xlabel_fontsize: 0.0,
             xlabel_color: RgbColor(0, 0, 0),
             xlabel_family: None,
+            xlabel_loc: "center".to_string(),
             ylabel_fontsize: 0.0,
             ylabel_color: RgbColor(0, 0, 0),
             ylabel_family: None,
+            ylabel_loc: "center".to_string(),
             title: String::new(),
             title_fontsize: 12.0,
             title_color: RgbColor(0, 0, 0),
             title_family: None,
+            title_loc: "center".to_string(),
             xlim: None,
             ylim: None,
             grid_visible: false,
@@ -716,7 +725,7 @@ impl Axes {
         });
     }
 
-    #[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+    #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
     pub fn set_xlabel(
         &mut self,
         py: Python<'_>,
@@ -724,6 +733,7 @@ impl Axes {
         color: Option<String>,
         fontsize: Option<f64>,
         family: Option<String>,
+        loc: Option<String>,
     ) {
         self.xlabel = text;
         if let Some(fs) = fontsize {
@@ -733,9 +743,12 @@ impl Axes {
             self.xlabel_color = parse_color(&c, 0).unwrap_or(RgbColor(0, 0, 0));
         }
         self.xlabel_family = resolve_and_register_family(py, family);
+        if let Some(l) = loc {
+            self.xlabel_loc = l;
+        }
     }
 
-    #[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+    #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
     pub fn set_ylabel(
         &mut self,
         py: Python<'_>,
@@ -743,6 +756,7 @@ impl Axes {
         color: Option<String>,
         fontsize: Option<f64>,
         family: Option<String>,
+        loc: Option<String>,
     ) {
         self.ylabel = text;
         if let Some(fs) = fontsize {
@@ -752,9 +766,12 @@ impl Axes {
             self.ylabel_color = parse_color(&c, 0).unwrap_or(RgbColor(0, 0, 0));
         }
         self.ylabel_family = resolve_and_register_family(py, family);
+        if let Some(l) = loc {
+            self.ylabel_loc = l;
+        }
     }
 
-    #[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+    #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
     pub fn set_title(
         &mut self,
         py: Python<'_>,
@@ -762,6 +779,7 @@ impl Axes {
         color: Option<String>,
         fontsize: Option<f64>,
         family: Option<String>,
+        loc: Option<String>,
     ) {
         self.title = text;
         if let Some(fs) = fontsize {
@@ -773,6 +791,9 @@ impl Axes {
         // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到
         // plotters，使用实际字体家族名称，确保标题以该字体渲染（与 text() 一致）。
         self.title_family = resolve_and_register_family(py, family);
+        if let Some(l) = loc {
+            self.title_loc = l;
+        }
     }
 
     #[pyo3(signature = (loc="best"))]
@@ -1627,9 +1648,13 @@ impl Axes {
                 .bold_line_style(frame_style);
 
             // xlabel/ylabel 用 plotters 内置 x_desc/y_desc 自动定位，共用 axis_desc_style。
+            // 但 plotters 只能居中；当 loc 非居中时，此处传空串禁用内置绘制，
+            // 改由 figure.rs 在 root 上按绝对像素手动绘制（见 axes_title::draw_{x,y}label_manual）。
+            let x_desc_text = if self.xlabel_loc == "center" { self.xlabel.clone() } else { String::new() };
+            let y_desc_text = if self.ylabel_loc == "center" { self.ylabel.clone() } else { String::new() };
             mesh_builder
-                .x_desc(self.xlabel.clone())
-                .y_desc(self.ylabel.clone())
+                .x_desc(x_desc_text)
+                .y_desc(y_desc_text)
                 .axis_desc_style((axis_desc_family.as_str(), axis_desc_size).into_font().color(&axis_desc_rgb));
 
             if xlog {
@@ -1750,7 +1775,7 @@ impl Axes {
         // 渲染 axes 标题（在数据区域上方的 margin_top 区域内）
         crate::figure::axes_title::draw_title(
             chart, &self.title, self.title_fontsize, font_scale,
-            self.title_color, self.title_family.as_deref(),
+            self.title_color, self.title_family.as_deref(), &self.title_loc,
             x_min, x_max, y_min, y_max,
         )?;
 
