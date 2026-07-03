@@ -11,6 +11,7 @@ use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, VPos, Pos};
 
 use crate::figure::axes::scale_font;
+use crate::core::colors::RgbColor;
 use crate::utils::font_stack;
 
 /// 渲染 axes 标题
@@ -20,13 +21,18 @@ use crate::utils::font_stack;
 /// - `title`: 标题文本（为空时不渲染）
 /// - `title_fontsize`: 用户指定的字体大小（0 表示使用默认 12pt）
 /// - `font_scale`: 字体缩放系数
+/// - `title_color`: 标题颜色（默认黑色）
+/// - `title_family`: 用户显式指定的字体族名（None 时按文本自动选择字体栈）
 /// - `x_min`, `x_max`: X 轴数据范围（用于计算标题水平居中位置）
 /// - `y_min`, `y_max`: Y 轴数据范围（用于计算标题垂直位置）
+#[allow(clippy::too_many_arguments)]
 pub fn draw_title<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     title: &str,
     title_fontsize: f64,
     font_scale: f64,
+    title_color: RgbColor,
+    title_family: Option<&str>,
     x_min: f64,
     x_max: f64,
     y_min: f64,
@@ -47,10 +53,12 @@ where
     // 使用用户指定的 fontsize；若未指定则取 matplotlib 默认 12pt
     let title_size = if title_fontsize > 0.0 { title_fontsize } else { 12.0 };
     // plotters 的 ab_glyph 字体可见字符高度约 0.94em，而 matplotlib DejaVu Sans 约 1.13em。
-    // 为匹配 matplotlib 视觉高度，乘以 1.40 补偿。
-    let title_family = font_stack::select_family(title);
-    let font: FontDesc = (title_family.as_str(), scale_font(title_size * 1.25, font_scale)).into();
-    let colored_font = font.color(&BLACK);
+    // 为匹配 matplotlib 视觉高度，乘以 1.25 补偿。
+    // 优先使用用户通过 fontdict{"family": ...} 指定的字体族，否则按文本自动选择。
+    let title_family = font_stack::resolve_font_family(title, title_family);
+    let font: FontDesc = (title_family.as_str(), scale_font(title_size, font_scale)).into();
+    let rgb = RGBColor(title_color.0, title_color.1, title_color.2);
+    let colored_font = font.color(&rgb);
     let text_style: TextStyle = colored_font.pos(Pos::new(HPos::Center, VPos::Bottom));
     chart.draw_series(std::iter::once(plotters::element::Text::new(
         title.to_string(),

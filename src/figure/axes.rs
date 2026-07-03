@@ -95,13 +95,44 @@ pub fn scale_font(size: f64, font_scale: f64) -> f64 {
     (size * font_scale * 14.5).round() / 10.0
 }
 
+/// 解析并注册用户显式指定的字体族名。
+///
+/// 通过 Python 的 `_font_resolver.resolve_font_path` 找到字体文件路径，读入后
+/// 用 `Box::leak` 提升为 'static 并注册到 plotters（同 (family, style) 会覆盖）。
+/// 成功时返回该字体族名（供渲染时作为 family 使用），失败或名字为空时返回 None。
+fn resolve_and_register_family(py: Python<'_>, family: Option<String>) -> Option<String> {
+    family.and_then(|family_name| {
+        if family_name.is_empty() {
+            return None;
+        }
+        if let Ok(resolver_mod) = py.import("rsplotlib.utils._font_resolver")
+            && let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,))
+            && let Ok(Some(path)) = path_obj.extract::<Option<String>>()
+            && let Ok(font_data) = std::fs::read(&path)
+        {
+            let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+            let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
+            return Some(family_name);
+        }
+        None
+    })
+}
+
 #[pyclass(skip_from_py_object)]
 pub struct Axes {
     pub elements: Vec<PlotElement>,
     pub xlabel: String,
     pub ylabel: String,
+    pub xlabel_fontsize: f64,
+    pub xlabel_color: RgbColor,
+    pub xlabel_family: Option<String>,
+    pub ylabel_fontsize: f64,
+    pub ylabel_color: RgbColor,
+    pub ylabel_family: Option<String>,
     pub title: String,
     pub title_fontsize: f64,
+    pub title_color: RgbColor,
+    pub title_family: Option<String>,
     pub xlim: Option<(f64, f64)>,
     pub ylim: Option<(f64, f64)>,
     pub grid_visible: bool,
@@ -155,8 +186,16 @@ impl Clone for Axes {
             elements: self.elements.clone(),
             xlabel: self.xlabel.clone(),
             ylabel: self.ylabel.clone(),
+            xlabel_fontsize: self.xlabel_fontsize,
+            xlabel_color: self.xlabel_color,
+            xlabel_family: self.xlabel_family.clone(),
+            ylabel_fontsize: self.ylabel_fontsize,
+            ylabel_color: self.ylabel_color,
+            ylabel_family: self.ylabel_family.clone(),
             title: self.title.clone(),
             title_fontsize: self.title_fontsize,
+            title_color: self.title_color,
+            title_family: self.title_family.clone(),
             xlim: self.xlim,
             ylim: self.ylim,
             grid_visible: self.grid_visible,
@@ -293,8 +332,16 @@ impl Axes {
             elements: Vec::new(),
             xlabel: String::new(),
             ylabel: String::new(),
+            xlabel_fontsize: 0.0,
+            xlabel_color: RgbColor(0, 0, 0),
+            xlabel_family: None,
+            ylabel_fontsize: 0.0,
+            ylabel_color: RgbColor(0, 0, 0),
+            ylabel_family: None,
             title: String::new(),
             title_fontsize: 12.0,
+            title_color: RgbColor(0, 0, 0),
+            title_family: None,
             xlim: None,
             ylim: None,
             grid_visible: false,
@@ -669,25 +716,63 @@ impl Axes {
         });
     }
 
-    #[pyo3(signature = (text, color=None))]
-    pub fn set_xlabel(&mut self, text: String, color: Option<String>) {
-        let _ = color;
+    #[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+    pub fn set_xlabel(
+        &mut self,
+        py: Python<'_>,
+        text: String,
+        color: Option<String>,
+        fontsize: Option<f64>,
+        family: Option<String>,
+    ) {
         self.xlabel = text;
+        if let Some(fs) = fontsize {
+            self.xlabel_fontsize = fs;
+        }
+        if let Some(c) = color {
+            self.xlabel_color = parse_color(&c, 0).unwrap_or(RgbColor(0, 0, 0));
+        }
+        self.xlabel_family = resolve_and_register_family(py, family);
     }
 
-    #[pyo3(signature = (text, color=None))]
-    pub fn set_ylabel(&mut self, text: String, color: Option<String>) {
-        let _ = color;
+    #[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+    pub fn set_ylabel(
+        &mut self,
+        py: Python<'_>,
+        text: String,
+        color: Option<String>,
+        fontsize: Option<f64>,
+        family: Option<String>,
+    ) {
         self.ylabel = text;
+        if let Some(fs) = fontsize {
+            self.ylabel_fontsize = fs;
+        }
+        if let Some(c) = color {
+            self.ylabel_color = parse_color(&c, 0).unwrap_or(RgbColor(0, 0, 0));
+        }
+        self.ylabel_family = resolve_and_register_family(py, family);
     }
 
-    #[pyo3(signature = (text, color=None, fontsize=None))]
-    pub fn set_title(&mut self, text: String, color: Option<String>, fontsize: Option<f64>) {
-        let _ = color;
+    #[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+    pub fn set_title(
+        &mut self,
+        py: Python<'_>,
+        text: String,
+        color: Option<String>,
+        fontsize: Option<f64>,
+        family: Option<String>,
+    ) {
         self.title = text;
         if let Some(fs) = fontsize {
             self.title_fontsize = fs;
         }
+        if let Some(c) = color {
+            self.title_color = parse_color(&c, 0).unwrap_or(RgbColor(0, 0, 0));
+        }
+        // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到
+        // plotters，使用实际字体家族名称，确保标题以该字体渲染（与 text() 一致）。
+        self.title_family = resolve_and_register_family(py, family);
     }
 
     #[pyo3(signature = (loc="best"))]
@@ -1511,17 +1596,41 @@ impl Axes {
             let frame_lw = self.spine_linewidth.round().max(1.0) as u32;
             let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw);
             let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
-            let axis_desc_family = font_stack::select_family(&self.xlabel);
+            // plotters 的 configure_mesh 只有单一 axis_desc_style（x_desc 与 y_desc 共用），
+            // 无法给 xlabel/ylabel 各自设样式。这里让二者共用一套：优先采用 xlabel 的
+            // fontdict（family/size/color），其次 ylabel，最后回退默认。TextStyle 借用
+            // desc_family 字符串，故其必须与 mesh_builder 同作用域。
+            let x_has_custom = self.xlabel_family.is_some()
+                || self.xlabel_fontsize > 0.0
+                || !(self.xlabel_color.0 == 0 && self.xlabel_color.1 == 0 && self.xlabel_color.2 == 0);
+            let y_has_custom = self.ylabel_family.is_some()
+                || self.ylabel_fontsize > 0.0
+                || !(self.ylabel_color.0 == 0 && self.ylabel_color.1 == 0 && self.ylabel_color.2 == 0);
+            let (desc_family_opt, desc_fontsize, desc_color) = if x_has_custom {
+                (self.xlabel_family.clone(), self.xlabel_fontsize, self.xlabel_color)
+            } else if y_has_custom {
+                (self.ylabel_family.clone(), self.ylabel_fontsize, self.ylabel_color)
+            } else {
+                (None, 0.0, RgbColor(0, 0, 0))
+            };
+            // family：显式指定优先，否则按标签文本自动选字（含 CJK 回退）。
+            let desc_text = if !self.xlabel.is_empty() { self.xlabel.as_str() } else { self.ylabel.as_str() };
+            let axis_desc_family = font_stack::resolve_font_family(desc_text, desc_family_opt.as_deref());
+            let axis_desc_size = if desc_fontsize > 0.0 { scale_font(desc_fontsize, font_scale) } else { label_size };
+            let axis_desc_rgb = to_plotters_color(desc_color);
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
                 .x_labels(ticks_info.xticks.len().max(2))
                 .y_labels(ticks_info.yticks.len().max(2))
                 .x_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .y_label_style(("sans-serif", label_size).into_font().color(&BLACK))
+                .bold_line_style(frame_style);
+
+            // xlabel/ylabel 用 plotters 内置 x_desc/y_desc 自动定位，共用 axis_desc_style。
+            mesh_builder
                 .x_desc(self.xlabel.clone())
                 .y_desc(self.ylabel.clone())
-                .axis_desc_style((axis_desc_family.as_str(), label_size).into_font().color(&BLACK))
-                .bold_line_style(frame_style);
+                .axis_desc_style((axis_desc_family.as_str(), axis_desc_size).into_font().color(&axis_desc_rgb));
 
             if xlog {
                 mesh_builder.x_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
@@ -1641,6 +1750,7 @@ impl Axes {
         // 渲染 axes 标题（在数据区域上方的 margin_top 区域内）
         crate::figure::axes_title::draw_title(
             chart, &self.title, self.title_fontsize, font_scale,
+            self.title_color, self.title_family.as_deref(),
             x_min, x_max, y_min, y_max,
         )?;
 

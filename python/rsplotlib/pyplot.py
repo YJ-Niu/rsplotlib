@@ -98,6 +98,25 @@ def _map_aliases(kwargs):
             kwargs[target] = kwargs.pop(alias)
         elif alias in kwargs:
             kwargs.pop(alias)
+    # 规范化 linestyle 词形 ('solid'/'dotted'/'dashed'/'dashdot') 与空值到简写，
+    # 与 matplotlib 一致：既可写 linestyle='dotted' 也可写 linestyle=':'。
+    ls = kwargs.get('linestyle')
+    if isinstance(ls, str):
+        key = ls.strip().lower()
+        if key == '' or key == 'none':
+            kwargs['linestyle'] = ' '  # 空串 / ' ' / 'None' 均表示不画线
+        elif key in _LINESTYLE_ALIASES:
+            kwargs['linestyle'] = _LINESTYLE_ALIASES[key]
+        # 已是简写 ('-' / '--' / ':' / '-.') 时保持不变
+
+
+# linestyle 词形 -> 简写。空串 / 'None' 在 _map_aliases 中单独处理为 ' '(不画线)。
+_LINESTYLE_ALIASES = {
+    'solid': '-',
+    'dotted': ':',
+    'dashed': '--',
+    'dashdot': '-.',
+}
 
 
 def _parse_fmt(fmt):
@@ -703,19 +722,77 @@ def vlines(x, ymin=None, ymax=None, **kwargs):
 
 # ==================== 配置函数 ====================
 
-def xlabel(text, **kwargs):
-    """设置 x 轴标签文本。"""
-    return _rsplotlib.xlabel(text)
+def _font_props(fontdict, kwargs):
+    """从 fontdict 与关键字参数中提取字体属性 (family, size, color)。
+
+    matplotlib 语义：关键字参数优先于 fontdict；family 支持 family/fontfamily/fontname
+    别名，size 支持 size/fontsize，color 支持 color/c。返回 (family, size, color)，
+    其中 size 已转为 float 或 None。
+    """
+    fd = fontdict or {}
+
+    def _pick(*keys):
+        for k in keys:
+            if kwargs.get(k) is not None:
+                return kwargs[k]
+        for k in keys:
+            if fd.get(k) is not None:
+                return fd[k]
+        return None
+
+    family = _pick('family', 'fontfamily', 'fontname')
+    size = _pick('size', 'fontsize')
+    color = _pick('color', 'c')
+    size = float(size) if size is not None else None
+    return family, size, color
 
 
-def ylabel(text, **kwargs):
-    """设置 y 轴标签文本。"""
-    return _rsplotlib.ylabel(text)
+def xlabel(text, fontdict=None, **kwargs):
+    """设置 x 轴标签文本，并可通过 fontdict / 关键字参数自定义字体属性。
+
+    支持的字体属性 (fontdict 的键或直接关键字参数, 关键字参数优先):
+        family / fontfamily / fontname: 字体族名 (如 'Courier'、'STHeiti Light' 等)
+        size / fontsize: 字号 (points)
+        color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
+
+    用法:
+        plt.xlabel("x - label")
+        plt.xlabel("x 轴", fontdict={"family": "STHeiti Light", "size": 16, "color": "b"})
+    """
+    family, size, color = _font_props(fontdict, kwargs)
+    return _rsplotlib.xlabel(text, color, size, family)
+
+
+def ylabel(text, fontdict=None, **kwargs):
+    """设置 y 轴标签文本，并可通过 fontdict / 关键字参数自定义字体属性。
+
+    支持的字体属性同 xlabel（family / size / color，关键字参数优先于 fontdict）。
+
+    用法:
+        plt.ylabel("y - label")
+        plt.ylabel("y 轴", fontdict={"family": "STHeiti Light", "size": 16, "color": "g"})
+    """
+    family, size, color = _font_props(fontdict, kwargs)
+    return _rsplotlib.ylabel(text, color, size, family)
 
 
 def title(label, fontdict=None, **kwargs):
-    """设置图表标题文本。"""
-    return _rsplotlib.title(label)
+    """设置图表标题文本，并可通过 fontdict / 关键字参数自定义字体属性。
+
+    支持的字体属性 (fontdict 的键或直接关键字参数, 关键字参数优先):
+        family / fontfamily / fontname: 字体族名 (如 'Courier'、'Times New Roman'、
+            'SimHei' 等)
+        size / fontsize: 字号 (points)
+        color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
+
+    用法:
+        plt.title("标题")
+        plt.title("标题", fontdict={"family": "Courier", "size": 18, "color": "red"})
+        plt.title("标题", fontsize=18, color='b')
+    """
+    family, size, color = _font_props(fontdict, kwargs)
+    # 字体族名的解析与注册由 Rust 层的 set_title 统一处理。
+    return _rsplotlib.title(label, color, size, family)
 
 
 def grid(visible=True, **kwargs):

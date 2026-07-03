@@ -99,20 +99,29 @@ macro_rules! make_fig_ax {
 }
 
 #[pyfunction]
-pub fn xlabel(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_xlabel(text, None);
+#[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+pub fn xlabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>) -> PyResult<()> {
+    let ax = get_current_axes(py)?;
+    let mut ax_ref = ax.borrow_mut(py);
+    Axes::set_xlabel(&mut ax_ref, py, text, color, fontsize, family);
     Ok(())
 }
 
 #[pyfunction]
-pub fn ylabel(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_ylabel(text, None);
+#[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+pub fn ylabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>) -> PyResult<()> {
+    let ax = get_current_axes(py)?;
+    let mut ax_ref = ax.borrow_mut(py);
+    Axes::set_ylabel(&mut ax_ref, py, text, color, fontsize, family);
     Ok(())
 }
 
 #[pyfunction]
-pub fn title(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_title(text, None, None);
+#[pyo3(signature = (text, color=None, fontsize=None, family=None))]
+pub fn title(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>) -> PyResult<()> {
+    let ax = get_current_axes(py)?;
+    let mut ax_ref = ax.borrow_mut(py);
+    Axes::set_title(&mut ax_ref, py, text, color, fontsize, family);
     Ok(())
 }
 
