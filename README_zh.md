@@ -2,7 +2,7 @@
 
 > 一个由 Rust 强力驱动的高性能 Python 绘图库，提供 Matplotlib 兼容 API
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyO3](https://img.shields.io/badge/PyO3-0.29-2c2d72)](https://pyo3.rs/)
@@ -95,11 +95,19 @@
 
 | 依赖    | 版本要求 | 说明                   |
 | ------- | -------- | ---------------------- |
-| Python  | 3.8+     | CPython 实现           |
+| Python  | 3.10+    | CPython 实现           |
 | Rust    | 1.70+    | 从源码构建时需要       |
 | maturin | 1.13+    | Rust-Python 包构建工具 |
 
-### 方法一：使用 maturin 从源码构建（推荐开发者）
+### 方法一：从 PyPI 安装（推荐）
+
+已为 Linux（x86_64/aarch64）、macOS（universal2）、Windows（x64）在 Python 3.10-3.14 上发布预编译 wheel，无需 Rust 工具链：
+
+```bash
+pip install rsplotlib
+```
+
+### 方法二：使用 maturin 从源码构建（推荐开发者）
 
 ```bash
 # 1. 克隆项目
@@ -111,17 +119,17 @@ pip install maturin
 maturin develop --release
 ```
 
-### 方法二：构建 wheel 包
+### 方法三：构建 wheel 包
 
 ```bash
-# 使用项目提供的构建脚本
+# 使用项目提供的构建脚本（macOS/Linux 直接运行；Windows 请在 Git Bash 或 WSL 中运行）
 ./build_wheel.sh
 
 # 安装生成的 wheel
 pip install target/wheels/rsplotlib-*.whl
 ```
 
-### 方法三：仅编译 Rust 扩展（调试用）
+### 方法四：仅编译 Rust 扩展（调试用）
 
 ```bash
 # 编译 Rust cdylib
@@ -359,19 +367,19 @@ plt.savefig('module_level.png')
 
 ### 图表配置
 
-| 函数                                   | 说明                             |
-| -------------------------------------- | -------------------------------- |
-| `title()` / `ax.set_title()`           | 设置图表标题                     |
-| `xlabel()` / `ax.set_xlabel()`         | 设置 X 轴标签                    |
-| `ylabel()` / `ax.set_ylabel()`         | 设置 Y 轴标签                    |
-| `grid()`                               | 显示/隐藏网格                    |
-| `legend()`                             | 显示图例                         |
-| `xlim()` / `ylim()`                    | 设置坐标轴范围                   |
-| `xticks()` / `yticks()`                | 设置刻度位置和标签               |
-| `xscale()` / `yscale()`                | 设置坐标缩放（`linear` / `log`） |
-| `margins()`                            | 设置自动缩放边距                 |
-| `box()`                                | 设置坐标轴边框显示               |
-| `minorticks_on()` / `minorticks_off()` | 次要刻度显示控制                 |
+| 函数                                   | 说明                                           |
+| -------------------------------------- | ---------------------------------------------- |
+| `title()` / `ax.set_title()`           | 设置图表标题（`loc='left'/'center'/'right'`）  |
+| `xlabel()` / `ax.set_xlabel()`         | 设置 X 轴标签（`loc='left'/'center'/'right'`） |
+| `ylabel()` / `ax.set_ylabel()`         | 设置 Y 轴标签（`loc='top'/'center'/'bottom'`） |
+| `grid()`                               | 显示/隐藏网格                                  |
+| `legend()`                             | 显示图例                                       |
+| `xlim()` / `ylim()`                    | 设置坐标轴范围                                 |
+| `xticks()` / `yticks()`                | 设置刻度位置和标签                             |
+| `xscale()` / `yscale()`                | 设置坐标缩放（`linear` / `log`）               |
+| `margins()`                            | 设置自动缩放边距                               |
+| `box()`                                | 设置坐标轴边框显示                             |
+| `minorticks_on()` / `minorticks_off()` | 次要刻度显示控制                               |
 
 ### 子图与布局
 
@@ -745,4 +753,4 @@ MIT License — 详见 [LICENSE](LICENSE) 文件。
 
 ---
 
-_最后更新：2026-06-17 · 版本 v0.1.6_
+_最后更新：2026-07-03 · 版本 v0.1.9_

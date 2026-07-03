@@ -2,7 +2,7 @@
 
 > A high-performance Python plotting library powered by Rust, with a Matplotlib-compatible API
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyO3](https://img.shields.io/badge/PyO3-0.29-2c2d72)](https://pyo3.rs/)
@@ -97,11 +97,19 @@
 
 | Dependency | Version | Notes                                   |
 | ---------- | ------- | --------------------------------------- |
-| Python     | 3.8+    | CPython implementation                  |
+| Python     | 3.10+   | CPython implementation                  |
 | Rust       | 1.70+   | Required only when building from source |
 | maturin    | 1.13+   | Rust-Python package build tool          |
 
-### Method 1: Build from source with maturin (recommended for developers)
+### Method 1: Install from PyPI (recommended)
+
+Prebuilt wheels are published for Linux (x86_64/aarch64), macOS (universal2), and Windows (x64) across Python 3.10-3.14. No Rust toolchain required:
+
+```bash
+pip install rsplotlib
+```
+
+### Method 2: Build from source with maturin (recommended for developers)
 
 ```bash
 # 1. Clone the repository
@@ -113,17 +121,17 @@ pip install maturin
 maturin develop --release
 ```
 
-### Method 2: Build a wheel package
+### Method 3: Build a wheel package
 
 ```bash
-# Use the project build script
+# Use the project build script (works on macOS/Linux; run under Git Bash/WSL on Windows)
 ./build_wheel.sh
 
 # Install the generated wheel
 pip install target/wheels/rsplotlib-*.whl
 ```
 
-### Method 3: Rust extension only (for debugging)
+### Method 4: Rust extension only (for debugging)
 
 ```bash
 # Compile the Rust cdylib
@@ -361,19 +369,19 @@ plt.savefig('module_level.png')
 
 ### Chart Configuration
 
-| Function                               | Description                       |
-| -------------------------------------- | --------------------------------- |
-| `title()` / `ax.set_title()`           | Set chart title                   |
-| `xlabel()` / `ax.set_xlabel()`         | Set X-axis label                  |
-| `ylabel()` / `ax.set_ylabel()`         | Set Y-axis label                  |
-| `grid()`                               | Show/hide grid lines              |
-| `legend()`                             | Show legend                       |
-| `xlim()` / `ylim()`                    | Set axis limits                   |
-| `xticks()` / `yticks()`                | Set tick positions and labels     |
-| `xscale()` / `yscale()`                | Set axis scale (`linear` / `log`) |
-| `margins()`                            | Set auto-scaling margins          |
-| `box()`                                | Set axes border display           |
-| `minorticks_on()` / `minorticks_off()` | Minor tick display control        |
+| Function                               | Description                                      |
+| -------------------------------------- | ------------------------------------------------ |
+| `title()` / `ax.set_title()`           | Set chart title (`loc='left'/'center'/'right'`)  |
+| `xlabel()` / `ax.set_xlabel()`         | Set X-axis label (`loc='left'/'center'/'right'`) |
+| `ylabel()` / `ax.set_ylabel()`         | Set Y-axis label (`loc='top'/'center'/'bottom'`) |
+| `grid()`                               | Show/hide grid lines                             |
+| `legend()`                             | Show legend                                      |
+| `xlim()` / `ylim()`                    | Set axis limits                                  |
+| `xticks()` / `yticks()`                | Set tick positions and labels                    |
+| `xscale()` / `yscale()`                | Set axis scale (`linear` / `log`)                |
+| `margins()`                            | Set auto-scaling margins                         |
+| `box()`                                | Set axes border display                          |
+| `minorticks_on()` / `minorticks_off()` | Minor tick display control                       |
 
 ### Subplots & Layout
 
@@ -752,4 +760,4 @@ MIT License - See the [LICENSE](LICENSE) file for details.
 
 ---
 
-_Last updated: 2026-06-17 / Version v0.1.6_
+_Last updated: 2026-07-03 / Version v0.1.9_
