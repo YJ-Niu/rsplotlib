@@ -88,42 +88,126 @@ def _map_aliases(kwargs):
         'lw': 'linewidth',
         'c': 'color',
         'ls': 'linestyle',
+        'ms': 'markersize',
+        'mfc': 'markerfacecolor',
+        'mec': 'markeredgecolor',
+        'mew': 'markeredgewidth',
     }
     for alias, target in alias_map.items():
         if alias in kwargs and target not in kwargs:
             kwargs[target] = kwargs.pop(alias)
         elif alias in kwargs:
             kwargs.pop(alias)
+    # 规范化 linestyle 词形 ('solid'/'dotted'/'dashed'/'dashdot') 与空值到简写，
+    # 与 matplotlib 一致：既可写 linestyle='dotted' 也可写 linestyle=':'。
+    ls = kwargs.get('linestyle')
+    if isinstance(ls, str):
+        key = ls.strip().lower()
+        if key == '' or key == 'none':
+            kwargs['linestyle'] = ' '  # 空串 / ' ' / 'None' 均表示不画线
+        elif key in _LINESTYLE_ALIASES:
+            kwargs['linestyle'] = _LINESTYLE_ALIASES[key]
+        # 已是简写 ('-' / '--' / ':' / '-.') 时保持不变
+
+
+# linestyle 词形 -> 简写。空串 / 'None' 在 _map_aliases 中单独处理为 ' '(不画线)。
+_LINESTYLE_ALIASES = {
+    'solid': '-',
+    'dotted': ':',
+    'dashed': '--',
+    'dashdot': '-.',
+}
+
+
+def _parse_fmt(fmt):
+    """解析 matplotlib 风格的格式字符串 '[marker][line][color]'。
+
+    fmt 由三部分任意组合而成 (均可省略):
+        marker: 数据点标记, 如 'o' 圆, '^' 三角, 's' 方块, '*' 星 ...
+        line:   线型, '-' 实线, '--' 虚线, '-.' 点划线, ':' 点线
+        color:  颜色单字母代码 b/g/r/c/m/y/k/w
+
+    例如 'o:r' = 圆形标记 + 点线 + 红色。
+
+    注意 black 与 blue 首字母冲突: 按 matplotlib 约定,
+    单字母代码里 'b' 表示 blue, 'k' 才表示 black, 因此不会产生歧义。
+
+    返回 dict, 可能包含 'marker' / 'linestyle' / 'color' 键。
+    """
+    if not fmt:
+        return {}
+    line_styles_multi = ('--', '-.')
+    line_styles_single = ('-', ':')
+    markers = set(".,ov^<>12348spP*hH+xXDd|_")
+    color_map = {
+        'b': 'blue', 'g': 'green', 'r': 'red', 'c': 'cyan',
+        'm': 'magenta', 'y': 'yellow', 'k': 'black', 'w': 'white',
+    }
+
+    marker = linestyle = color = None
+    i, n = 0, len(fmt)
+    while i < n:
+        two = fmt[i:i + 2]
+        ch = fmt[i]
+        if two in line_styles_multi:
+            if linestyle is not None:
+                raise ValueError(f"格式字符串 {fmt!r} 中出现了重复的线型")
+            linestyle, i = two, i + 2
+        elif ch in line_styles_single:
+            if linestyle is not None:
+                raise ValueError(f"格式字符串 {fmt!r} 中出现了重复的线型")
+            linestyle, i = ch, i + 1
+        elif ch in markers:
+            if marker is not None:
+                raise ValueError(f"格式字符串 {fmt!r} 中出现了重复的标记")
+            marker, i = ch, i + 1
+        elif ch in color_map:
+            if color is not None:
+                raise ValueError(f"格式字符串 {fmt!r} 中出现了重复的颜色")
+            color, i = color_map[ch], i + 1
+        else:
+            raise ValueError(f"无法识别的格式字符串 {fmt!r} (非法字符 {ch!r})")
+
+    result = {}
+    if marker is not None:
+        result['marker'] = marker
+    if linestyle is not None:
+        result['linestyle'] = linestyle
+    if color is not None:
+        result['color'] = color
+    return result
 
 
 def _parse_plot_args(args, kwargs):
-    """解析 plot() 的位置参数为 [(x, y, fmt_or_none), ...] 对列表 + kwargs"""
-    if len(args) == 0:
-        return [], kwargs
-    if len(args) == 1:
-        y = args[0]
-        try:
-            x = list(range(len(y)))
-        except Exception:
-            x = list(y) if hasattr(y, '__iter__') else []
-        return [(x, y, None)], kwargs
-    if len(args) == 2:
-        return [(args[0], args[1], None)], kwargs
-    # 3 个参数且第 3 个是字符串 → fmt 格式字符串
-    if len(args) == 3 and isinstance(args[2], str):
-        return [(args[0], args[1], args[2])], kwargs
-    # 多对参数: plt.plot(x1, y1, x2, y2, ...)
+    """解析 plot() 的位置参数为 [(x, y, fmt_or_none), ...] 对列表 + kwargs
+
+    支持的调用形式 (与 matplotlib 一致):
+        plot(y)                    plot(x, y)
+        plot(y, fmt)               plot(x, y, fmt)
+        plot(x1, y1, fmt1, x2, y2, fmt2, ...)   # 多条线, 每组 fmt 可选
+    """
+    args = list(args)
     pairs = []
-    for i in range(0, len(args), 2):
-        if i + 1 < len(args):
-            pairs.append((args[i], args[i + 1], None))
-        else:
-            # 奇数个参数: 最后一组只有 y
+    while args:
+        # 取出本组数据参数 (1~2 个); 若第 2 个其实是 fmt 字符串, 则本组只有 1 个
+        group = args[:2]
+        if len(group) == 2 and isinstance(group[1], str):
+            group = group[:1]
+        args = args[len(group):]
+        # 消费紧跟其后的 fmt 字符串 (若有)
+        fmt = None
+        if args and isinstance(args[0], str):
+            fmt, args = args[0], args[1:]
+
+        if len(group) == 1:
+            y = group[0]
             try:
-                x = list(range(len(args[i])))
+                x = list(range(len(y)))
             except Exception:
-                x = list(args[i]) if hasattr(args[i], '__iter__') else []
-            pairs.append((x, args[i], None))
+                x = list(y) if hasattr(y, '__iter__') else []
+            pairs.append((x, y, fmt))
+        else:
+            pairs.append((group[0], group[1], fmt))
     return pairs, kwargs
 
 
@@ -137,13 +221,23 @@ def plot(*args, **kwargs):
         plt.plot(y)                 # 仅提供 y, 自动 x = [0, 1, ...]
         plt.plot(x, y, lw=2.0)     # 自定义线宽
         plt.plot(x, y, x, z)       # 绘制多条线
-        plt.plot(x, y, 'o')        # 格式字符串（只绘标记）
+        plt.plot(y, 'o:r')         # 格式字符串: 圆标记 + 点线 + 红色
+
+    格式字符串 fmt = '[marker][line][color]', 各部分均可省略, 例如:
+        'o'   仅圆形标记        '--'  仅虚线
+        'o:r' 圆标记+点线+红色  '^-g' 三角标记+实线+绿色
+    颜色单字母: b=blue g=green r=red c=cyan m=magenta y=yellow k=black w=white
+    (注意 black 用 'k' 而非 'b', 'b' 表示 blue, 避免与 blue 首字母冲突)
+    显式关键字参数优先于 fmt 中的同名设置。
 
     关键字参数 (matplotlib 兼容别名):
         lw / linewidth: 线宽 (float)
         c / color: 颜色 (如 'red', '#FF0000')
         ls / linestyle: 线型 ('-', '--', ':', '-.')
         marker: 数据点标记 ('o', 's', '^', 'D', '*', 'x', '+')
+        ms / markersize: 标记大小 (float)
+        mfc / markerfacecolor: 标记内部填充色
+        mec / markeredgecolor: 标记边框色
         solid_capstyle: 端点 ('butt', 'round', 'projecting')
         label: 图例标签
 
@@ -157,12 +251,13 @@ def plot(*args, **kwargs):
         return _rsplotlib.plot(*a, **k)
 
     result = None
-    for triple in pairs:
-        x, y, fmt = triple
-        if fmt is not None:
-            result = _route_to_ax('plot', _call, x, y, label=fmt, **kwargs)
-        else:
-            result = _route_to_ax('plot', _call, x, y, **kwargs)
+    for x, y, fmt in pairs:
+        call_kwargs = dict(kwargs)
+        if fmt:
+            # fmt 解析出的样式作为默认值, 不覆盖用户显式传入的关键字参数
+            for key, value in _parse_fmt(fmt).items():
+                call_kwargs.setdefault(key, value)
+        result = _route_to_ax('plot', _call, x, y, **call_kwargs)
     return result
 
 
@@ -627,19 +722,86 @@ def vlines(x, ymin=None, ymax=None, **kwargs):
 
 # ==================== 配置函数 ====================
 
-def xlabel(text, **kwargs):
-    """设置 x 轴标签文本。"""
-    return _rsplotlib.xlabel(text)
+def _font_props(fontdict, kwargs):
+    """从 fontdict 与关键字参数中提取字体属性 (family, size, color)。
+
+    matplotlib 语义：关键字参数优先于 fontdict；family 支持 family/fontfamily/fontname
+    别名，size 支持 size/fontsize，color 支持 color/c。返回 (family, size, color)，
+    其中 size 已转为 float 或 None。
+    """
+    fd = fontdict or {}
+
+    def _pick(*keys):
+        for k in keys:
+            if kwargs.get(k) is not None:
+                return kwargs[k]
+        for k in keys:
+            if fd.get(k) is not None:
+                return fd[k]
+        return None
+
+    family = _pick('family', 'fontfamily', 'fontname')
+    size = _pick('size', 'fontsize')
+    color = _pick('color', 'c')
+    size = float(size) if size is not None else None
+    return family, size, color
 
 
-def ylabel(text, **kwargs):
-    """设置 y 轴标签文本。"""
-    return _rsplotlib.ylabel(text)
+def xlabel(text, fontdict=None, loc=None, **kwargs):
+    """设置 x 轴标签文本，并可通过 fontdict / 关键字参数自定义字体属性。
+
+    支持的字体属性 (fontdict 的键或直接关键字参数, 关键字参数优先):
+        family / fontfamily / fontname: 字体族名 (如 'Courier'、'STHeiti Light' 等)
+        size / fontsize: 字号 (points)
+        color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
+
+    loc: 标签水平位置，可选 'left'、'center'、'right'，默认 'center'。
+
+    用法:
+        plt.xlabel("x - label")
+        plt.xlabel("x 轴", fontdict={"family": "STHeiti Light", "size": 16, "color": "b"})
+        plt.xlabel("x 轴", loc="left")
+    """
+    family, size, color = _font_props(fontdict, kwargs)
+    return _rsplotlib.xlabel(text, color, size, family, loc)
 
 
-def title(label, fontdict=None, **kwargs):
-    """设置图表标题文本。"""
-    return _rsplotlib.title(label)
+def ylabel(text, fontdict=None, loc=None, **kwargs):
+    """设置 y 轴标签文本，并可通过 fontdict / 关键字参数自定义字体属性。
+
+    支持的字体属性同 xlabel（family / size / color，关键字参数优先于 fontdict）。
+
+    loc: 标签垂直位置，可选 'bottom'、'center'、'top'，默认 'center'。
+
+    用法:
+        plt.ylabel("y - label")
+        plt.ylabel("y 轴", fontdict={"family": "STHeiti Light", "size": 16, "color": "g"})
+        plt.ylabel("y 轴", loc="top")
+    """
+    family, size, color = _font_props(fontdict, kwargs)
+    return _rsplotlib.ylabel(text, color, size, family, loc)
+
+
+def title(label, fontdict=None, loc=None, **kwargs):
+    """设置图表标题文本，并可通过 fontdict / 关键字参数自定义字体属性。
+
+    支持的字体属性 (fontdict 的键或直接关键字参数, 关键字参数优先):
+        family / fontfamily / fontname: 字体族名 (如 'Courier'、'Times New Roman'、
+            'SimHei' 等)
+        size / fontsize: 字号 (points)
+        color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
+
+    loc: 标题水平位置，可选 'left'、'center'、'right'，默认 'center'。
+
+    用法:
+        plt.title("标题")
+        plt.title("标题", fontdict={"family": "Courier", "size": 18, "color": "red"})
+        plt.title("标题", fontsize=18, color='b')
+        plt.title("标题", loc="left")
+    """
+    family, size, color = _font_props(fontdict, kwargs)
+    # 字体族名的解析与注册由 Rust 层的 set_title 统一处理。
+    return _rsplotlib.title(label, color, size, family, loc)
 
 
 def grid(visible=True, **kwargs):

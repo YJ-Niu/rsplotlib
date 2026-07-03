@@ -57,14 +57,29 @@ pub fn register_sans_serif_font(py: Python, path: String, family_name: Option<St
 }
 
 pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
-    let fig = get_current_figure(py)?;
-    let fig_ref = fig.borrow();
-    if fig_ref.axes_list.is_empty() {
-        return Err(PyRuntimeError::new_err("No axes found in current figure."));
+    // 已有当前 figure 时的处理
+    if let Ok(fig) = get_current_figure(py) {
+        {
+            let fig_ref = fig.borrow();
+            if !fig_ref.axes_list.is_empty() {
+                // 返回最后创建的 axes（符合 matplotlib：plt.* 作用于最近操作的 axes）
+                let last_idx = fig_ref.axes_list.len() - 1;
+                return Ok(fig_ref.axes_list[last_idx].clone_ref(py));
+            }
+        }
+        // 当前 figure 存在但还没有 axes：向其补一个全幅 axes，
+        // 保留用户已在 figure 上设置的属性（figsize / dpi 等）。
+        let ax_py = Py::new(py, Axes::new())?;
+        init_axes_self_py(&ax_py, py);
+        let mut fig_mut = fig.borrow_mut();
+        fig_mut.axes_list.push(ax_py.clone_ref(py));
+        fig_mut.axes_positions.push((0.0, 1.0, 0.0, 1.0));
+        return Ok(ax_py);
     }
-    // 返回最后创建的axes（更符合matplotlib行为，plt.*应该作用于最近操作的axes）
-    let last_idx = fig_ref.axes_list.len() - 1;
-    Ok(fig_ref.axes_list[last_idx].clone_ref(py))
+    // 没有任何当前 figure：按 matplotlib gca() 语义惰性创建 figure + 全幅 axes，
+    // 这样 title / xlabel / ylabel 等可在 plot 之前调用而不再报错。
+    let (_fig_py, ax_py) = _make_fig_ax(py, Axes::new())?;
+    Ok(ax_py)
 }
 
 pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
@@ -99,20 +114,29 @@ macro_rules! make_fig_ax {
 }
 
 #[pyfunction]
-pub fn xlabel(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_xlabel(text, None);
+#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+pub fn xlabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
+    let ax = get_current_axes(py)?;
+    let mut ax_ref = ax.borrow_mut(py);
+    Axes::set_xlabel(&mut ax_ref, py, text, color, fontsize, family, loc);
     Ok(())
 }
 
 #[pyfunction]
-pub fn ylabel(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_ylabel(text, None);
+#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+pub fn ylabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
+    let ax = get_current_axes(py)?;
+    let mut ax_ref = ax.borrow_mut(py);
+    Axes::set_ylabel(&mut ax_ref, py, text, color, fontsize, family, loc);
     Ok(())
 }
 
 #[pyfunction]
-pub fn title(py: Python, text: String) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).set_title(text, None, None);
+#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+pub fn title(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
+    let ax = get_current_axes(py)?;
+    let mut ax_ref = ax.borrow_mut(py);
+    Axes::set_title(&mut ax_ref, py, text, color, fontsize, family, loc);
     Ok(())
 }
 
@@ -565,7 +589,7 @@ pub fn subplots(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, solid_capstyle=None))]
+#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn plot<'a>(
     py: Python<'a>,
@@ -581,10 +605,12 @@ pub fn plot<'a>(
     ls: Option<String>,
     markersize: Option<f64>,
     markeredgewidth: Option<f64>,
+    markerfacecolor: Option<String>,
+    markeredgecolor: Option<String>,
     solid_capstyle: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, solid_capstyle)?;
+        ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, markerfacecolor, markeredgecolor, solid_capstyle)?;
     })
 }
 
@@ -659,7 +685,7 @@ pub fn semilogx<'a>(
         ax.set_xscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
     })
 }
 
@@ -680,7 +706,7 @@ pub fn semilogy<'a>(
         ax.set_yscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
     })
 }
 
@@ -702,7 +728,7 @@ pub fn loglog<'a>(
         ax.set_yscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None)?;
+        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
     })
 }
 

@@ -13,12 +13,40 @@ use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 
+use std::cell::RefCell;
+
 use crate::figure::axes::scale_font;
 use crate::core::colormap::{autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color, viridis_color, winter_color};
 use crate::core::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
 use crate::utils::font_stack;
+
+thread_local! {
+    /// SVG 后端虚线注入表。位图后端无原生 dash，需把折线切成一段段独立描边；
+    /// 但 SVG/光栅化路径下这样做会让每段 dash 的亚像素相位、跨顶点点数各异，
+    /// 光栅化后形状"随机不一致"。改为：SVG 分支把虚线画成**整条连续 polyline**，
+    /// 再由 `render_svg_string` 给它注入原生 `stroke-dasharray`——连续描边使各段
+    /// dash 相位连续、端点统一，像素形状规律一致（与 matplotlib SVG 输出一致）。
+    ///
+    /// 每条记录为 (stroke 颜色 hex, 首点像素坐标 x, y, dasharray 字符串)，用于在
+    /// plotters 生成的 `<polyline .../>` 中精确定位对应虚线并注入属性。
+    static SVG_DASH_INJECTS: RefCell<Vec<(String, i32, i32, String)>> = RefCell::new(Vec::new());
+}
+
+/// 清空 SVG 虚线注入表（每次 SVG 渲染前调用，避免跨次渲染残留）。
+pub fn clear_svg_dash_injects() {
+    SVG_DASH_INJECTS.with(|c| c.borrow_mut().clear());
+}
+
+/// 取出并清空 SVG 虚线注入表（SVG 渲染完成后调用）。
+pub fn take_svg_dash_injects() -> Vec<(String, i32, i32, String)> {
+    SVG_DASH_INJECTS.with(|c| std::mem::take(&mut *c.borrow_mut()))
+}
+
+fn push_svg_dash_inject(color_hex: String, x0: i32, y0: i32, dasharray: String) {
+    SVG_DASH_INJECTS.with(|c| c.borrow_mut().push((color_hex, x0, y0, dasharray)));
+}
 
 /// 绘制单条线段（用于 axhline/axvline/stem 等）
 pub fn draw_single_line<DB: DrawingBackend>(
@@ -41,6 +69,391 @@ where
     Ok(())
 }
 
+/// 绘制等宽折线（实线）。
+///
+/// 逐段绘制四边形 + 顶点处圆填充，保证任意斜率下线宽一致。
+/// 每个线段在数据坐标中构造精确法线方向的四边形，顶点处用圆形成 round join，
+/// 避免 plotters 原生粗线对法线偏移取整导致的粗细不均问题。
+#[allow(dead_code)]
+fn draw_thick_polyline<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    points: &[(f64, f64)],
+    rgb: &plotters::style::RGBColor,
+    width_px: f64,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    if points.len() < 2 {
+        return Ok(());
+    }
+    let (pw, ph) = {
+        let dim = chart.plotting_area().dim_in_pixel();
+        (dim.0 as f64, dim.1 as f64)
+    };
+    let x_per_pix = if pw > 0.0 { (x_max - x_min) / pw } else { 1.0 };
+    let y_per_pix = if ph > 0.0 { (y_max - y_min) / ph } else { 1.0 };
+    let half = width_px / 2.0;
+    let style: ShapeStyle = rgb.filled();
+
+    let n = points.len();
+
+    // 计算每个线段的单位方向（屏幕空间）和法线
+    let mut seg_dirs: Vec<(f64, f64)> = Vec::with_capacity(n - 1);
+    for i in 0..n - 1 {
+        let dx_data = points[i + 1].0 - points[i].0;
+        let dy_data = points[i + 1].1 - points[i].1;
+        let dx_px = if x_per_pix != 0.0 { dx_data / x_per_pix } else { 0.0 };
+        let dy_px = if y_per_pix != 0.0 { dy_data / y_per_pix } else { 0.0 };
+        let len = (dx_px * dx_px + dy_px * dy_px).sqrt();
+        if len < 1e-9 {
+            seg_dirs.push((1.0, 0.0));
+        } else {
+            seg_dirs.push((dx_px / len, dy_px / len));
+        }
+    }
+
+    // 计算每个线段的四个顶点（四边形），在数据坐标中构造
+    // 法线方向：(-ty, tx)，即左侧法线
+    let mut quads: Vec<Vec<(f64, f64)>> = Vec::with_capacity(n - 1);
+    for i in 0..n - 1 {
+        let (tx, ty) = seg_dirs[i];
+        let nx = -ty;
+        let ny = tx;
+        let (x0, y0) = points[i];
+        let (x1, y1) = points[i + 1];
+
+        let dx_n = nx * half * x_per_pix;
+        let dy_n = ny * half * y_per_pix;
+
+        quads.push(vec![
+            (x0 + dx_n, y0 + dy_n),
+            (x1 + dx_n, y1 + dy_n),
+            (x1 - dx_n, y1 - dy_n),
+            (x0 - dx_n, y0 - dy_n),
+        ]);
+    }
+
+    // 绘制所有线段四边形
+    chart
+        .draw_series(quads.iter().map(|v| Polygon::new(v.clone(), style)))
+        .map_err(|e| PyRuntimeError::new_err(format!("Thick polyline segs: {}", e)))?;
+
+    // 在每个顶点处绘制填充圆，形成 round join 并填补相邻四边形之间的缝隙。
+    // plotters 的 Circle 半径以「像素」为单位（与 marker 一致），因此直接用 half，
+    // 半径正好等于线的半宽，圆不会超出 ribbon 宽度，保证线宽处处一致。
+    chart
+        .draw_series(points.iter().map(|&(x, y)| Circle::new((x, y), half, style)))
+        .map_err(|e| PyRuntimeError::new_err(format!("Thick polyline joins: {}", e)))?;
+
+    Ok(())
+}
+
+thread_local! {
+    /// 复用的 AA "到折线笔画最小距离" 缓冲 + 本次写入过的像素下标列表。
+    ///
+    /// dist 缓冲长度覆盖整块绘图区、且始终保持全 +∞（哨兵，表示"未被触及"）；
+    /// 每条折线只写入被覆盖的像素，并把这些像素下标记录到 touched，绘制后逐一
+    /// 复位为 +∞。这样避免了「每个折线元素都重新分配并清零整块绘图区」的巨大
+    /// 开销——单张主图有数百条折线时，这正是渲染的主要瓶颈。
+    static AA_SCRATCH: std::cell::RefCell<(Vec<f32>, Vec<usize>)> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+
+/// 抗锯齿等宽折线渲染（仅位图后端）。
+///
+/// 对折线包围盒内的每个像素，计算像素中心到线段的距离，用覆盖率（coverage）
+/// 做 alpha 混合。这样任意斜率下线宽都严格一致、边缘平滑，从根本上消除
+/// 无抗锯齿多边形填充导致的"阶梯状粗细不均"。相邻线段用 clamped 距离自然
+/// 形成圆角连接（round join）；两端按 capstyle 处理 butt/round/projecting。
+#[allow(clippy::too_many_arguments)]
+fn draw_thick_polyline_aa<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    points: &[(f64, f64)],
+    rgb: &plotters::style::RGBColor,
+    width_px: f64,
+    capstyle: &str,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    if points.len() < 2 {
+        return Ok(());
+    }
+    let (pw, ph) = {
+        let dim = chart.plotting_area().dim_in_pixel();
+        (dim.0 as f64, dim.1 as f64)
+    };
+    if pw < 1.0 || ph < 1.0 {
+        return Ok(());
+    }
+    let x_per_pix = (x_max - x_min) / pw;
+    let y_per_pix = (y_max - y_min) / ph;
+    if x_per_pix == 0.0 || y_per_pix == 0.0 {
+        return Ok(());
+    }
+    // 数据坐标 -> 绘图区局部连续像素坐标（y 轴翻转：y_max 对应 v=0）
+    let to_px = |p: (f64, f64)| -> (f64, f64) {
+        ((p.0 - x_min) / x_per_pix, (y_max - p.1) / y_per_pix)
+    };
+    let pts: Vec<(f64, f64)> = points.iter().map(|&p| to_px(p)).collect();
+
+    let half = width_px / 2.0;
+    // 覆盖率 = 到折线笔画的距离经过 1px 线性斜坡：cov = clamp(half + 0.5 - dist, 0, 1)。
+    // 对直线段而言，这与"每像素 8×8 子采样求面积占比"在数学上等价（面积覆盖对直边
+    // 就是该线性斜坡），但每像素只需一次距离计算，省去 64× 子采样开销。
+    // 为消除折线顶点处"一侧 50% + 另一侧 50% 被错误合成为 50%"的掐细拐折，
+    // 逐段写入的是「像素中心到该段的距离」，并对所有段取 **最小距离**（= 到整条
+    // 折线笔画的真实距离），拐点自然形成 round join、线宽处处一致。
+    let reach = half + 1.0;
+    let cov_reach = half + 0.5; // 距离 >= 此值覆盖率为 0
+
+    let pw_u = pw as usize;
+    let ph_u = ph as usize;
+    // dist_buf 从线程本地 scratch 借出复用（见 AA_SCRATCH），语义为"到折线笔画的
+    // 最小距离"，哨兵值 +∞ 表示未被本条折线触及。避免每个折线元素都重新分配/清零
+    // 整块绘图区。
+    let (mut dist_buf, mut touched) = AA_SCRATCH.with(|c| {
+        let mut g = c.borrow_mut();
+        (std::mem::take(&mut g.0), std::mem::take(&mut g.1))
+    });
+    if dist_buf.len() < pw_u * ph_u {
+        dist_buf.resize(pw_u * ph_u, f32::INFINITY);
+    }
+    touched.clear();
+
+    let cap_round = capstyle.eq_ignore_ascii_case("round");
+    let cap_proj = capstyle.eq_ignore_ascii_case("projecting");
+
+    let n = pts.len();
+    for i in 0..n - 1 {
+        let (ax, ay) = pts[i];
+        let (bx, by) = pts[i + 1];
+        let dx = bx - ax;
+        let dy = by - ay;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-9 {
+            continue;
+        }
+        let ux = dx / len;
+        let uy = dy / len;
+        let start_cap = i == 0;
+        let end_cap = i == n - 2;
+
+        let min_x = (ax.min(bx) - reach).floor().max(0.0) as usize;
+        let max_x = (ax.max(bx) + reach).ceil().min(pw - 1.0) as usize;
+        let min_y = (ay.min(by) - reach).floor().max(0.0) as usize;
+        let max_y = (ay.max(by) + reach).ceil().min(ph - 1.0) as usize;
+
+        // 像素中心到本段的距离（含端点 cap / 内部 round join 处理）
+        let dist_at = |px: f64, py: f64| -> f64 {
+            let s = (px - ax) * ux + (py - ay) * uy;
+            let perp = ((px - ax) * (-uy) + (py - ay) * ux).abs();
+            if s < 0.0 {
+                if start_cap {
+                    if cap_round {
+                        (s * s + perp * perp).sqrt()
+                    } else if cap_proj {
+                        if s >= -half { perp } else { f64::INFINITY }
+                    } else {
+                        f64::INFINITY // butt：垂直切断
+                    }
+                } else {
+                    (s * s + perp * perp).sqrt() // 内部连接：round join
+                }
+            } else if s > len {
+                let over = s - len;
+                if end_cap {
+                    if cap_round {
+                        (over * over + perp * perp).sqrt()
+                    } else if cap_proj {
+                        if over <= half { perp } else { f64::INFINITY }
+                    } else {
+                        f64::INFINITY
+                    }
+                } else {
+                    (over * over + perp * perp).sqrt()
+                }
+            } else {
+                perp
+            }
+        };
+
+        for yy in min_y..=max_y {
+            let cy = yy as f64 + 0.5;
+            let row = yy * pw_u;
+            for xx in min_x..=max_x {
+                let cx = xx as f64 + 0.5;
+                let d = dist_at(cx, cy);
+                if d >= cov_reach {
+                    continue;
+                }
+                let idx = row + xx;
+                let df = d as f32;
+                let cur = dist_buf[idx];
+                if cur.is_infinite() {
+                    touched.push(idx);
+                    dist_buf[idx] = df;
+                } else if df < cur {
+                    dist_buf[idx] = df;
+                }
+            }
+        }
+    }
+
+    // 直接以「后端整数像素」坐标绘制，绕过 plotters 的数据->像素映射
+    // （其 floor(actual*logic+1e-3) 会偶发把两个相邻局部像素映射到同一图像
+    // 列、留空相邻列，造成"偶尔 1 像素错位"）。strip_coord_spec 给出的
+    // Shift 坐标是「加上绘图区左上角原点」的纯平移，局部像素 (xx,yy) 精确
+    // 对应后端像素，与覆盖率所用的局部网格一一对应。
+    //
+    // 仅遍历本次写入过的像素（touched），既完成绘制又顺便把 dist_buf 复位为 +∞，
+    // 开销与被覆盖像素数成正比，而非与整块绘图区成正比。复位对每个 touched 下标
+    // 都执行（即使绘制中途出错），以保证 dist_buf 归还 scratch 时仍为全 +∞。
+    let area = chart.plotting_area().strip_coord_spec();
+    let mut draw_res: PyResult<()> = Ok(());
+    let cov_reach_f = cov_reach as f32;
+    for &idx in touched.iter() {
+        let d = dist_buf[idx];
+        dist_buf[idx] = f32::INFINITY;
+        if draw_res.is_ok() {
+            let cov = (cov_reach_f - d).clamp(0.0, 1.0);
+            if cov > 0.0 {
+                let xx = (idx % pw_u) as i32;
+                let yy = (idx / pw_u) as i32;
+                let color = rgb.mix(cov as f64);
+                if let Err(e) = area.draw_pixel((xx, yy), &color) {
+                    draw_res = Err(PyRuntimeError::new_err(format!("AA polyline: {}", e)));
+                }
+            }
+        }
+    }
+    touched.clear();
+    AA_SCRATCH.with(|c| {
+        let mut g = c.borrow_mut();
+        g.0 = std::mem::take(&mut dist_buf);
+        g.1 = std::mem::take(&mut touched);
+    });
+    draw_res
+}
+
+/// 沿折线按「显示像素」度量的图案切分出各段 dash 折线（纯几何，不做绘制）。
+///
+/// `pattern` 是 (段长像素, 是否绘制) 的循环序列，例如 dashed = [(dash,true),(gap,false)]。
+/// 关键点：段长以**像素**度量（用 `x_per_pix` / `y_per_pix` 把数据坐标增量换算为像素），
+/// 因此划线长度与坐标轴量程无关，和 matplotlib 一致。返回的每个 `Vec` 是一段 dash 的
+/// 折点（数据坐标），一段 dash 可跨越多段折线：在顶点处继续累积当前 dash 的折点。
+///
+/// 切分与渲染解耦后，每段 dash 都能走与实线相同的高质量渲染路径（位图 AA / SVG 原生描边），
+/// 从而线宽处处一致、沿线方向绘制——消除此前把每段 dash 交给 plotters 原生粗线渲染时，
+/// 短斜线出现的 Z 形 / 星形 / 粗细不均。
+fn compute_dash_segments(
+    points: &[(f64, f64)],
+    pattern: &[(f64, bool)],
+    x_per_pix: f64,
+    y_per_pix: f64,
+) -> Vec<Vec<(f64, f64)>> {
+    let mut out: Vec<Vec<(f64, f64)>> = Vec::new();
+    if points.len() < 2 || pattern.is_empty() {
+        return out;
+    }
+
+    let mut pat_idx = 0usize;
+    let mut pat_remain = pattern[0].0.max(1e-6);
+    let mut drawing = pattern[0].1;
+    // 当前正在累积的一段 dash 折点（数据坐标），可跨多段折线累积
+    let mut cur: Vec<(f64, f64)> = Vec::new();
+
+    for i in 0..points.len() - 1 {
+        let (ax, ay) = points[i];
+        let (bx, by) = points[i + 1];
+        let ddx = bx - ax;
+        let ddy = by - ay;
+        let seg_px = {
+            let px = ddx / x_per_pix;
+            let py = ddy / y_per_pix;
+            (px * px + py * py).sqrt()
+        };
+        if seg_px < 1e-12 {
+            continue;
+        }
+        let mut consumed = 0.0f64; // 本段已消耗像素
+        while seg_px - consumed > 1e-9 {
+            let step = (seg_px - consumed).min(pat_remain);
+            if drawing {
+                if cur.is_empty() {
+                    let t0 = consumed / seg_px;
+                    cur.push((ax + ddx * t0, ay + ddy * t0));
+                }
+                let t1 = (consumed + step) / seg_px;
+                cur.push((ax + ddx * t1, ay + ddy * t1));
+            }
+            consumed += step;
+            pat_remain -= step;
+            if pat_remain <= 1e-9 {
+                if drawing && cur.len() >= 2 {
+                    out.push(std::mem::take(&mut cur));
+                }
+                cur.clear();
+                pat_idx = (pat_idx + 1) % pattern.len();
+                pat_remain = pattern[pat_idx].0.max(1e-6);
+                drawing = pattern[pat_idx].1;
+            }
+        }
+    }
+    if drawing && cur.len() >= 2 {
+        out.push(cur);
+    }
+    out
+}
+
+/// 统一的折线渲染入口：实线与每一段 dash 都经此绘制，保证任意斜率线宽一致、沿线方向。
+///
+/// - 位图后端：走逐像素覆盖率抗锯齿 `draw_thick_polyline_aa`（内部含 round join 与端点处理）；
+/// - SVG 后端：走原生连续描边 `PathElement`（描边端点 / 连接在导出时统一注入为 round）。
+///
+/// 相比直接用 plotters 原生 `stroke_width` 渲染短斜线（法线偏移取整导致 Z 形 / 星形 /
+/// 粗细不均），此入口对短 dash 同样保持均匀线宽。
+#[allow(clippy::too_many_arguments)]
+fn render_polyline<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    points: &[(f64, f64)],
+    rgb: &plotters::style::RGBColor,
+    width_px: f64,
+    capstyle: &str,
+    bitmap: bool,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    if points.len() < 2 {
+        return Ok(());
+    }
+    if bitmap {
+        draw_thick_polyline_aa(chart, points, rgb, width_px.max(1.0), capstyle,
+                               x_min, x_max, y_min, y_max)
+    } else {
+        let sw = width_px.round().max(1.0) as u32;
+        let style_native: ShapeStyle = rgb.stroke_width(sw);
+        chart
+            .draw_series(std::iter::once(PathElement::new(points.to_vec(), style_native)))
+            .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
+        Ok(())
+    }
+}
+
 /// 渲染所有 PlotElement
 ///
 /// # 参数
@@ -49,16 +462,19 @@ where
 /// - `font_scale`: 字体缩放系数
 /// - `xlog`, `ylog`: 是否对数刻度
 /// - `x_min`, `x_max`, `y_min`, `y_max`: 数据范围
+#[allow(clippy::too_many_arguments)]
 pub fn render_elements<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     elements: &[PlotElement],
     font_scale: f64,
+    marker_scale: f64,
     xlog: bool,
     ylog: bool,
     x_min: f64,
     x_max: f64,
     y_min: f64,
     y_max: f64,
+    bitmap: bool,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
@@ -69,7 +485,7 @@ where
 
     for el in elements {
         match el {
-            PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, markersize, .. } => {
+            PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, markersize, markerfacecolor, markeredgecolor, .. } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
                 // 折线线宽增加 50%
@@ -110,179 +526,61 @@ where
                     if linestyle != " " {
                         for points in &segments {
                         // 将 linewidth 从 points 转换为像素：1pt = dpi/72 px，dpi = 72 * font_scale
-                        // matplotlib 通过 AA 在 0.5-1.5pt 量级产生柔和的 1-3 像素宽线。
-                        // plotters 无 AA，使用四舍五入以获得接近 mpl 的视觉粗细。
                         let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
-                        let _style: ShapeStyle = rgb.stroke_width(lw_px);
-                        // 对于虚线样式，使用分段绘制模拟
-                        if linestyle == "--" {
-                            let dash_len = *linewidth * 4.0;
-                            let gap_len = *linewidth * 2.0;
-                            let mut seg_start = 0usize;
-                            while seg_start < points.len() - 1 {
-                                let mut seg_end = seg_start + 1;
-                                let mut acc_dist = 0.0;
-                                while seg_end < points.len() {
-                                    let dx = points[seg_end].0 - points[seg_end - 1].0;
-                                    let dy = points[seg_end].1 - points[seg_end - 1].1;
-                                    acc_dist += (dx * dx + dy * dy).sqrt();
-                                    if acc_dist >= dash_len + gap_len { break; }
-                                    seg_end += 1;
+                        // 虚线图案按「显示像素」度量：matplotlib 图案(points) × 名义线宽 × (dpi/72)。
+                        let (pw_dash, ph_dash) = {
+                            let dim = chart.plotting_area().dim_in_pixel();
+                            (dim.0 as f64, dim.1 as f64)
+                        };
+                        let x_per_pix = if pw_dash > 0.0 { (x_max - x_min) / pw_dash } else { 1.0 };
+                        let y_per_pix = if ph_dash > 0.0 { (y_max - y_min) / ph_dash } else { 1.0 };
+                        // 撤销前面 1.5x 线宽膨胀，dash 图案按 matplotlib 名义线宽缩放；font_scale = dpi/72
+                        let lw_nominal = (*linewidth / 1.5).max(0.1);
+                        let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
+                        let width_px = (lw_px as i32 - 1).max(1) as f64;
+                        // matplotlib 默认 dash 图案 (rcParams)，None 表示实线
+                        let dash_pattern: Option<Vec<(f64, bool)>> = match linestyle.as_str() {
+                            // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
+                            "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
+                            // dotted (lines.dotted_pattern): 点 1, 隙 1.65
+                            ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
+                            // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
+                            "-." => Some(vec![
+                                (6.4 * ds, true), (1.6 * ds, false),
+                                (1.0 * ds, true), (1.6 * ds, false),
+                            ]),
+                            _ => None,
+                        };
+                        if let Some(pattern) = dash_pattern {
+                            if bitmap {
+                                // 位图后端无原生 dash：按像素图案把折线切成一段段 dash（沿线方向），
+                                // 每段走与实线相同的 AA 渲染入口，线宽处处一致、无 Z 形 / 星形。
+                                // dash 端点用 "butt"（matplotlib 默认 dash_capstyle）。
+                                let dashes = compute_dash_segments(points, &pattern, x_per_pix, y_per_pix);
+                                for dash in &dashes {
+                                    render_polyline(chart, dash, &rgb, width_px, "butt",
+                                                    bitmap, x_min, x_max, y_min, y_max)?;
                                 }
-                                // 绘制dash段（前dash_len长度）
-                                let mut dash_points = Vec::new();
-                                dash_points.push(points[seg_start]);
-                                let mut dist = 0.0;
-                                for i in seg_start..seg_end.min(points.len() - 1) {
-                                    let dx = points[i + 1].0 - points[i].0;
-                                    let dy = points[i + 1].1 - points[i].1;
-                                    let seg_len = (dx * dx + dy * dy).sqrt();
-                                    if dist + seg_len <= dash_len {
-                                        dash_points.push(points[i + 1]);
-                                        dist += seg_len;
-                                    } else {
-                                        let remain = dash_len - dist;
-                                        let t = remain / seg_len;
-                                        dash_points.push((points[i].0 + dx * t, points[i].1 + dy * t));
-                                        break;
-                                    }
-                                }
-                                if dash_points.len() >= 2 {
-                                    let lw_px_dash = ((*linewidth) * font_scale).max(1.0).round() as u32;
-                                    let stroke_dash = (lw_px_dash as i32 - 1).max(1) as u32;
-                                    chart.draw_series(std::iter::once(PathElement::new(dash_points, rgb.stroke_width(stroke_dash))))
-                                        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dashed line: {}", e)))?;
-                                }
-                                seg_start = seg_end.max(seg_start + 1);
-                            }
-                        } else if linestyle == ":" {
-                            // 点线：沿路径绘制短点段
-                            let dot_len = *linewidth * 1.0;
-                            let gap_len = *linewidth * 2.0;
-                            let mut seg_idx = 0usize;
-                            let mut pos_in_seg = 0.0f64;
-                            while seg_idx < points.len() - 1 {
-                                let dx = points[seg_idx + 1].0 - points[seg_idx].0;
-                                let dy = points[seg_idx + 1].1 - points[seg_idx].1;
-                                let seg_len = (dx * dx + dy * dy).sqrt();
-                                if seg_len < 1e-10 {
-                                    seg_idx += 1;
-                                    pos_in_seg = 0.0;
-                                    continue;
-                                }
-                                let unit_x = dx / seg_len;
-                                let unit_y = dy / seg_len;
-                                // 绘制一个点
-                                let dot_start = pos_in_seg;
-                                let dot_end = (pos_in_seg + dot_len).min(seg_len);
-                                let p1 = (points[seg_idx].0 + unit_x * dot_start,
-                                          points[seg_idx].1 + unit_y * dot_start);
-                                let p2 = (points[seg_idx].0 + unit_x * dot_end,
-                                          points[seg_idx].1 + unit_y * dot_end);
-                                let lw_px_dot = ((*linewidth) * font_scale).max(1.0).round() as u32;
-                                let stroke_dot = (lw_px_dot as i32 - 1).max(1) as u32;
-                                chart.draw_series(std::iter::once(PathElement::new(
-                                    vec![p1, p2], rgb.stroke_width(stroke_dot))))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dotted line: {}", e)))?;
-                                // 跳过间隙
-                                let gap_end = dot_end + gap_len;
-                                if gap_end < seg_len {
-                                    pos_in_seg = gap_end;
-                                } else {
-                                    // 间隙跨越到下一段
-                                    let mut remaining_gap = gap_end - seg_len;
-                                    seg_idx += 1;
-                                    pos_in_seg = 0.0;
-                                    while seg_idx < points.len() - 1 && remaining_gap > 0.0 {
-                                        let next_dx = points[seg_idx + 1].0 - points[seg_idx].0;
-                                        let next_dy = points[seg_idx + 1].1 - points[seg_idx].1;
-                                        let next_len = (next_dx * next_dx + next_dy * next_dy).sqrt();
-                                        if remaining_gap < next_len {
-                                            pos_in_seg = remaining_gap;
-                                            remaining_gap = 0.0;
-                                        } else {
-                                            remaining_gap -= next_len;
-                                            seg_idx += 1;
-                                            pos_in_seg = 0.0;
-                                        }
-                                    }
-                                }
-                            }
-                        } else if linestyle == "-." {
-                            // 点划线：交替绘制长划和短点
-                            let dash_len = *linewidth * 6.0;
-                            let dot_len = *linewidth * 1.0;
-                            let gap_len = *linewidth * 2.0;
-                            let mut seg_idx = 0usize;
-                            let mut pos_in_seg = 0.0f64;
-                            let mut is_dash = true; // 交替 dash/dot
-                            while seg_idx < points.len() - 1 {
-                                let dx = points[seg_idx + 1].0 - points[seg_idx].0;
-                                let dy = points[seg_idx + 1].1 - points[seg_idx].1;
-                                let seg_len = (dx * dx + dy * dy).sqrt();
-                                if seg_len < 1e-10 {
-                                    seg_idx += 1;
-                                    pos_in_seg = 0.0;
-                                    continue;
-                                }
-                                let unit_x = dx / seg_len;
-                                let unit_y = dy / seg_len;
-                                let mark_len = if is_dash { dash_len } else { dot_len };
-                                let mark_start = pos_in_seg;
-                                let mark_end = (pos_in_seg + mark_len).min(seg_len);
-                                let p1 = (points[seg_idx].0 + unit_x * mark_start,
-                                          points[seg_idx].1 + unit_y * mark_start);
-                                let p2 = (points[seg_idx].0 + unit_x * mark_end,
-                                          points[seg_idx].1 + unit_y * mark_end);
-                                let lw_px_mix = ((*linewidth) * font_scale).max(1.0).round() as u32;
-                                let stroke_mix = (lw_px_mix as i32 - 1).max(1) as u32;
-                                chart.draw_series(std::iter::once(PathElement::new(
-                                    vec![p1, p2], rgb.stroke_width(stroke_mix))))
-                                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw dash-dot line: {}", e)))?;
-                                // 跳过间隙
-                                let gap_end = mark_end + gap_len;
-                                is_dash = !is_dash;
-                                if gap_end < seg_len {
-                                    pos_in_seg = gap_end;
-                                } else {
-                                    let mut remaining_gap = gap_end - seg_len;
-                                    seg_idx += 1;
-                                    pos_in_seg = 0.0;
-                                    while seg_idx < points.len() - 1 && remaining_gap > 0.0 {
-                                        let next_dx = points[seg_idx + 1].0 - points[seg_idx].0;
-                                        let next_dy = points[seg_idx + 1].1 - points[seg_idx].1;
-                                        let next_len = (next_dx * next_dx + next_dy * next_dy).sqrt();
-                                        if remaining_gap < next_len {
-                                            pos_in_seg = remaining_gap;
-                                            remaining_gap = 0.0;
-                                        } else {
-                                            remaining_gap -= next_len;
-                                            seg_idx += 1;
-                                            pos_in_seg = 0.0;
-                                        }
-                                    }
-                                }
+                            } else {
+                                // SVG 后端：画**整条连续** polyline（butt 端点），再由
+                                // render_svg_string 注入原生 stroke-dasharray。连续描边让每段
+                                // dash 相位连续、端点统一，像素形状规律一致（不再"随机"）。
+                                render_polyline(chart, points, &rgb, width_px, "butt",
+                                                bitmap, x_min, x_max, y_min, y_max)?;
+                                // 记录注入信息：首点像素坐标（= plotters 写入 polyline 的整数坐标）
+                                // + stroke 颜色 hex + dasharray（图案长度序列，单位为显示像素）。
+                                let (x0, y0) = chart.backend_coord(&points[0]);
+                                let color_hex = format!("#{:02X}{:02X}{:02X}", rgb.0, rgb.1, rgb.2);
+                                let dasharray = pattern.iter()
+                                    .map(|(len, _)| format!("{:.2}", len))
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                push_svg_dash_inject(color_hex, x0, y0, dasharray);
                             }
                         } else {
-                            // 实线：使用 plotters 原生 stroke_width。
-                            // points 已在构造时整体下移半像素（见 y_half_px），中心已对齐坐标点。
-                            // plotters 把宽线扩成多边形，半宽 r = stroke_w/2，顶点取整后：
-                            //   stroke_w 为偶数 → 像素带 [Y-r, Y+r] 关于 Y 对称，中心恰在坐标点；
-                            //   stroke_w 为奇数 → 截断后变为 [Y-r-0.5, Y+r-0.5]，中心偏上 0.5 像素，
-                            //                     且偏移量随线宽奇偶变化，造成"线宽不同中心不同"。
-                            // 因此当 stroke_w>1 时强制取偶数，保证任意线宽下线的中心都落在坐标点上。
-                            let stroke_w0 = (lw_px as i32 - 1).max(1) as u32;
-                            let stroke_w = if stroke_w0 > 1 && stroke_w0 % 2 == 1 { stroke_w0 + 1 } else { stroke_w0 };
-                            let style_native: ShapeStyle = rgb.stroke_width(stroke_w);
-                            chart.draw_series(std::iter::once(PathElement::new(points.clone(), style_native)))
-                                .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
-                            // 端点形状 (solid_capstyle)：plotters 0.3.7 不支持 linecap，手动补端点圆盘。
-                            // points 已含半像素偏移，cap 圆心与端点重合，cap_y_shift 取 0。
-                            if linestyle == "-" && marker.as_ref().is_none_or(|m| m.is_empty()) {
-                                let cap_lw_px = (stroke_w as i32).max(1) as f64; // 与线段渲染宽度一致
-                                draw_solid_caps(chart, points, &rgb, solid_capstyle, *linewidth, font_scale,
-                                                x_min, x_max, y_min, y_max, cap_lw_px, 0.0)?;
-                            }
+                            // 实线：中心已对齐坐标点（见 y_half_px）。
+                            render_polyline(chart, points, &rgb, width_px, solid_capstyle,
+                                            bitmap, x_min, x_max, y_min, y_max)?;
                         }
                         }
                     }
@@ -291,24 +589,34 @@ where
                     && !marker_name.is_empty() && x.len() == y.len()
                 {
                     let col2 = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
-                    let rgb = to_plotters_color(col2);
-                        // matplotlib markersize 单位是 points（近似直径）；直径(像素) = markersize * dpi/72
-                        // 在 144dpi 下，markersize=6 (mpl 默认) 直径约为 12 像素。
-                        // "." 是 matplotlib 的 1 像素点 marker，需要保持极小以免覆盖线条
-                        let marker_size = if marker_name == "." {
-                            // "." 1pt 像素点：线宽 <=1pt 时取 1 像素，否则 2 像素（保持可见）
-                            if *linewidth <= 1.0 { 1.0 } else { 2.0 }
-                        } else if marker_name == "," {
-                            // "," 1/2 像素点：保持 1 像素
+                    let line_rgb = to_plotters_color(col2);
+                    // markerfacecolor / markeredgecolor 缺省时都跟随线条颜色 (matplotlib 'auto')
+                    let face_rgb = markerfacecolor.as_deref()
+                        .filter(|s| !s.is_empty())
+                        .and_then(|s| parse_color(s, *color_idx).ok())
+                        .map(to_plotters_color)
+                        .unwrap_or(line_rgb);
+                    let edge_rgb = markeredgecolor.as_deref()
+                        .filter(|s| !s.is_empty())
+                        .and_then(|s| parse_color(s, *color_idx).ok())
+                        .map(to_plotters_color)
+                        .unwrap_or(line_rgb);
+                        // matplotlib markersize 单位是 points；marker 包围盒边长(像素) = markersize * dpi/72。
+                        // 使用 marker_scale (= 真实 dpi/72) 计算，与字体/线宽的 font_scale 解耦，
+                        // 保证 markersize 只影响 marker 大小。
+                        // draw_marker 收到的 `size` 是「半边长 / 半径」= 包围盒边长 / 2。
+                        let marker_size = if marker_name == "," {
+                            // matplotlib 像素点 marker：约 1 设备像素
                             1.0
+                        } else if marker_name == "." {
+                            // matplotlib 点 marker：直径 = 0.5 * markersize（point_size_reduction=0.5），
+                            // 故半径 = 0.25 * markersize_px
+                            let ms = markersize.unwrap_or(6.0_f64).max(0.01);
+                            0.25 * ms * marker_scale
                         } else {
                             // markersize: None => matplotlib 默认 6
                             let ms = markersize.unwrap_or(6.0_f64).max(0.01);
-                            // 直径(像素) ≈ markersize * font_scale
-                            // plotters Circle::new 的半径转 i32 会截断，因此 6*2=12 → radius=6
-                            // 渲染直径 = 2*6+1 = 13px（与 mpl ~13px 接近）
-                            let diameter_px = ms * font_scale;
-                            // draw_marker 中半径 = s
+                            let diameter_px = ms * marker_scale;
                             diameter_px / 2.0
                         };
                         for (xv, yv) in x.iter().zip(y.iter()) {
@@ -316,7 +624,7 @@ where
                                 let txv = tx(*xv);
                                 let tyv = ty(*yv) - y_half_px;
                                 if txv.is_finite() && tyv.is_finite() {
-                                    draw_marker(chart, marker_name, txv, tyv, marker_size, rgb)
+                                    draw_marker(chart, marker_name, txv, tyv, marker_size, face_rgb, edge_rgb)
                                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw marker: {}", e)))?;
                                 }
                             }
@@ -331,7 +639,7 @@ where
                     let txv = tx(xv);
                     let tyv = ty(yv);
                     if txv.is_finite() && tyv.is_finite() {
-                        draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb)
+                        draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb)
                             .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw scatter: {}", e)))?;
                     }
                 }
@@ -353,7 +661,7 @@ where
                         .and_then(|s| s.get(i).cloned())
                         .unwrap_or(20.0)
                         .sqrt() * 0.4;
-                    draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb)
+                    draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb)
                         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e)))?;
                 }
             }
@@ -737,7 +1045,7 @@ where
                     }
                     if !fmt.is_empty() {
                         let marker_name = fmt;
-                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb)
+                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb)
                             .map_err(|e| PyRuntimeError::new_err(format!("ErrorBar marker: {}", e)))?;
                     }
                 }
@@ -769,7 +1077,7 @@ where
                     let txv = tx(xv);
                     let tyv = ty(yv);
                     if !txv.is_finite() || !tyv.is_finite() { continue; }
-                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb)
+                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb)
                         .map_err(|e| PyRuntimeError::new_err(format!("Stem marker: {}", e)))?;
                 }
             }
@@ -938,6 +1246,7 @@ where
 /// - `cap_y_shift`：线段 y 中心对齐偏移，cap 应用同样的偏移以保持端点对齐
 ///
 /// 仅在实线 (`-`) 且无 marker 时调用；虚线/点线场景下端点不连续，跳过。
+#[allow(dead_code)]
 fn draw_solid_caps<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     points: &[(f64, f64)],

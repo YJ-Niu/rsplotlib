@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rsplotlib"
-version = "0.1.7"
+version = "0.1.8"
 description = "A high-performance matplotlib-compatible plotting library powered by Rust"
 readme = "README_zh.md"
 license = { text = "MIT" }
@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
