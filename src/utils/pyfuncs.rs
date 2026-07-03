@@ -57,14 +57,29 @@ pub fn register_sans_serif_font(py: Python, path: String, family_name: Option<St
 }
 
 pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
-    let fig = get_current_figure(py)?;
-    let fig_ref = fig.borrow();
-    if fig_ref.axes_list.is_empty() {
-        return Err(PyRuntimeError::new_err("No axes found in current figure."));
+    // 已有当前 figure 时的处理
+    if let Ok(fig) = get_current_figure(py) {
+        {
+            let fig_ref = fig.borrow();
+            if !fig_ref.axes_list.is_empty() {
+                // 返回最后创建的 axes（符合 matplotlib：plt.* 作用于最近操作的 axes）
+                let last_idx = fig_ref.axes_list.len() - 1;
+                return Ok(fig_ref.axes_list[last_idx].clone_ref(py));
+            }
+        }
+        // 当前 figure 存在但还没有 axes：向其补一个全幅 axes，
+        // 保留用户已在 figure 上设置的属性（figsize / dpi 等）。
+        let ax_py = Py::new(py, Axes::new())?;
+        init_axes_self_py(&ax_py, py);
+        let mut fig_mut = fig.borrow_mut();
+        fig_mut.axes_list.push(ax_py.clone_ref(py));
+        fig_mut.axes_positions.push((0.0, 1.0, 0.0, 1.0));
+        return Ok(ax_py);
     }
-    // 返回最后创建的axes（更符合matplotlib行为，plt.*应该作用于最近操作的axes）
-    let last_idx = fig_ref.axes_list.len() - 1;
-    Ok(fig_ref.axes_list[last_idx].clone_ref(py))
+    // 没有任何当前 figure：按 matplotlib gca() 语义惰性创建 figure + 全幅 axes，
+    // 这样 title / xlabel / ylabel 等可在 plot 之前调用而不再报错。
+    let (_fig_py, ax_py) = _make_fig_ax(py, Axes::new())?;
+    Ok(ax_py)
 }
 
 pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
