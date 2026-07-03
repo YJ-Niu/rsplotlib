@@ -1,14 +1,14 @@
 pub mod core;
 pub mod figure;
-pub mod utils;
 pub mod layout;
 pub mod ticks;
+pub mod utils;
 
-use pyo3::prelude::*;
 use plotters::style::register_font;
+use pyo3::prelude::*;
 
-use crate::figure::axis::{Axis, Patch, SpineDict, Spine};
 use crate::figure::axes::Axes;
+use crate::figure::axis::{Axis, Patch, Spine, SpineDict};
 use crate::figure::figure::Figure;
 
 #[pymodule]
@@ -47,7 +47,8 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         for path in &font_candidates {
             if let Ok(font_data) = std::fs::read(path) {
                 let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
+                {
                     registered = true;
                     break; // 找到第一个能用的就停，保证只用单一字体
                 }
@@ -57,16 +58,23 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             // 退回 matplotlib 自带 DejaVu Sans（仅英文可用）
             for prefix in [
                 std::env::var("VIRTUAL_ENV").ok(),
-                Some(std::env::current_dir()
-                    .map(|p| p.join(".venv").to_string_lossy().to_string())
-                    .unwrap_or_default())
-                    .filter(|p| !p.is_empty()),
-            ].iter().flatten() {
-                let p = std::path::Path::new(&prefix)
-                    .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
+                Some(
+                    std::env::current_dir()
+                        .map(|p| p.join(".venv").to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                )
+                .filter(|p| !p.is_empty()),
+            ]
+            .iter()
+            .flatten()
+            {
+                let p = std::path::Path::new(&prefix).join(
+                    "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
+                );
                 if let Ok(font_data) = std::fs::read(&p) {
                     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                    let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    let _ =
+                        register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
                     break;
                 }
             }
@@ -85,7 +93,8 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         for path in &font_candidates {
             if let Ok(font_data) = std::fs::read(path) {
                 let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
+                {
                     registered = true;
                     break;
                 }
@@ -95,16 +104,23 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             // 退回 DejaVu Sans
             for prefix in [
                 std::env::var("VIRTUAL_ENV").ok(),
-                Some(std::env::current_dir()
-                    .map(|p| p.join(".venv").to_string_lossy().to_string())
-                    .unwrap_or_default())
-                    .filter(|p| !p.is_empty()),
-            ].iter().flatten() {
-                let p = std::path::Path::new(&prefix)
-                    .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf");
+                Some(
+                    std::env::current_dir()
+                        .map(|p| p.join(".venv").to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                )
+                .filter(|p| !p.is_empty()),
+            ]
+            .iter()
+            .flatten()
+            {
+                let p = std::path::Path::new(&prefix).join(
+                    "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
+                );
                 if let Ok(font_data) = std::fs::read(&p) {
                     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                    let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    let _ =
+                        register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
                     break;
                 }
             }
@@ -122,7 +138,8 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         for path in &font_candidates {
             if let Ok(font_data) = std::fs::read(path) {
                 let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
+                {
                     registered = true;
                     break;
                 }
@@ -200,7 +217,10 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(utils::pyfuncs::axhspan, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::axvspan, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::axline, m)?)?;
-    m.add_function(wrap_pyfunction!(utils::pyfuncs::register_sans_serif_font, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        utils::pyfuncs::register_sans_serif_font,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::clear_font_stack, m)?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::debug_font_stack, m)?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::debug_select_family, m)?)?;

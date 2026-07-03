@@ -21,15 +21,22 @@ pub fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
         return vec![min, max];
     }
     let range = max - min;
-    if range <= 0.0 { return vec![min]; }
+    if range <= 0.0 {
+        return vec![min];
+    }
     // 选择合适的步长（matplotlib 的 MaxNLocator 简化版）
     let rough = range / 7.0;
     let mag = 10f64.powf(rough.log10().floor());
     let norm = rough / mag;
-    let step = if norm < 1.5 { mag }
-               else if norm < 3.0 { 2.0 * mag }
-               else if norm < 7.0 { 5.0 * mag }
-               else { 10.0 * mag };
+    let step = if norm < 1.5 {
+        mag
+    } else if norm < 3.0 {
+        2.0 * mag
+    } else if norm < 7.0 {
+        5.0 * mag
+    } else {
+        10.0 * mag
+    };
     let start = (min / step).ceil() * step;
     let end = (max / step).floor() * step;
     let n = ((end + step * 0.001 - start) / step).ceil() as usize + 1;
@@ -39,7 +46,9 @@ pub fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
         ticks.push(t);
         t += step;
     }
-    if ticks.is_empty() { ticks.push(min); }
+    if ticks.is_empty() {
+        ticks.push(min);
+    }
     ticks
 }
 
@@ -91,8 +100,11 @@ pub fn compute_ticks(
     let xticks: Vec<f64> = xaxis_major_locator
         .as_ref()
         .and_then(|locator| {
-            locator.bind(py).call_method1("tick_values", (x_min, x_max))
-                .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
+            locator
+                .bind(py)
+                .call_method1("tick_values", (x_min, x_max))
+                .ok()
+                .and_then(|r| r.extract::<Vec<f64>>().ok())
         })
         .or_else(|| xticks_val.clone())
         .unwrap_or_else(|| nice_ticks(x_min, x_max));
@@ -100,8 +112,11 @@ pub fn compute_ticks(
     let yticks: Vec<f64> = yaxis_major_locator
         .as_ref()
         .and_then(|locator| {
-            locator.bind(py).call_method1("tick_values", (y_min, y_max))
-                .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
+            locator
+                .bind(py)
+                .call_method1("tick_values", (y_min, y_max))
+                .ok()
+                .and_then(|r| r.extract::<Vec<f64>>().ok())
         })
         .or_else(|| yticks_val.clone())
         .unwrap_or_else(|| nice_ticks(y_min, y_max));
@@ -109,18 +124,37 @@ pub fn compute_ticks(
     let x_pw_approx = (plot_pixel_width as f64).max(1.0);
     let y_ph_approx = (plot_pixel_height as f64).max(1.0);
 
-    let should_compute_x_minor = minor_grid_x_visible || !minor_grid_y_visible && minor_grid_visible;
+    let should_compute_x_minor =
+        minor_grid_x_visible || !minor_grid_y_visible && minor_grid_visible;
     let xminor = compute_minor_ticks(
-        py, xaxis_minor_locator, &xticks, x_min, x_max, x_pw_approx,
-        (x_max - x_min) / x_pw_approx, should_compute_x_minor,
+        py,
+        xaxis_minor_locator,
+        &xticks,
+        x_min,
+        x_max,
+        x_pw_approx,
+        (x_max - x_min) / x_pw_approx,
+        should_compute_x_minor,
     );
-    let should_compute_y_minor = minor_grid_y_visible || !minor_grid_x_visible && minor_grid_visible;
+    let should_compute_y_minor =
+        minor_grid_y_visible || !minor_grid_x_visible && minor_grid_visible;
     let yminor = compute_minor_ticks(
-        py, yaxis_minor_locator, &yticks, y_min, y_max, y_ph_approx,
-        (y_max - y_min) / y_ph_approx, should_compute_y_minor,
+        py,
+        yaxis_minor_locator,
+        &yticks,
+        y_min,
+        y_max,
+        y_ph_approx,
+        (y_max - y_min) / y_ph_approx,
+        should_compute_y_minor,
     );
 
-    TicksInfo { xticks, yticks, xminor, yminor }
+    TicksInfo {
+        xticks,
+        yticks,
+        xminor,
+        yminor,
+    }
 }
 
 fn compute_minor_ticks(
@@ -135,17 +169,29 @@ fn compute_minor_ticks(
 ) -> Option<Vec<f64>> {
     // 优先使用用户设置的 Python locator
     let ticks_opt = locator.as_ref().and_then(|loc| {
-        loc.bind(py).call_method1("tick_values", (axis_min, axis_max))
-            .ok().and_then(|r| r.extract::<Vec<f64>>().ok())
+        loc.bind(py)
+            .call_method1("tick_values", (axis_min, axis_max))
+            .ok()
+            .and_then(|r| r.extract::<Vec<f64>>().ok())
     });
 
     if let Some(ticks) = ticks_opt {
-        if ticks.len() > MAX_MINOR_TICKS { return None; }
-        if ticks.len() < 2 { return Some(ticks); }
+        if ticks.len() > MAX_MINOR_TICKS {
+            return None;
+        }
+        if ticks.len() < 2 {
+            return Some(ticks);
+        }
         // 检查副刻度密度：若像素间距 < MIN_MINOR_TICK_PX_SPACING 则回退
-        let min_spacing = ticks.windows(2).map(|w| (w[1] - w[0]).abs())
+        let min_spacing = ticks
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
             .fold(f64::INFINITY, f64::min);
-        let min_spacing_px = if units_per_pix > 0.0 { min_spacing / units_per_pix } else { 0.0 };
+        let min_spacing_px = if units_per_pix > 0.0 {
+            min_spacing / units_per_pix
+        } else {
+            0.0
+        };
         if min_spacing_px < MIN_MINOR_TICK_PX_SPACING {
             None
         } else {
@@ -158,7 +204,9 @@ fn compute_minor_ticks(
         let mut minor = Vec::with_capacity(major_ticks.len().saturating_sub(1) * 4);
         for i in 0..major_ticks.len().saturating_sub(1) {
             let spacing = major_ticks[i + 1] - major_ticks[i];
-            if spacing <= 0.0 { continue; }
+            if spacing <= 0.0 {
+                continue;
+            }
             let step = spacing / 4.0;
             let mut v = major_ticks[i] + step;
             while v < major_ticks[i + 1] - step * 0.5 {
@@ -168,7 +216,11 @@ fn compute_minor_ticks(
                 v += step;
             }
         }
-        if minor.is_empty() || minor.len() > MAX_MINOR_TICKS { None } else { Some(minor) }
+        if minor.is_empty() || minor.len() > MAX_MINOR_TICKS {
+            None
+        } else {
+            Some(minor)
+        }
     } else {
         None
     }

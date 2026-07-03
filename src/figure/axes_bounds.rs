@@ -13,7 +13,11 @@ use crate::core::elements::PlotElement;
 
 /// 对 log 刻度轴的数据值进行 log10 转换
 fn log_transform(val: f64) -> f64 {
-    if val > 0.0 { val.log10() } else { f64::NEG_INFINITY }
+    if val > 0.0 {
+        val.log10()
+    } else {
+        f64::NEG_INFINITY
+    }
 }
 
 /// 计算 axes 的 X/Y 数据范围
@@ -46,69 +50,123 @@ pub fn compute_bounds(
             PlotElement::Line { x, y, .. } => {
                 for v in x.iter().flatten() {
                     let tv = tx(*v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for v in y.iter().flatten() {
                     let tv = ty(*v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
             }
             PlotElement::Scatter { x, y, .. } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for &v in y {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
             }
-            PlotElement::Bar { x, height, width, .. } => {
+            PlotElement::Bar {
+                x, height, width, ..
+            } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for &v in height {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
                 if !x.is_empty() && !height.is_empty() {
                     let last_x = tx(x[x.len() - 1]);
                     let bar_end = last_x + *width;
-                    if bar_end > x_max { x_max = bar_end; }
+                    if bar_end > x_max {
+                        x_max = bar_end;
+                    }
                 }
-                if !ylog && y_min > 0.0 { y_min = 0.0; }
+                if !ylog && y_min > 0.0 {
+                    y_min = 0.0;
+                }
             }
             PlotElement::BarH { y, width, .. } => {
                 for &v in y {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
                 for &v in width {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 if !width.is_empty() {
                     let last_w = tx(width[width.len() - 1]);
-                    if last_w > x_max { x_max = last_w; }
+                    if last_w > x_max {
+                        x_max = last_w;
+                    }
                 }
-                if !xlog && x_min > 0.0 { x_min = 0.0; }
+                if !xlog && x_min > 0.0 {
+                    x_min = 0.0;
+                }
             }
-            PlotElement::Hist { data_all, bins, density, bin_edges, .. } => {
-                if data_all.is_empty() { continue; }
-                let (data_min, data_max) = data_all.iter().flatten().fold(
-                    (f64::INFINITY, f64::NEG_INFINITY),
-                    |(mn, mx), &v| (mn.min(v), mx.max(v)),
-                );
-                if !data_max.is_finite() { continue; }
+            PlotElement::Hist {
+                data_all,
+                bins,
+                density,
+                bin_edges,
+                ..
+            } => {
+                if data_all.is_empty() {
+                    continue;
+                }
+                let (data_min, data_max) = data_all
+                    .iter()
+                    .flatten()
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                        (mn.min(v), mx.max(v))
+                    });
+                if !data_max.is_finite() {
+                    continue;
+                }
                 let (x_start, x_end) = if let Some(edges) = bin_edges {
                     (edges[0], edges[edges.len() - 1])
                 } else {
@@ -116,38 +174,64 @@ pub fn compute_bounds(
                 };
                 let tx_start = tx(x_start);
                 let tx_end = tx(x_end);
-                if tx_start > f64::NEG_INFINITY && tx_start < x_min { x_min = tx_start; }
-                if tx_end > x_max { x_max = tx_end; }
+                if tx_start > f64::NEG_INFINITY && tx_start < x_min {
+                    x_min = tx_start;
+                }
+                if tx_end > x_max {
+                    x_max = tx_end;
+                }
                 let total = data_all.iter().flatten().count() as f64;
                 let mut max_count = 0.0f64;
                 for dataset in data_all {
-                    if dataset.is_empty() { continue; }
+                    if dataset.is_empty() {
+                        continue;
+                    }
                     let d_min = dataset.iter().cloned().fold(f64::INFINITY, f64::min);
                     let d_max = dataset.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                     let d_range = d_max - d_min;
                     if d_range < 1e-10 {
                         // 所有值相同 -> 算一个单柱，计数为 dataset 长度
-                        let dc = if *density { dataset.len() as f64 / total } else { dataset.len() as f64 };
-                        if dc > max_count { max_count = dc; }
+                        let dc = if *density {
+                            dataset.len() as f64 / total
+                        } else {
+                            dataset.len() as f64
+                        };
+                        if dc > max_count {
+                            max_count = dc;
+                        }
                         continue;
                     }
                     let bw = d_range / *bins as f64;
                     let mut counts = vec![0usize; *bins];
                     for &val in dataset {
                         let mut bin = ((val - d_min) / bw).floor() as usize;
-                        if bin >= *bins { bin = *bins - 1; }
+                        if bin >= *bins {
+                            bin = *bins - 1;
+                        }
                         counts[bin] += 1;
                     }
                     let mc = counts.iter().max().unwrap_or(&0);
-                    let dc = if *density { *mc as f64 / (total * bw) } else { *mc as f64 };
-                    if dc > max_count { max_count = dc; }
+                    let dc = if *density {
+                        *mc as f64 / (total * bw)
+                    } else {
+                        *mc as f64
+                    };
+                    if dc > max_count {
+                        max_count = dc;
+                    }
                 }
-                if !ylog && y_min > 0.0 { y_min = 0.0; }
+                if !ylog && y_min > 0.0 {
+                    y_min = 0.0;
+                }
                 let tmax = ty(max_count);
-                if tmax > y_max { y_max = tmax; }
+                if tmax > y_max {
+                    y_max = tmax;
+                }
             }
             PlotElement::Image { data, .. } => {
-                if data.is_empty() || data[0].is_empty() { continue; }
+                if data.is_empty() || data[0].is_empty() {
+                    continue;
+                }
                 x_min = 0.0;
                 x_max = data[0].len() as f64;
                 y_min = 0.0;
@@ -156,155 +240,277 @@ pub fn compute_bounds(
             PlotElement::Text { x, y, .. } => {
                 let tvx = tx(*x);
                 let tvy = ty(*y);
-                if tvx > f64::NEG_INFINITY && tvx < x_min { x_min = tvx; }
-                if tvx > x_max { x_max = tvx; }
-                if tvy > f64::NEG_INFINITY && tvy < y_min { y_min = tvy; }
-                if tvy > y_max { y_max = tvy; }
+                if tvx > f64::NEG_INFINITY && tvx < x_min {
+                    x_min = tvx;
+                }
+                if tvx > x_max {
+                    x_max = tvx;
+                }
+                if tvy > f64::NEG_INFINITY && tvy < y_min {
+                    y_min = tvy;
+                }
+                if tvy > y_max {
+                    y_max = tvy;
+                }
             }
             PlotElement::HLine { y, .. } => {
-                if x_min == f64::INFINITY { x_min = -1.0; x_max = 1.0; }
+                if x_min == f64::INFINITY {
+                    x_min = -1.0;
+                    x_max = 1.0;
+                }
                 let tvy = ty(*y);
-                if tvy > f64::NEG_INFINITY && tvy < y_min { y_min = tvy; }
-                if tvy > y_max { y_max = tvy; }
+                if tvy > f64::NEG_INFINITY && tvy < y_min {
+                    y_min = tvy;
+                }
+                if tvy > y_max {
+                    y_max = tvy;
+                }
             }
             PlotElement::VLine { x, .. } => {
-                if y_min == f64::INFINITY { y_min = -1.0; y_max = 1.0; }
+                if y_min == f64::INFINITY {
+                    y_min = -1.0;
+                    y_max = 1.0;
+                }
                 let tvx = tx(*x);
-                if tvx > f64::NEG_INFINITY && tvx < x_min { x_min = tvx; }
-                if tvx > x_max { x_max = tvx; }
+                if tvx > f64::NEG_INFINITY && tvx < x_min {
+                    x_min = tvx;
+                }
+                if tvx > x_max {
+                    x_max = tvx;
+                }
             }
             PlotElement::Pie { .. } => {
-                if x_min > -1.5 { x_min = -1.5; }
-                if x_max < 1.5 { x_max = 1.5; }
-                if y_min > -1.5 { y_min = -1.5; }
-                if y_max < 1.5 { y_max = 1.5; }
+                if x_min > -1.5 {
+                    x_min = -1.5;
+                }
+                if x_max < 1.5 {
+                    x_max = 1.5;
+                }
+                if y_min > -1.5 {
+                    y_min = -1.5;
+                }
+                if y_max < 1.5 {
+                    y_max = 1.5;
+                }
             }
             PlotElement::FillBetween { x, y1, y2, .. } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for &v in y1 {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
                 for &v in y2 {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
             }
             PlotElement::Stack { x, y_series, .. } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 // 累加 y 以考虑堆叠后的最大值
                 let n = x.len();
                 let mut cumulative = vec![0.0; n];
                 for series in y_series {
                     for (i, &v) in series.iter().enumerate() {
-                        if i < n { cumulative[i] += v; }
+                        if i < n {
+                            cumulative[i] += v;
+                        }
                     }
                 }
                 for &v in &cumulative {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
             }
             PlotElement::ErrorBar { x, y, yerr, .. } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for &v in y {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
                 if let Some(ye_vec) = yerr.as_ref() {
                     for (i, &yv) in y.iter().enumerate() {
                         let ye = if i < ye_vec.len() { ye_vec[i] } else { 0.0_f64 };
                         let tv_lo = ty(yv - ye);
                         let tv_hi = ty(yv + ye);
-                        if tv_lo > f64::NEG_INFINITY && tv_lo < y_min { y_min = tv_lo; }
-                        if tv_hi > y_max { y_max = tv_hi; }
+                        if tv_lo > f64::NEG_INFINITY && tv_lo < y_min {
+                            y_min = tv_lo;
+                        }
+                        if tv_hi > y_max {
+                            y_max = tv_hi;
+                        }
                     }
                 }
             }
             PlotElement::Stem { x, y, .. } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for &v in y {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
-                if !ylog && y_min > 0.0 { y_min = 0.0; }
+                if !ylog && y_min > 0.0 {
+                    y_min = 0.0;
+                }
             }
             PlotElement::Step { x, y, .. } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for &v in y {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
             }
             PlotElement::BoxPlot { data, .. } => {
                 for series in data {
                     for &v in series {
                         let tv = ty(v);
-                        if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                        if tv > y_max { y_max = tv; }
+                        if tv > f64::NEG_INFINITY && tv < y_min {
+                            y_min = tv;
+                        }
+                        if tv > y_max {
+                            y_max = tv;
+                        }
                     }
                 }
-                if !ylog && y_min > 0.0 { y_min = 0.0; }
-                if !xlog && x_min > 0.0 { x_min = 0.0; }
+                if !ylog && y_min > 0.0 {
+                    y_min = 0.0;
+                }
+                if !xlog && x_min > 0.0 {
+                    x_min = 0.0;
+                }
                 let n = data.len() as f64;
-                if n > x_max { x_max = n + 1.0; }
+                if n > x_max {
+                    x_max = n + 1.0;
+                }
             }
             PlotElement::Annotate { xy, xytext, .. } => {
                 let (xv, yv) = *xy;
                 let tvx = tx(xv);
                 let tvy = ty(yv);
-                if tvx > f64::NEG_INFINITY && tvx < x_min { x_min = tvx; }
-                if tvx > x_max { x_max = tvx; }
-                if tvy > f64::NEG_INFINITY && tvy < y_min { y_min = tvy; }
-                if tvy > y_max { y_max = tvy; }
+                if tvx > f64::NEG_INFINITY && tvx < x_min {
+                    x_min = tvx;
+                }
+                if tvx > x_max {
+                    x_max = tvx;
+                }
+                if tvy > f64::NEG_INFINITY && tvy < y_min {
+                    y_min = tvy;
+                }
+                if tvy > y_max {
+                    y_max = tvy;
+                }
                 if let Some((xt, yt)) = xytext {
                     let tvxt = tx(*xt);
                     let tvyt = ty(*yt);
-                    if tvxt > f64::NEG_INFINITY && tvxt < x_min { x_min = tvxt; }
-                    if tvxt > x_max { x_max = tvxt; }
-                    if tvyt > f64::NEG_INFINITY && tvyt < y_min { y_min = tvyt; }
-                    if tvyt > y_max { y_max = tvyt; }
+                    if tvxt > f64::NEG_INFINITY && tvxt < x_min {
+                        x_min = tvxt;
+                    }
+                    if tvxt > x_max {
+                        x_max = tvxt;
+                    }
+                    if tvyt > f64::NEG_INFINITY && tvyt < y_min {
+                        y_min = tvyt;
+                    }
+                    if tvyt > y_max {
+                        y_max = tvyt;
+                    }
                 }
             }
             PlotElement::HSpan { y1, y2, .. } => {
                 let tv1 = ty(*y1);
                 let tv2 = ty(*y2);
-                if tv1.min(tv2) > f64::NEG_INFINITY && tv1.min(tv2) < y_min { y_min = tv1.min(tv2); }
-                if tv1.max(tv2) > y_max { y_max = tv1.max(tv2); }
-                if x_min == f64::INFINITY { x_min = -1.0; x_max = 1.0; }
+                if tv1.min(tv2) > f64::NEG_INFINITY && tv1.min(tv2) < y_min {
+                    y_min = tv1.min(tv2);
+                }
+                if tv1.max(tv2) > y_max {
+                    y_max = tv1.max(tv2);
+                }
+                if x_min == f64::INFINITY {
+                    x_min = -1.0;
+                    x_max = 1.0;
+                }
             }
             PlotElement::VSpan { x1, x2, .. } => {
                 let tv1 = tx(*x1);
                 let tv2 = tx(*x2);
-                if tv1.min(tv2) > f64::NEG_INFINITY && tv1.min(tv2) < x_min { x_min = tv1.min(tv2); }
-                if tv1.max(tv2) > x_max { x_max = tv1.max(tv2); }
-                if y_min == f64::INFINITY { y_min = -1.0; y_max = 1.0; }
+                if tv1.min(tv2) > f64::NEG_INFINITY && tv1.min(tv2) < x_min {
+                    x_min = tv1.min(tv2);
+                }
+                if tv1.max(tv2) > x_max {
+                    x_max = tv1.max(tv2);
+                }
+                if y_min == f64::INFINITY {
+                    y_min = -1.0;
+                    y_max = 1.0;
+                }
             }
             PlotElement::AxLine { xy1, xy2, .. } => {
                 let (xv1, yv1) = *xy1;
@@ -312,44 +518,82 @@ pub fn compute_bounds(
                 for (xv, yv) in [(xv1, yv1), (xv2, yv2)] {
                     let tvx = tx(xv);
                     let tvy = ty(yv);
-                    if tvx > f64::NEG_INFINITY && tvx < x_min { x_min = tvx; }
-                    if tvx > x_max { x_max = tvx; }
-                    if tvy > f64::NEG_INFINITY && tvy < y_min { y_min = tvy; }
-                    if tvy > y_max { y_max = tvy; }
+                    if tvx > f64::NEG_INFINITY && tvx < x_min {
+                        x_min = tvx;
+                    }
+                    if tvx > x_max {
+                        x_max = tvx;
+                    }
+                    if tvy > f64::NEG_INFINITY && tvy < y_min {
+                        y_min = tvy;
+                    }
+                    if tvy > y_max {
+                        y_max = tvy;
+                    }
                 }
             }
             PlotElement::ScatterMulti { x, y, .. } => {
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min { x_min = tv; }
-                    if tv > x_max { x_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < x_min {
+                        x_min = tv;
+                    }
+                    if tv > x_max {
+                        x_max = tv;
+                    }
                 }
                 for &v in y {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min { y_min = tv; }
-                    if tv > y_max { y_max = tv; }
+                    if tv > f64::NEG_INFINITY && tv < y_min {
+                        y_min = tv;
+                    }
+                    if tv > y_max {
+                        y_max = tv;
+                    }
                 }
             }
             PlotElement::Arrow { x1, y1, x2, y2, .. } => {
                 for (xv, yv) in [(*x1, *y1), (*x2, *y2)] {
                     let tvx = tx(xv);
                     let tvy = ty(yv);
-                    if tvx > f64::NEG_INFINITY && tvx < x_min { x_min = tvx; }
-                    if tvx > x_max { x_max = tvx; }
-                    if tvy > f64::NEG_INFINITY && tvy < y_min { y_min = tvy; }
-                    if tvy > y_max { y_max = tvy; }
+                    if tvx > f64::NEG_INFINITY && tvx < x_min {
+                        x_min = tvx;
+                    }
+                    if tvx > x_max {
+                        x_max = tvx;
+                    }
+                    if tvy > f64::NEG_INFINITY && tvy < y_min {
+                        y_min = tvy;
+                    }
+                    if tvy > y_max {
+                        y_max = tvy;
+                    }
                 }
             }
         }
     }
 
-    if x_min == f64::INFINITY { x_min = 0.0; x_max = 1.0; }
-    if y_min == f64::INFINITY { y_min = 0.0; y_max = 1.0; }
+    if x_min == f64::INFINITY {
+        x_min = 0.0;
+        x_max = 1.0;
+    }
+    if y_min == f64::INFINITY {
+        y_min = 0.0;
+        y_max = 1.0;
+    }
 
     let x_range = x_max - x_min;
     let y_range = y_max - y_min;
-    let x_pad = if x_range.abs() < 1e-10 { 1.0 } else { x_range * 0.05 };
-    let y_pad = if y_range.abs() < 1e-10 { 1.0 } else { y_range * 0.05 };
+    let x_pad = if x_range.abs() < 1e-10 {
+        1.0
+    } else {
+        x_range * 0.05
+    };
+    let y_pad = if y_range.abs() < 1e-10 {
+        1.0
+    } else {
+        y_range * 0.05
+    };
 
     if let Some((l, r)) = xlim {
         x_min = l;

@@ -1,9 +1,9 @@
-use std::sync::Mutex;
-use std::fs::File;
+use plotters::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
-use plotters::prelude::*;
+use std::fs::File;
+use std::sync::Mutex;
 
 use crate::figure::axes::Axes;
 use crate::utils::font_stack;
@@ -105,16 +105,31 @@ impl Figure {
 
     #[allow(unused_variables)]
     #[pyo3(signature = (left=None, right=None, bottom=None, top=None, wspace=None, hspace=None))]
-    fn subplots_adjust(&mut self, left: Option<f64>, right: Option<f64>, bottom: Option<f64>, top: Option<f64>, wspace: Option<f64>, hspace: Option<f64>) {
-        if let Some(v) = left { self.subplot_left = v; }
-        if let Some(v) = right { self.subplot_right = v; }
-        if let Some(v) = bottom { self.subplot_bottom = v; }
-        if let Some(v) = top { self.subplot_top = v; }
+    fn subplots_adjust(
+        &mut self,
+        left: Option<f64>,
+        right: Option<f64>,
+        bottom: Option<f64>,
+        top: Option<f64>,
+        wspace: Option<f64>,
+        hspace: Option<f64>,
+    ) {
+        if let Some(v) = left {
+            self.subplot_left = v;
+        }
+        if let Some(v) = right {
+            self.subplot_right = v;
+        }
+        if let Some(v) = bottom {
+            self.subplot_bottom = v;
+        }
+        if let Some(v) = top {
+            self.subplot_top = v;
+        }
     }
 
     #[doc = "调整子图间距"]
-    fn tight_layout(&mut self) {
-    }
+    fn tight_layout(&mut self) {}
 
     #[doc = "设置图形背景颜色"]
     fn set_facecolor(&mut self, color: &str) {
@@ -138,18 +153,42 @@ impl Figure {
     #[allow(unused_variables)]
     fn add_subplot(&mut self, py: Python, spec: &Bound<'_, PyAny>) -> PyResult<Py<Axes>> {
         let (left, right, bottom, top) = if spec.getattr("rowStart").is_ok() {
-            let num_rows: f64 = spec.getattr("numRows")?.extract::<i32>().map(|v| v as f64).unwrap_or(100.0);
-            let num_cols: f64 = spec.getattr("numCols")?.extract::<i32>().map(|v| v as f64).unwrap_or(100.0);
-            let row_start: f64 = spec.getattr("rowStart")?.extract::<i32>().map(|v| v as f64).unwrap_or(0.0);
-            let row_stop: f64 = spec.getattr("rowStop")?.extract::<i32>().map(|v| v as f64).unwrap_or(num_rows);
-            let col_start: f64 = spec.getattr("colStart")?.extract::<i32>().map(|v| v as f64).unwrap_or(0.0);
-            let col_stop: f64 = spec.getattr("colStop")?.extract::<i32>().map(|v| v as f64).unwrap_or(num_cols);
-            
+            let num_rows: f64 = spec
+                .getattr("numRows")?
+                .extract::<i32>()
+                .map(|v| v as f64)
+                .unwrap_or(100.0);
+            let num_cols: f64 = spec
+                .getattr("numCols")?
+                .extract::<i32>()
+                .map(|v| v as f64)
+                .unwrap_or(100.0);
+            let row_start: f64 = spec
+                .getattr("rowStart")?
+                .extract::<i32>()
+                .map(|v| v as f64)
+                .unwrap_or(0.0);
+            let row_stop: f64 = spec
+                .getattr("rowStop")?
+                .extract::<i32>()
+                .map(|v| v as f64)
+                .unwrap_or(num_rows);
+            let col_start: f64 = spec
+                .getattr("colStart")?
+                .extract::<i32>()
+                .map(|v| v as f64)
+                .unwrap_or(0.0);
+            let col_stop: f64 = spec
+                .getattr("colStop")?
+                .extract::<i32>()
+                .map(|v| v as f64)
+                .unwrap_or(num_cols);
+
             let left = col_start / num_cols;
             let right = col_stop / num_cols;
             let bottom = 1.0 - row_stop / num_rows;
             let top = 1.0 - row_start / num_rows;
-            
+
             (left, right, bottom, top)
         } else {
             (0.0, 1.0, 0.0, 1.0)
@@ -183,8 +222,16 @@ impl Figure {
             let height_in = self.height as f64 / used_dpi;
             // plotters SVGBackend 输出 width="pixel_width" height="pixel_height"，替换为英寸单位
             content = content
-                .replacen(&format!("width=\"{}\"", self.width), &format!("width=\"{:.4}in\"", width_in), 1)
-                .replacen(&format!("height=\"{}\"", self.height), &format!("height=\"{:.4}in\"", height_in), 1);
+                .replacen(
+                    &format!("width=\"{}\"", self.width),
+                    &format!("width=\"{:.4}in\"", width_in),
+                    1,
+                )
+                .replacen(
+                    &format!("height=\"{}\"", self.height),
+                    &format!("height=\"{:.4}in\"", height_in),
+                    1,
+                );
             std::fs::write(filename, content)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to write SVG: {}", e)))?;
             Ok(())
@@ -202,7 +249,9 @@ impl Figure {
         if cfg!(target_os = "macos") {
             let _ = std::process::Command::new("open").arg(&filename).spawn();
         } else if cfg!(target_os = "linux") {
-            let _ = std::process::Command::new("xdg-open").arg(&filename).spawn();
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&filename)
+                .spawn();
         }
 
         println!("Figure saved to: {}", filename);
@@ -259,7 +308,10 @@ impl Figure {
                 let cpos = from + rel;
                 let tag_start = match svg[..cpos].rfind('<') {
                     Some(p) => p,
-                    None => { from = cpos + color_needle.len(); continue; }
+                    None => {
+                        from = cpos + color_needle.len();
+                        continue;
+                    }
                 };
                 if svg[tag_start..].starts_with("<polyline")
                     && let Some(prel) = svg[cpos..].find("points=\"")
@@ -267,10 +319,8 @@ impl Figure {
                     let ppos = cpos + prel + "points=\"".len();
                     if svg[ppos..].starts_with(&pts_prefix) {
                         if !svg[tag_start..ppos].contains("stroke-dasharray") {
-                            let attr = format!(
-                                "stroke-dasharray=\"{}\" stroke-linecap=\"butt\" ",
-                                darr
-                            );
+                            let attr =
+                                format!("stroke-dasharray=\"{}\" stroke-linecap=\"butt\" ", darr);
                             svg.insert_str(tag_start + "<polyline ".len(), &attr);
                         }
                         break;
@@ -293,8 +343,9 @@ impl Figure {
         let mut hi = vec![0u8; (sw as usize) * (sh as usize) * 3];
         {
             let backend: BitMapBackend<'_, plotters::backend::RGBPixel> =
-                BitMapBackend::with_buffer_and_format(&mut hi, (sw, sh))
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e)))?;
+                BitMapBackend::with_buffer_and_format(&mut hi, (sw, sh)).map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e))
+                })?;
             // 传 actual_w/h = 超采样尺寸（render_to_backend 据此算出 ss 并放大各布局常量），
             // font_scale 也乘以 ss，让字体/线宽在放大画布上同比放大。
             self.render_to_backend(py, backend, sw, sh, true, font_scale * ss as f64)?;
@@ -313,7 +364,11 @@ impl Figure {
         let (palette, indices) = quantize_octree(rgb, 256);
 
         let ppm = (dpi / 0.0254).round() as u32;
-        let dims = png::PixelDimensions { xppu: ppm, yppu: ppm, unit: png::Unit::Meter };
+        let dims = png::PixelDimensions {
+            xppu: ppm,
+            yppu: ppm,
+            unit: png::Unit::Meter,
+        };
         let file = File::create(filename)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
         let mut encoder = png::Encoder::new(file, self.width, self.height);
@@ -323,9 +378,11 @@ impl Figure {
         encoder.set_pixel_dims(Some(dims));
         // PNG 无损：Fast(fdeflate) 编码极快，索引数据本就小，压缩比也很好。
         encoder.set_compression(png::Compression::Fast);
-        let mut writer = encoder.write_header()
+        let mut writer = encoder
+            .write_header()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
-        writer.write_image_data(&indices)
+        writer
+            .write_image_data(&indices)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
         Ok(())
     }
@@ -333,15 +390,24 @@ impl Figure {
     /// 将 RGB 像素缓冲编码为 JPEG（质量 90）写入文件。
     fn write_rgb_jpg(&self, filename: &str, rgb: &[u8]) -> PyResult<()> {
         use jpeg_encoder::{ColorType, Encoder};
-        let encoder = Encoder::new_file(filename, 90)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create JPEG encoder: {}", e)))?;
+        let encoder = Encoder::new_file(filename, 90).map_err(|e| {
+            PyRuntimeError::new_err(format!("Failed to create JPEG encoder: {}", e))
+        })?;
         encoder
             .encode(rgb, self.width as u16, self.height as u16, ColorType::Rgb)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to encode JPEG: {}", e)))?;
         Ok(())
     }
 
-    fn render_to_backend<B: DrawingBackend>(&self, py: Python, backend: B, actual_w: u32, actual_h: u32, fill_bg: bool, font_scale: f64) -> PyResult<()>
+    fn render_to_backend<B: DrawingBackend>(
+        &self,
+        py: Python,
+        backend: B,
+        actual_w: u32,
+        actual_h: u32,
+        fill_bg: bool,
+        font_scale: f64,
+    ) -> PyResult<()>
     where
         B::ErrorType: 'static,
     {
@@ -421,7 +487,8 @@ impl Figure {
             }
 
             // 计算 tick/label 区域大小
-            let tick_label_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale).ceil() as u32;
+            let tick_label_size =
+                crate::figure::axes::scale_font(ax.tick_labelsize, font_scale).ceil() as u32;
 
             // 估算 y/x tick label 区域大小（容纳最长的 tick 数字 + 少量 padding）
             let y_tick_area = tick_label_size + pad6;
@@ -429,13 +496,13 @@ impl Figure {
 
             // 检测 y 轴是否有可见的 tick 标签或 ylabel
             // 条件：ylabel 非空 或 (yticks_val 未被设为空 且 tick_left 或 tick_right 为真)
-            let y_has_labels = !ax.ylabel.is_empty()
-                || !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+            let y_has_labels =
+                !ax.ylabel.is_empty() || !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
             let y_has_ticks = ax.tick_left || ax.tick_right;
 
             // 检测 x 轴是否有可见的 tick 标签或 xlabel
-            let x_has_labels = !ax.xlabel.is_empty()
-                || !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
+            let x_has_labels =
+                !ax.xlabel.is_empty() || !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
             let x_has_ticks = ax.tick_bottom || ax.tick_top;
 
             // axis label (y_desc/x_desc) 在 tick label 之外，需要额外空间
@@ -517,7 +584,17 @@ impl Figure {
 
             // 将标题信息存到 axes 之外用：传入 subplot 在 figure 中的位置，用于在 figure root 上绘制
             let fig_subplot_info = (x0, y0, sub_w, sub_h);
-            ax.render(py, &mut chart, (x_min, x_max), (y_min, y_max), font_scale, marker_scale, true, fill_bg, Some(&fig_subplot_info))?;
+            ax.render(
+                py,
+                &mut chart,
+                (x_min, x_max),
+                (y_min, y_max),
+                font_scale,
+                marker_scale,
+                true,
+                fill_bg,
+                Some(&fig_subplot_info),
+            )?;
 
             // 非居中的 xlabel/ylabel：plotters 的 x_desc/y_desc 只能居中，
             // Axes::render 已在 loc 非居中时禁用内置 desc，这里用绝对像素在 root 上手动绘制。
@@ -530,11 +607,20 @@ impl Figure {
                 let data_right = chart_x0 + chart_w;
                 let xsize = if ax.xlabel_fontsize > 0.0 {
                     crate::figure::axes::scale_font(ax.xlabel_fontsize, font_scale)
-                } else { 0.0 };
+                } else {
+                    0.0
+                };
                 crate::figure::axes_title::draw_xlabel_manual(
-                    &root, &ax.xlabel, &ax.xlabel_loc, xsize, tick_px,
-                    ax.xlabel_color, ax.xlabel_family.as_deref(),
-                    data_left, data_right, chart_y0 + chart_h,
+                    &root,
+                    &ax.xlabel,
+                    &ax.xlabel_loc,
+                    xsize,
+                    tick_px,
+                    ax.xlabel_color,
+                    ax.xlabel_family.as_deref(),
+                    data_left,
+                    data_right,
+                    chart_y0 + chart_h,
                 )?;
             }
             if !ax.ylabel.is_empty() && ax.ylabel_loc != "center" {
@@ -543,11 +629,20 @@ impl Figure {
                 let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
                 let ysize = if ax.ylabel_fontsize > 0.0 {
                     crate::figure::axes::scale_font(ax.ylabel_fontsize, font_scale)
-                } else { 0.0 };
+                } else {
+                    0.0
+                };
                 crate::figure::axes_title::draw_ylabel_manual(
-                    &root, &ax.ylabel, &ax.ylabel_loc, ysize, tick_px,
-                    ax.ylabel_color, ax.ylabel_family.as_deref(),
-                    chart_x0, data_top, data_bottom,
+                    &root,
+                    &ax.ylabel,
+                    &ax.ylabel_loc,
+                    ysize,
+                    tick_px,
+                    ax.ylabel_color,
+                    ax.ylabel_family.as_deref(),
+                    chart_x0,
+                    data_top,
+                    data_bottom,
                 )?;
             }
 
@@ -555,10 +650,19 @@ impl Figure {
             drop(ax);
             for twin in &twin_axes {
                 let ((tx_min, tx_max), (ty_min, ty_max)) = twin.compute_bounds();
-                let (ux_min, ux_max) = if twin.is_twin_x { (tx_min, tx_max) } else { (x_min, x_max) };
-                let (uy_min, uy_max) = if twin.is_twin_y { (ty_min, ty_max) } else { (y_min, y_max) };
+                let (ux_min, ux_max) = if twin.is_twin_x {
+                    (tx_min, tx_max)
+                } else {
+                    (x_min, x_max)
+                };
+                let (uy_min, uy_max) = if twin.is_twin_y {
+                    (ty_min, ty_max)
+                } else {
+                    (y_min, y_max)
+                };
                 // twin axes 使用与主轴相同的 chart_area，但 label area 在右侧/顶部
-                let twin_tick_size = crate::figure::axes::scale_font(twin.tick_labelsize, font_scale).ceil() as u32;
+                let twin_tick_size =
+                    crate::figure::axes::scale_font(twin.tick_labelsize, font_scale).ceil() as u32;
                 let twin_y_label_area = twin_tick_size + pad6;
                 let twin_x_label_area = twin_tick_size + pad6;
                 let mut twin_chart = ChartBuilder::on(&chart_area)
@@ -569,9 +673,21 @@ impl Figure {
                     .right_y_label_area_size(twin_y_label_area)
                     .top_x_label_area_size(twin_x_label_area)
                     .build_cartesian_2d(ux_min..ux_max, uy_min..uy_max)
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to build twin chart: {}", e)))?;
+                    .map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to build twin chart: {}", e))
+                    })?;
                 // twin axes 不填充背景，避免覆盖主轴数据
-                twin.render(py, &mut twin_chart, (ux_min, ux_max), (uy_min, uy_max), font_scale, marker_scale, false, fill_bg, None)?;
+                twin.render(
+                    py,
+                    &mut twin_chart,
+                    (ux_min, ux_max),
+                    (uy_min, uy_max),
+                    font_scale,
+                    marker_scale,
+                    false,
+                    fill_bg,
+                    None,
+                )?;
             }
         }
 
@@ -639,7 +755,15 @@ fn downsample_box(src: &[u8], sw: u32, sh: u32, factor: u32) -> Vec<u8> {
 
 /// 对目标行区间 [dy_start, dy_end) 做盒式平均，结果写入 `dst`（dst 从该区间起始行开始，
 /// 局部下标从 0 计）。供 downsample_box 单线程或并行分块调用。
-fn downsample_rows(src: &[u8], dst: &mut [u8], dy_start: usize, dy_end: usize, dw: usize, sw: usize, f: usize) {
+fn downsample_rows(
+    src: &[u8],
+    dst: &mut [u8],
+    dy_start: usize,
+    dy_end: usize,
+    dw: usize,
+    sw: usize,
+    f: usize,
+) {
     let area = (f * f) as u32;
     let half = area / 2;
     let stride = sw * 3;
@@ -891,7 +1015,8 @@ fn dedup_band(rgb: &[u8]) -> BandDedup {
     let mut prev_key = u32::MAX;
     let mut prev_id = 0u32;
     for i in 0..npix {
-        let key = ((rgb[i * 3] as u32) << 16) | ((rgb[i * 3 + 1] as u32) << 8) | (rgb[i * 3 + 2] as u32);
+        let key =
+            ((rgb[i * 3] as u32) << 16) | ((rgb[i * 3 + 1] as u32) << 8) | (rgb[i * 3 + 2] as u32);
         let id = if key == prev_key {
             prev_id
         } else {
@@ -1008,7 +1133,12 @@ fn quantize_octree(rgb: &[u8], max_colors: usize) -> (Vec<u8>, Vec<u8>) {
     // 只对每种全局唯一色调用一次 add_color，按其像素数加权，叶子平均色即像素加权质心。
     let mut tree = Octree::new(max_colors);
     for (id, &key) in uniq_key.iter().enumerate() {
-        tree.add_color((key >> 16) as u8, (key >> 8) as u8, key as u8, uniq_cnt[id] as u64);
+        tree.add_color(
+            (key >> 16) as u8,
+            (key >> 8) as u8,
+            key as u8,
+            uniq_cnt[id] as u64,
+        );
     }
     let palette = tree.build_palette();
 

@@ -109,7 +109,10 @@ impl MaxNLocator {
     }
 
     fn __repr__(&self) -> String {
-        format!("MaxNLocator(nbins={}, integer={})", self.nbins, self.integer)
+        format!(
+            "MaxNLocator(nbins={}, integer={})",
+            self.nbins, self.integer
+        )
     }
 }
 
@@ -190,9 +193,7 @@ impl LinearLocator {
             return vec![vmin];
         }
         let step = (vmax - vmin) / (self.numticks - 1) as f64;
-        (0..self.numticks)
-            .map(|i| vmin + i as f64 * step)
-            .collect()
+        (0..self.numticks).map(|i| vmin + i as f64 * step).collect()
     }
 }
 
@@ -309,7 +310,8 @@ impl FormatStrFormatter {
 
     fn __call__(&self, value: f64) -> String {
         // 支持 % 格式化
-        self.fmt.replace("%d", &(value as i64).to_string())
+        self.fmt
+            .replace("%d", &(value as i64).to_string())
             .replace("%f", &format!("{:.6}", value))
             .replace("%g", &format!("{}", value))
             .replace("%e", &format!("{:e}", value))

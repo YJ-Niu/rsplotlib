@@ -1,11 +1,13 @@
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyTuple, PyAny};
+use pyo3::types::{PyAny, PyList, PyTuple};
 
-use plotters::style::{register_font, FontStyle};
+use plotters::style::{FontStyle, register_font};
 
 use crate::figure::axes::Axes;
-use crate::figure::figure::{get_current_figure, set_current_figure, Figure, DEFAULT_DPI, DEFAULT_FIGSIZE};
+use crate::figure::figure::{
+    DEFAULT_DPI, DEFAULT_FIGSIZE, Figure, get_current_figure, set_current_figure,
+};
 use crate::utils::font_stack;
 
 /// 从文件路径注册一个字体到字体系统。
@@ -28,28 +30,30 @@ use crate::utils::font_stack;
 /// - 文件不存在或字体解析失败返回 Err
 #[pyfunction]
 #[pyo3(signature = (path, family_name=None))]
-pub fn register_sans_serif_font(py: Python, path: String, family_name: Option<String>) -> PyResult<()> {
-    let font_data = std::fs::read(&path).map_err(|e| {
-        PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e))
-    })?;
+pub fn register_sans_serif_font(
+    py: Python,
+    path: String,
+    family_name: Option<String>,
+) -> PyResult<()> {
+    let font_data = std::fs::read(&path)
+        .map_err(|e| PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e)))?;
 
     // 优先使用传入的 family_name，否则从字体文件中提取
     let family = match family_name {
         Some(name) if !name.is_empty() => name,
-        _ => font_stack::extract_family_name(&font_data)
-            .unwrap_or_else(|| "sans-serif".to_string()),
+        _ => {
+            font_stack::extract_family_name(&font_data).unwrap_or_else(|| "sans-serif".to_string())
+        }
     };
 
     // 用家族名称注册到 plotters
     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-    register_font(&family, FontStyle::Normal, font_ref).map_err(|_| {
-        PyValueError::new_err(format!("Failed to register font from '{}'", path))
-    })?;
+    register_font(&family, FontStyle::Normal, font_ref)
+        .map_err(|_| PyValueError::new_err(format!("Failed to register font from '{}'", path)))?;
 
     // 推入字体栈（重新读取，因为 font_data 已被 Box::leak 消耗）
-    let font_data2 = std::fs::read(&path).map_err(|e| {
-        PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e))
-    })?;
+    let font_data2 = std::fs::read(&path)
+        .map_err(|e| PyValueError::new_err(format!("Cannot read font file '{}': {}", path, e)))?;
     font_stack::push_font(family, font_data2);
 
     let _ = py; // suppress unused warning
@@ -97,7 +101,10 @@ fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
     let ax_py = Py::new(py, ax)?;
     init_axes_self_py(&ax_py, py);
     fig_py.borrow_mut(py).axes_list.push(ax_py.clone_ref(py));
-    fig_py.borrow_mut(py).axes_positions.push((0.0, 1.0, 0.0, 1.0));
+    fig_py
+        .borrow_mut(py)
+        .axes_positions
+        .push((0.0, 1.0, 0.0, 1.0));
     Ok((fig_py, ax_py))
 }
 
@@ -115,7 +122,14 @@ macro_rules! make_fig_ax {
 
 #[pyfunction]
 #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
-pub fn xlabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
+pub fn xlabel(
+    py: Python,
+    text: String,
+    color: Option<String>,
+    fontsize: Option<f64>,
+    family: Option<String>,
+    loc: Option<String>,
+) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
     Axes::set_xlabel(&mut ax_ref, py, text, color, fontsize, family, loc);
@@ -124,7 +138,14 @@ pub fn xlabel(py: Python, text: String, color: Option<String>, fontsize: Option<
 
 #[pyfunction]
 #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
-pub fn ylabel(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
+pub fn ylabel(
+    py: Python,
+    text: String,
+    color: Option<String>,
+    fontsize: Option<f64>,
+    family: Option<String>,
+    loc: Option<String>,
+) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
     Axes::set_ylabel(&mut ax_ref, py, text, color, fontsize, family, loc);
@@ -133,7 +154,14 @@ pub fn ylabel(py: Python, text: String, color: Option<String>, fontsize: Option<
 
 #[pyfunction]
 #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
-pub fn title(py: Python, text: String, color: Option<String>, fontsize: Option<f64>, family: Option<String>, loc: Option<String>) -> PyResult<()> {
+pub fn title(
+    py: Python,
+    text: String,
+    color: Option<String>,
+    fontsize: Option<f64>,
+    family: Option<String>,
+    loc: Option<String>,
+) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
     Axes::set_title(&mut ax_ref, py, text, color, fontsize, family, loc);
@@ -142,8 +170,17 @@ pub fn title(py: Python, text: String, color: Option<String>, fontsize: Option<f
 
 #[pyfunction]
 #[pyo3(signature = (visible=None, c=None, ls=None, lw=None, axis=None))]
-pub fn grid(py: Python, visible: Option<bool>, c: Option<String>, ls: Option<String>, lw: Option<f64>, axis: Option<String>) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).grid(visible, c, ls, lw, axis);
+pub fn grid(
+    py: Python,
+    visible: Option<bool>,
+    c: Option<String>,
+    ls: Option<String>,
+    lw: Option<f64>,
+    axis: Option<String>,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .grid(visible, c, ls, lw, axis);
     Ok(())
 }
 
@@ -158,7 +195,15 @@ pub fn legend(py: Python, loc: &str) -> PyResult<()> {
 #[pyo3(signature = (left=None, right=None))]
 pub fn xlim(py: Python, left: Option<f64>, right: Option<f64>) -> PyResult<()> {
     if let (Some(lo), Some(hi)) = (left, right) {
-        get_current_axes(py)?.borrow_mut(py).set_xlim(Some(lo), Some(hi), None, None, None, true, None);
+        get_current_axes(py)?.borrow_mut(py).set_xlim(
+            Some(lo),
+            Some(hi),
+            None,
+            None,
+            None,
+            true,
+            None,
+        );
     }
     Ok(())
 }
@@ -167,7 +212,9 @@ pub fn xlim(py: Python, left: Option<f64>, right: Option<f64>) -> PyResult<()> {
 #[pyo3(signature = (bottom=None, top=None))]
 pub fn ylim(py: Python, bottom: Option<f64>, top: Option<f64>) -> PyResult<()> {
     if let (Some(lo), Some(hi)) = (bottom, top) {
-        get_current_axes(py)?.borrow_mut(py).set_ylim(Some(lo), Some(hi), true, None);
+        get_current_axes(py)?
+            .borrow_mut(py)
+            .set_ylim(Some(lo), Some(hi), true, None);
     }
     Ok(())
 }
@@ -237,7 +284,9 @@ pub fn hist<'py>(
     histtype: Option<String>,
 ) -> PyResult<Bound<'py, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.hist(py, x, bins, density, label, alpha, color, facecolor, align, histtype)?;
+        ax.hist(
+            py, x, bins, density, label, alpha, color, facecolor, align, histtype,
+        )?;
     })
 }
 
@@ -324,7 +373,12 @@ pub fn step<'a>(
 
 #[pyfunction]
 #[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
-pub fn imshow<'a>(py: Python<'a>, x: Bound<'a, PyAny>, cmap: &'a str, aspect: &'a str) -> PyResult<Bound<'a, PyTuple>> {
+pub fn imshow<'a>(
+    py: Python<'a>,
+    x: Bound<'a, PyAny>,
+    cmap: &'a str,
+    aspect: &'a str,
+) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
         let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
             v
@@ -401,7 +455,9 @@ pub fn axhline(
     linestyle: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).axhline(y, color, linestyle, linewidth);
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .axhline(y, color, linestyle, linewidth);
     Ok(())
 }
 
@@ -414,7 +470,9 @@ pub fn axvline(
     linestyle: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).axvline(x, color, linestyle, linewidth);
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .axvline(x, color, linestyle, linewidth);
     Ok(())
 }
 
@@ -427,7 +485,9 @@ pub fn hlines(
     linestyle: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).hlines(py, y, color, linestyle, linewidth)?;
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .hlines(py, y, color, linestyle, linewidth)?;
     Ok(())
 }
 
@@ -440,7 +500,9 @@ pub fn vlines(
     linestyle: Option<String>,
     linewidth: Option<f64>,
 ) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).vlines(py, x, color, linestyle, linewidth)?;
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .vlines(py, x, color, linestyle, linewidth)?;
     Ok(())
 }
 
@@ -513,7 +575,12 @@ pub fn set_dpi(py: Python, dpi: f64) -> PyResult<()> {
 
 #[pyfunction]
 #[pyo3(signature = (nrows=1, ncols=1, index=1))]
-pub fn subplot(py: Python<'_>, nrows: usize, ncols: usize, index: usize) -> PyResult<Bound<'_, PyTuple>> {
+pub fn subplot(
+    py: Python<'_>,
+    nrows: usize,
+    ncols: usize,
+    index: usize,
+) -> PyResult<Bound<'_, PyTuple>> {
     if index == 0 || index > nrows * ncols {
         return Err(PyValueError::new_err("Index out of range"));
     }
@@ -610,7 +677,24 @@ pub fn plot<'a>(
     solid_capstyle: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.plot(py, x, y, label, color, &linestyle.unwrap_or_else(|| "-".to_string()), marker, linewidth.unwrap_or(1.5), lw, c, ls, markersize, markeredgewidth, markerfacecolor, markeredgecolor, solid_capstyle)?;
+        ax.plot(
+            py,
+            x,
+            y,
+            label,
+            color,
+            &linestyle.unwrap_or_else(|| "-".to_string()),
+            marker,
+            linewidth.unwrap_or(1.5),
+            lw,
+            c,
+            ls,
+            markersize,
+            markeredgewidth,
+            markerfacecolor,
+            markeredgecolor,
+            solid_capstyle,
+        )?;
     })
 }
 
@@ -645,7 +729,9 @@ pub fn gca(py: Python) -> PyResult<Py<Axes>> {
     let fig = get_current_figure(py)?;
     let fig_ref = fig.borrow();
     if fig_ref.axes_list.is_empty() {
-        return Err(PyRuntimeError::new_err("No axes found. Create a figure first."));
+        return Err(PyRuntimeError::new_err(
+            "No axes found. Create a figure first.",
+        ));
     }
     // 返回最后创建的axes（更符合matplotlib行为）
     let last_idx = fig_ref.axes_list.len() - 1;
@@ -662,7 +748,14 @@ pub fn clf(py: Python) -> PyResult<()> {
 
 #[pyfunction]
 #[pyo3(signature = (y, width, height=0.8, color=None, label=None))]
-pub fn barh<'a>(py: Python<'a>, y: Bound<'a, PyAny>, width: Bound<'a, PyAny>, height: f64, color: Option<String>, label: Option<String>) -> PyResult<Bound<'a, PyTuple>> {
+pub fn barh<'a>(
+    py: Python<'a>,
+    y: Bound<'a, PyAny>,
+    width: Bound<'a, PyAny>,
+    height: f64,
+    color: Option<String>,
+    label: Option<String>,
+) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
         ax.barh(py, y, width, height, color, label)?;
     })
@@ -685,7 +778,9 @@ pub fn semilogx<'a>(
         ax.set_xscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
+        ax.plot(
+            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+        )?;
     })
 }
 
@@ -706,7 +801,9 @@ pub fn semilogy<'a>(
         ax.set_yscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
+        ax.plot(
+            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+        )?;
     })
 }
 
@@ -728,13 +825,14 @@ pub fn loglog<'a>(
         ax.set_yscale("log");
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
-        ax.plot(py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None)?;
+        ax.plot(
+            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+        )?;
     })
 }
 
 #[pyfunction]
-pub fn use_(_backend: String) {
-}
+pub fn use_(_backend: String) {}
 
 #[pyfunction]
 pub fn gcf(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
@@ -783,21 +881,46 @@ pub fn minorticks_off(py: Python<'_>) -> PyResult<()> {
 
 #[pyfunction]
 #[pyo3(signature = (y1, y2, color=None, alpha=0.3))]
-pub fn axhspan(py: Python<'_>, y1: f64, y2: f64, color: Option<String>, alpha: f64) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).axhspan(y1, y2, color, alpha);
+pub fn axhspan(
+    py: Python<'_>,
+    y1: f64,
+    y2: f64,
+    color: Option<String>,
+    alpha: f64,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .axhspan(y1, y2, color, alpha);
     Ok(())
 }
 
 #[pyfunction]
 #[pyo3(signature = (x1, x2, color=None, alpha=0.3))]
-pub fn axvspan(py: Python<'_>, x1: f64, x2: f64, color: Option<String>, alpha: f64) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).axvspan(x1, x2, color, alpha);
+pub fn axvspan(
+    py: Python<'_>,
+    x1: f64,
+    x2: f64,
+    color: Option<String>,
+    alpha: f64,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .axvspan(x1, x2, color, alpha);
     Ok(())
 }
 
 #[pyfunction]
 #[pyo3(signature = (xy1, xy2, color=None, linestyle=None, linewidth=None))]
-pub fn axline(py: Python<'_>, xy1: (f64, f64), xy2: (f64, f64), color: Option<String>, linestyle: Option<String>, linewidth: Option<f64>) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).axline(xy1, xy2, color, linestyle, linewidth);
+pub fn axline(
+    py: Python<'_>,
+    xy1: (f64, f64),
+    xy2: (f64, f64),
+    color: Option<String>,
+    linestyle: Option<String>,
+    linewidth: Option<f64>,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .axline(xy1, xy2, color, linestyle, linewidth);
     Ok(())
 }

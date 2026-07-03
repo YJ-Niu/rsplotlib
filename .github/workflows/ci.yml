@@ -6,55 +6,71 @@ on:
   pull_request:
     branches: [main, master]
 
+# 同一分支/PR 的新推送会取消仍在进行的旧运行，节省 CI 时间。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.13"]
-      fail-fast: false
-
+    name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.13", "3.14"]
+        # 补测最低支持版本 3.8；macOS(arm64) 对 3.8 支持不稳定，故仅在 Linux/Windows 上测。
+        include:
+          - os: ubuntu-latest
+            python-version: "3.8"
+          - os: windows-latest
+            python-version: "3.8"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Build wheel and install
+      - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
-          args: --release -o dist
-          pip: uv
-      
-      - name: Install dependencies
-        run: uv pip install numpy xlrd --system
+          command: build
+          # -i python 绑定到当前矩阵版本；container:'off' 让 Linux 也直接在宿主机构建，
+          # 从而与 setup-python 的版本一致（CI 只需能导入运行，无需 manylinux 合规）。
+          args: --release --out dist -i python
+          container: "off"
+          sccache: "true"
 
-      - name: Run tests
-        run: python -c "
-          import rsplotlib.pyplot as plt;
-          from rsplotlib.gridspec import GridSpec;
-          fig = plt.figure();
-          gs = GridSpec(1, 1);
-          ax = fig.add_subplot(gs[0, 0]);
-          ax.plot([1, 2, 3], [1, 2, 3]);
-          plt.savefig('/tmp/test_ci.png');
-          print('Test passed!');
-        "
+      - name: Install built wheel
+        run: python -m pip install --no-index --find-links dist rsplotlib
+
+      - name: Run smoke test
+        run: python ci/smoke_test.py
 
   lint:
+    name: Lint (rustfmt + clippy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check Rust formatting
-        uses: actions-rust-lang/rustfmt@v1
+      # pyo3 的 build script 需要一个 Python 解释器来探测 ABI。
+      - uses: actions/setup-python@v5
         with:
-          args: --check
+          python-version: "3.13"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run clippy
-        uses: actions-rust-lang/clippy@v1
-        with:
-          args: -- -D warnings
+        run: cargo clippy -- -D warnings

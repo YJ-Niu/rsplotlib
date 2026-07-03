@@ -1,7 +1,7 @@
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::prelude::*;
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 
 /// 绘制单个 marker。
 ///
@@ -36,22 +36,29 @@ pub fn draw_marker<DB: DrawingBackend>(
     match marker {
         "o" => {
             // 圆：数据坐标锚点 + 像素半径，直径 = 2s = markersize_px
-            chart.draw_series(std::iter::once(Circle::new((x, y), si, fill)))
+            chart
+                .draw_series(std::iter::once(Circle::new((x, y), si, fill)))
                 .map_err(err)?;
             if need_edge {
-                chart.draw_series(std::iter::once(Circle::new((x, y), si, edge_style)))
+                chart
+                    .draw_series(std::iter::once(Circle::new((x, y), si, edge_style)))
                     .map_err(err)?;
             }
         }
         "s" => {
             // 正方形：半边长 = s（像素），边长 = markersize_px
-            chart.draw_series(std::iter::once(
-                EmptyElement::at((x, y)) + Rectangle::new([(-si, -si), (si, si)], fill),
-            )).map_err(err)?;
+            chart
+                .draw_series(std::iter::once(
+                    EmptyElement::at((x, y)) + Rectangle::new([(-si, -si), (si, si)], fill),
+                ))
+                .map_err(err)?;
             if need_edge {
-                chart.draw_series(std::iter::once(
-                    EmptyElement::at((x, y)) + Rectangle::new([(-si, -si), (si, si)], edge_style),
-                )).map_err(err)?;
+                chart
+                    .draw_series(std::iter::once(
+                        EmptyElement::at((x, y))
+                            + Rectangle::new([(-si, -si), (si, si)], edge_style),
+                    ))
+                    .map_err(err)?;
             }
         }
         "^" => {
@@ -73,8 +80,14 @@ pub fn draw_marker<DB: DrawingBackend>(
             // 四角星：外顶点半径 s，内顶点半径 s/3
             let i = (s / 3.0).round() as i32;
             let pts = vec![
-                (0, -si), (i, -i), (si, 0), (i, i),
-                (0, si), (-i, i), (-si, 0), (-i, -i),
+                (0, -si),
+                (i, -i),
+                (si, 0),
+                (i, i),
+                (0, si),
+                (-i, i),
+                (-si, 0),
+                (-i, -i),
             ];
             draw_polygon_marker(chart, x, y, &pts, fill, edge_style, need_edge)?;
         }
@@ -82,8 +95,14 @@ pub fn draw_marker<DB: DrawingBackend>(
             let a = (2.0 * s / 3.0).round() as i32;
             let b = (s / 2.0).round() as i32;
             let pts = vec![
-                (0, -si), (a, -b), (si, 0), (a, b),
-                (0, si), (-a, b), (-si, 0), (-a, -b),
+                (0, -si),
+                (a, -b),
+                (si, 0),
+                (a, b),
+                (0, si),
+                (-a, b),
+                (-si, 0),
+                (-a, -b),
             ];
             draw_polygon_marker(chart, x, y, &pts, fill, edge_style, need_edge)?;
         }
@@ -92,36 +111,39 @@ pub fn draw_marker<DB: DrawingBackend>(
             // 宽 = √3·s ≈ 0.866·高（与 matplotlib hexagon1 的宽高比一致）。
             let w = (0.8660254_f64 * s).round() as i32;
             let b = (s / 2.0).round() as i32;
-            let pts = vec![
-                (0, -si), (w, -b), (w, b),
-                (0, si), (-w, b), (-w, -b),
-            ];
+            let pts = vec![(0, -si), (w, -b), (w, b), (0, si), (-w, b), (-w, -b)];
             draw_polygon_marker(chart, x, y, &pts, fill, edge_style, need_edge)?;
         }
         "x" => {
             // 纯描线 marker：使用边框色
             let line_style: ShapeStyle = edge.stroke_width(2);
-            chart.draw_series(std::iter::once(
-                EmptyElement::at((x, y))
-                    + PathElement::new(vec![(-si, -si), (si, si)], line_style)
-                    + PathElement::new(vec![(-si, si), (si, -si)], line_style),
-            )).map_err(err)?;
+            chart
+                .draw_series(std::iter::once(
+                    EmptyElement::at((x, y))
+                        + PathElement::new(vec![(-si, -si), (si, si)], line_style)
+                        + PathElement::new(vec![(-si, si), (si, -si)], line_style),
+                ))
+                .map_err(err)?;
         }
         "+" => {
             let line_style: ShapeStyle = edge.stroke_width(2);
-            chart.draw_series(std::iter::once(
-                EmptyElement::at((x, y))
-                    + PathElement::new(vec![(-si, 0), (si, 0)], line_style)
-                    + PathElement::new(vec![(0, -si), (0, si)], line_style),
-            )).map_err(err)?;
+            chart
+                .draw_series(std::iter::once(
+                    EmptyElement::at((x, y))
+                        + PathElement::new(vec![(-si, 0), (si, 0)], line_style)
+                        + PathElement::new(vec![(0, -si), (0, si)], line_style),
+                ))
+                .map_err(err)?;
         }
         _ => {
             // "." / "," 等点 marker：调用方已把半径换算好（"." = 0.25*markersize_px，"," ≈ 1px）
             let r = si.max(1);
-            chart.draw_series(std::iter::once(Circle::new((x, y), r, fill)))
+            chart
+                .draw_series(std::iter::once(Circle::new((x, y), r, fill)))
                 .map_err(err)?;
             if need_edge {
-                chart.draw_series(std::iter::once(Circle::new((x, y), r, edge_style)))
+                chart
+                    .draw_series(std::iter::once(Circle::new((x, y), r, edge_style)))
                     .map_err(err)?;
             }
         }
@@ -140,17 +162,21 @@ fn draw_polygon_marker<DB: DrawingBackend>(
     need_edge: bool,
 ) -> PyResult<()> {
     let err = |e| PyRuntimeError::new_err(format!("Marker error: {}", e));
-    chart.draw_series(std::iter::once(
-        EmptyElement::at((x, y)) + Polygon::new(pts.to_vec(), fill),
-    )).map_err(err)?;
+    chart
+        .draw_series(std::iter::once(
+            EmptyElement::at((x, y)) + Polygon::new(pts.to_vec(), fill),
+        ))
+        .map_err(err)?;
     if need_edge {
         let mut outline = pts.to_vec();
         if let Some(&first) = pts.first() {
             outline.push(first);
         }
-        chart.draw_series(std::iter::once(
-            EmptyElement::at((x, y)) + PathElement::new(outline, edge_style),
-        )).map_err(err)?;
+        chart
+            .draw_series(std::iter::once(
+                EmptyElement::at((x, y)) + PathElement::new(outline, edge_style),
+            ))
+            .map_err(err)?;
     }
     Ok(())
 }

@@ -6,20 +6,23 @@
 //! - `render_elements()`: 遍历并渲染所有元素
 //! - `draw_single_line()`: 绘制单条线段（用于 axhline/axvline/stem 等）
 
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::prelude::*;
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 
 use std::cell::RefCell;
 
-use crate::figure::axes::scale_font;
-use crate::core::colormap::{autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color, viridis_color, winter_color};
-use crate::core::colors::{RgbColor, default_color, parse_color, to_plotters_color, median};
+use crate::core::colormap::{
+    autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color,
+    viridis_color, winter_color,
+};
+use crate::core::colors::{RgbColor, default_color, median, parse_color, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
+use crate::figure::axes::scale_font;
 use crate::utils::font_stack;
 
 thread_local! {
@@ -31,7 +34,7 @@ thread_local! {
     ///
     /// 每条记录为 (stroke 颜色 hex, 首点像素坐标 x, y, dasharray 字符串)，用于在
     /// plotters 生成的 `<polyline .../>` 中精确定位对应虚线并注入属性。
-    static SVG_DASH_INJECTS: RefCell<Vec<(String, i32, i32, String)>> = RefCell::new(Vec::new());
+    static SVG_DASH_INJECTS: RefCell<Vec<(String, i32, i32, String)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// 清空 SVG 虚线注入表（每次 SVG 渲染前调用，避免跨次渲染残留）。
@@ -51,8 +54,13 @@ fn push_svg_dash_inject(color_hex: String, x0: i32, y0: i32, dasharray: String) 
 /// 绘制单条线段（用于 axhline/axvline/stem 等）
 pub fn draw_single_line<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
-    x1: f64, y1: f64, x2: f64, y2: f64,
-    color: RgbColor, lw: f64, font_scale: f64,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    color: RgbColor,
+    lw: f64,
+    font_scale: f64,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
@@ -63,9 +71,12 @@ where
     let lw_px = (lw * font_scale).max(1.0).round() as u32;
     let stroke_w = (lw_px as i32 - 1).max(1) as u32;
     let style = rgb.stroke_width(stroke_w);
-    chart.draw_series(std::iter::once(PathElement::new(
-        vec![(x1, y1), (x2, y2)], style,
-    ))).map_err(|e| PyRuntimeError::new_err(format!("Line: {}", e)))?;
+    chart
+        .draw_series(std::iter::once(PathElement::new(
+            vec![(x1, y1), (x2, y2)],
+            style,
+        )))
+        .map_err(|e| PyRuntimeError::new_err(format!("Line: {}", e)))?;
     Ok(())
 }
 
@@ -107,8 +118,16 @@ where
     for i in 0..n - 1 {
         let dx_data = points[i + 1].0 - points[i].0;
         let dy_data = points[i + 1].1 - points[i].1;
-        let dx_px = if x_per_pix != 0.0 { dx_data / x_per_pix } else { 0.0 };
-        let dy_px = if y_per_pix != 0.0 { dy_data / y_per_pix } else { 0.0 };
+        let dx_px = if x_per_pix != 0.0 {
+            dx_data / x_per_pix
+        } else {
+            0.0
+        };
+        let dy_px = if y_per_pix != 0.0 {
+            dy_data / y_per_pix
+        } else {
+            0.0
+        };
         let len = (dx_px * dx_px + dy_px * dy_px).sqrt();
         if len < 1e-9 {
             seg_dirs.push((1.0, 0.0));
@@ -147,7 +166,11 @@ where
     // plotters 的 Circle 半径以「像素」为单位（与 marker 一致），因此直接用 half，
     // 半径正好等于线的半宽，圆不会超出 ribbon 宽度，保证线宽处处一致。
     chart
-        .draw_series(points.iter().map(|&(x, y)| Circle::new((x, y), half, style)))
+        .draw_series(
+            points
+                .iter()
+                .map(|&(x, y)| Circle::new((x, y), half, style)),
+        )
         .map_err(|e| PyRuntimeError::new_err(format!("Thick polyline joins: {}", e)))?;
 
     Ok(())
@@ -201,9 +224,8 @@ where
         return Ok(());
     }
     // 数据坐标 -> 绘图区局部连续像素坐标（y 轴翻转：y_max 对应 v=0）
-    let to_px = |p: (f64, f64)| -> (f64, f64) {
-        ((p.0 - x_min) / x_per_pix, (y_max - p.1) / y_per_pix)
-    };
+    let to_px =
+        |p: (f64, f64)| -> (f64, f64) { ((p.0 - x_min) / x_per_pix, (y_max - p.1) / y_per_pix) };
     let pts: Vec<(f64, f64)> = points.iter().map(|&p| to_px(p)).collect();
 
     let half = width_px / 2.0;
@@ -442,13 +464,25 @@ where
         return Ok(());
     }
     if bitmap {
-        draw_thick_polyline_aa(chart, points, rgb, width_px.max(1.0), capstyle,
-                               x_min, x_max, y_min, y_max)
+        draw_thick_polyline_aa(
+            chart,
+            points,
+            rgb,
+            width_px.max(1.0),
+            capstyle,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        )
     } else {
         let sw = width_px.round().max(1.0) as u32;
         let style_native: ShapeStyle = rgb.stroke_width(sw);
         chart
-            .draw_series(std::iter::once(PathElement::new(points.to_vec(), style_native)))
+            .draw_series(std::iter::once(PathElement::new(
+                points.to_vec(),
+                style_native,
+            )))
             .map_err(|e| PyRuntimeError::new_err(format!("Native line: {}", e)))?;
         Ok(())
     }
@@ -480,12 +514,45 @@ where
     DB::ErrorType: 'static,
 {
     // log 刻度坐标转换闭包
-    let tx = |v: f64| if xlog { if v > 0.0 { v.log10() } else { f64::NEG_INFINITY } } else { v };
-    let ty = |v: f64| if ylog { if v > 0.0 { v.log10() } else { f64::NEG_INFINITY } } else { v };
+    let tx = |v: f64| {
+        if xlog {
+            if v > 0.0 {
+                v.log10()
+            } else {
+                f64::NEG_INFINITY
+            }
+        } else {
+            v
+        }
+    };
+    let ty = |v: f64| {
+        if ylog {
+            if v > 0.0 {
+                v.log10()
+            } else {
+                f64::NEG_INFINITY
+            }
+        } else {
+            v
+        }
+    };
 
     for el in elements {
         match el {
-            PlotElement::Line { x, y, color, linestyle, marker, linewidth, color_idx, solid_capstyle, markersize, markerfacecolor, markeredgecolor, .. } => {
+            PlotElement::Line {
+                x,
+                y,
+                color,
+                linestyle,
+                marker,
+                linewidth,
+                color_idx,
+                solid_capstyle,
+                markersize,
+                markerfacecolor,
+                markeredgecolor,
+                ..
+            } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
                 // 折线线宽增加 50%
@@ -496,7 +563,11 @@ where
                 let y_half_px = {
                     let dim = chart.plotting_area().dim_in_pixel();
                     let ph = dim.1 as f64;
-                    if ph > 0.0 { (y_max - y_min) / ph * 0.5 } else { 0.0 }
+                    if ph > 0.0 {
+                        (y_max - y_min) / ph * 0.5
+                    } else {
+                        0.0
+                    }
                 };
                 if !x.is_empty() && x.len() == y.len() {
                     // 构建连续有效数据段（被 None 分隔）
@@ -525,113 +596,162 @@ where
                     }
                     if linestyle != " " {
                         for points in &segments {
-                        // 将 linewidth 从 points 转换为像素：1pt = dpi/72 px，dpi = 72 * font_scale
-                        let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
-                        // 虚线图案按「显示像素」度量：matplotlib 图案(points) × 名义线宽 × (dpi/72)。
-                        let (pw_dash, ph_dash) = {
-                            let dim = chart.plotting_area().dim_in_pixel();
-                            (dim.0 as f64, dim.1 as f64)
-                        };
-                        let x_per_pix = if pw_dash > 0.0 { (x_max - x_min) / pw_dash } else { 1.0 };
-                        let y_per_pix = if ph_dash > 0.0 { (y_max - y_min) / ph_dash } else { 1.0 };
-                        // 撤销前面 1.5x 线宽膨胀，dash 图案按 matplotlib 名义线宽缩放；font_scale = dpi/72
-                        let lw_nominal = (*linewidth / 1.5).max(0.1);
-                        let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
-                        let width_px = (lw_px as i32 - 1).max(1) as f64;
-                        // matplotlib 默认 dash 图案 (rcParams)，None 表示实线
-                        let dash_pattern: Option<Vec<(f64, bool)>> = match linestyle.as_str() {
-                            // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
-                            "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
-                            // dotted (lines.dotted_pattern): 点 1, 隙 1.65
-                            ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
-                            // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
-                            "-." => Some(vec![
-                                (6.4 * ds, true), (1.6 * ds, false),
-                                (1.0 * ds, true), (1.6 * ds, false),
-                            ]),
-                            _ => None,
-                        };
-                        if let Some(pattern) = dash_pattern {
-                            if bitmap {
-                                // 位图后端无原生 dash：按像素图案把折线切成一段段 dash（沿线方向），
-                                // 每段走与实线相同的 AA 渲染入口，线宽处处一致、无 Z 形 / 星形。
-                                // dash 端点用 "butt"（matplotlib 默认 dash_capstyle）。
-                                let dashes = compute_dash_segments(points, &pattern, x_per_pix, y_per_pix);
-                                for dash in &dashes {
-                                    render_polyline(chart, dash, &rgb, width_px, "butt",
-                                                    bitmap, x_min, x_max, y_min, y_max)?;
+                            // 将 linewidth 从 points 转换为像素：1pt = dpi/72 px，dpi = 72 * font_scale
+                            let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
+                            // 虚线图案按「显示像素」度量：matplotlib 图案(points) × 名义线宽 × (dpi/72)。
+                            let (pw_dash, ph_dash) = {
+                                let dim = chart.plotting_area().dim_in_pixel();
+                                (dim.0 as f64, dim.1 as f64)
+                            };
+                            let x_per_pix = if pw_dash > 0.0 {
+                                (x_max - x_min) / pw_dash
+                            } else {
+                                1.0
+                            };
+                            let y_per_pix = if ph_dash > 0.0 {
+                                (y_max - y_min) / ph_dash
+                            } else {
+                                1.0
+                            };
+                            // 撤销前面 1.5x 线宽膨胀，dash 图案按 matplotlib 名义线宽缩放；font_scale = dpi/72
+                            let lw_nominal = (*linewidth / 1.5).max(0.1);
+                            let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
+                            let width_px = (lw_px as i32 - 1).max(1) as f64;
+                            // matplotlib 默认 dash 图案 (rcParams)，None 表示实线
+                            let dash_pattern: Option<Vec<(f64, bool)>> = match linestyle.as_str() {
+                                // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
+                                "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
+                                // dotted (lines.dotted_pattern): 点 1, 隙 1.65
+                                ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
+                                // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
+                                "-." => Some(vec![
+                                    (6.4 * ds, true),
+                                    (1.6 * ds, false),
+                                    (1.0 * ds, true),
+                                    (1.6 * ds, false),
+                                ]),
+                                _ => None,
+                            };
+                            if let Some(pattern) = dash_pattern {
+                                if bitmap {
+                                    // 位图后端无原生 dash：按像素图案把折线切成一段段 dash（沿线方向），
+                                    // 每段走与实线相同的 AA 渲染入口，线宽处处一致、无 Z 形 / 星形。
+                                    // dash 端点用 "butt"（matplotlib 默认 dash_capstyle）。
+                                    let dashes = compute_dash_segments(
+                                        points, &pattern, x_per_pix, y_per_pix,
+                                    );
+                                    for dash in &dashes {
+                                        render_polyline(
+                                            chart, dash, &rgb, width_px, "butt", bitmap, x_min,
+                                            x_max, y_min, y_max,
+                                        )?;
+                                    }
+                                } else {
+                                    // SVG 后端：画**整条连续** polyline（butt 端点），再由
+                                    // render_svg_string 注入原生 stroke-dasharray。连续描边让每段
+                                    // dash 相位连续、端点统一，像素形状规律一致（不再"随机"）。
+                                    render_polyline(
+                                        chart, points, &rgb, width_px, "butt", bitmap, x_min,
+                                        x_max, y_min, y_max,
+                                    )?;
+                                    // 记录注入信息：首点像素坐标（= plotters 写入 polyline 的整数坐标）
+                                    // + stroke 颜色 hex + dasharray（图案长度序列，单位为显示像素）。
+                                    let (x0, y0) = chart.backend_coord(&points[0]);
+                                    let color_hex =
+                                        format!("#{:02X}{:02X}{:02X}", rgb.0, rgb.1, rgb.2);
+                                    let dasharray = pattern
+                                        .iter()
+                                        .map(|(len, _)| format!("{:.2}", len))
+                                        .collect::<Vec<_>>()
+                                        .join(",");
+                                    push_svg_dash_inject(color_hex, x0, y0, dasharray);
                                 }
                             } else {
-                                // SVG 后端：画**整条连续** polyline（butt 端点），再由
-                                // render_svg_string 注入原生 stroke-dasharray。连续描边让每段
-                                // dash 相位连续、端点统一，像素形状规律一致（不再"随机"）。
-                                render_polyline(chart, points, &rgb, width_px, "butt",
-                                                bitmap, x_min, x_max, y_min, y_max)?;
-                                // 记录注入信息：首点像素坐标（= plotters 写入 polyline 的整数坐标）
-                                // + stroke 颜色 hex + dasharray（图案长度序列，单位为显示像素）。
-                                let (x0, y0) = chart.backend_coord(&points[0]);
-                                let color_hex = format!("#{:02X}{:02X}{:02X}", rgb.0, rgb.1, rgb.2);
-                                let dasharray = pattern.iter()
-                                    .map(|(len, _)| format!("{:.2}", len))
-                                    .collect::<Vec<_>>()
-                                    .join(",");
-                                push_svg_dash_inject(color_hex, x0, y0, dasharray);
+                                // 实线：中心已对齐坐标点（见 y_half_px）。
+                                render_polyline(
+                                    chart,
+                                    points,
+                                    &rgb,
+                                    width_px,
+                                    solid_capstyle,
+                                    bitmap,
+                                    x_min,
+                                    x_max,
+                                    y_min,
+                                    y_max,
+                                )?;
                             }
-                        } else {
-                            // 实线：中心已对齐坐标点（见 y_half_px）。
-                            render_polyline(chart, points, &rgb, width_px, solid_capstyle,
-                                            bitmap, x_min, x_max, y_min, y_max)?;
-                        }
                         }
                     }
                 }
                 if let Some(marker_name) = marker
-                    && !marker_name.is_empty() && x.len() == y.len()
+                    && !marker_name.is_empty()
+                    && x.len() == y.len()
                 {
                     let col2 = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                     let line_rgb = to_plotters_color(col2);
                     // markerfacecolor / markeredgecolor 缺省时都跟随线条颜色 (matplotlib 'auto')
-                    let face_rgb = markerfacecolor.as_deref()
+                    let face_rgb = markerfacecolor
+                        .as_deref()
                         .filter(|s| !s.is_empty())
                         .and_then(|s| parse_color(s, *color_idx).ok())
                         .map(to_plotters_color)
                         .unwrap_or(line_rgb);
-                    let edge_rgb = markeredgecolor.as_deref()
+                    let edge_rgb = markeredgecolor
+                        .as_deref()
                         .filter(|s| !s.is_empty())
                         .and_then(|s| parse_color(s, *color_idx).ok())
                         .map(to_plotters_color)
                         .unwrap_or(line_rgb);
-                        // matplotlib markersize 单位是 points；marker 包围盒边长(像素) = markersize * dpi/72。
-                        // 使用 marker_scale (= 真实 dpi/72) 计算，与字体/线宽的 font_scale 解耦，
-                        // 保证 markersize 只影响 marker 大小。
-                        // draw_marker 收到的 `size` 是「半边长 / 半径」= 包围盒边长 / 2。
-                        let marker_size = if marker_name == "," {
-                            // matplotlib 像素点 marker：约 1 设备像素
-                            1.0
-                        } else if marker_name == "." {
-                            // matplotlib 点 marker：直径 = 0.5 * markersize（point_size_reduction=0.5），
-                            // 故半径 = 0.25 * markersize_px
-                            let ms = markersize.unwrap_or(6.0_f64).max(0.01);
-                            0.25 * ms * marker_scale
-                        } else {
-                            // markersize: None => matplotlib 默认 6
-                            let ms = markersize.unwrap_or(6.0_f64).max(0.01);
-                            let diameter_px = ms * marker_scale;
-                            diameter_px / 2.0
-                        };
-                        for (xv, yv) in x.iter().zip(y.iter()) {
-                            if let (Some(xv), Some(yv)) = (xv, yv) {
-                                let txv = tx(*xv);
-                                let tyv = ty(*yv) - y_half_px;
-                                if txv.is_finite() && tyv.is_finite() {
-                                    draw_marker(chart, marker_name, txv, tyv, marker_size, face_rgb, edge_rgb)
-                                        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw marker: {}", e)))?;
-                                }
+                    // matplotlib markersize 单位是 points；marker 包围盒边长(像素) = markersize * dpi/72。
+                    // 使用 marker_scale (= 真实 dpi/72) 计算，与字体/线宽的 font_scale 解耦，
+                    // 保证 markersize 只影响 marker 大小。
+                    // draw_marker 收到的 `size` 是「半边长 / 半径」= 包围盒边长 / 2。
+                    let marker_size = if marker_name == "," {
+                        // matplotlib 像素点 marker：约 1 设备像素
+                        1.0
+                    } else if marker_name == "." {
+                        // matplotlib 点 marker：直径 = 0.5 * markersize（point_size_reduction=0.5），
+                        // 故半径 = 0.25 * markersize_px
+                        let ms = markersize.unwrap_or(6.0_f64).max(0.01);
+                        0.25 * ms * marker_scale
+                    } else {
+                        // markersize: None => matplotlib 默认 6
+                        let ms = markersize.unwrap_or(6.0_f64).max(0.01);
+                        let diameter_px = ms * marker_scale;
+                        diameter_px / 2.0
+                    };
+                    for (xv, yv) in x.iter().zip(y.iter()) {
+                        if let (Some(xv), Some(yv)) = (xv, yv) {
+                            let txv = tx(*xv);
+                            let tyv = ty(*yv) - y_half_px;
+                            if txv.is_finite() && tyv.is_finite() {
+                                draw_marker(
+                                    chart,
+                                    marker_name,
+                                    txv,
+                                    tyv,
+                                    marker_size,
+                                    face_rgb,
+                                    edge_rgb,
+                                )
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Failed to draw marker: {}", e))
+                                })?;
                             }
                         }
+                    }
                 }
             }
-            PlotElement::Scatter { x, y, s, c, marker, color_idx, .. } => {
+            PlotElement::Scatter {
+                x,
+                y,
+                s,
+                c,
+                marker,
+                color_idx,
+                ..
+            } => {
                 let col = parse_color(c, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
                 let size = s.sqrt() * 0.4;
@@ -639,50 +759,95 @@ where
                     let txv = tx(xv);
                     let tyv = ty(yv);
                     if txv.is_finite() && tyv.is_finite() {
-                        draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb)
-                            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw scatter: {}", e)))?;
+                        draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb).map_err(
+                            |e| PyRuntimeError::new_err(format!("Failed to draw scatter: {}", e)),
+                        )?;
                     }
                 }
             }
-            PlotElement::ScatterMulti { x, y, s_list, c_list, marker, color_idx, .. } => {
-                if x.is_empty() || y.is_empty() { continue; }
+            PlotElement::ScatterMulti {
+                x,
+                y,
+                s_list,
+                c_list,
+                marker,
+                color_idx,
+                ..
+            } => {
+                if x.is_empty() || y.is_empty() {
+                    continue;
+                }
                 for (i, (&xv, &yv)) in x.iter().zip(y.iter()).enumerate() {
                     let txv = tx(xv);
                     let tyv = ty(yv);
-                    if !txv.is_finite() || !tyv.is_finite() { continue; }
-                    let c_str = c_list.as_ref().and_then(|c| c.get(i).cloned()).unwrap_or_default();
+                    if !txv.is_finite() || !tyv.is_finite() {
+                        continue;
+                    }
+                    let c_str = c_list
+                        .as_ref()
+                        .and_then(|c| c.get(i).cloned())
+                        .unwrap_or_default();
                     let col = if c_str.is_empty() {
                         parse_color("", *color_idx).unwrap_or(default_color(*color_idx + i))
                     } else {
                         parse_color(&c_str, *color_idx + i).unwrap_or(default_color(*color_idx + i))
                     };
                     let rgb = to_plotters_color(col);
-                    let size = s_list.as_ref()
+                    let size = s_list
+                        .as_ref()
                         .and_then(|s| s.get(i).cloned())
                         .unwrap_or(20.0)
-                        .sqrt() * 0.4;
-                    draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb)
-                        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e)))?;
+                        .sqrt()
+                        * 0.4;
+                    draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb).map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e))
+                    })?;
                 }
             }
-            PlotElement::Bar { x, height, width, color, color_idx, .. } => {
+            PlotElement::Bar {
+                x,
+                height,
+                width,
+                color,
+                color_idx,
+                ..
+            } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
                 let fill_style: ShapeStyle = rgb.filled();
                 for (&xv, &h) in x.iter().zip(height.iter()) {
                     let txv = tx(xv);
                     let th = ty(h);
-                    let y0 = if ylog { f64::NEG_INFINITY } else { 0.0f64.max(y_min) };
+                    let y0 = if ylog {
+                        f64::NEG_INFINITY
+                    } else {
+                        0.0f64.max(y_min)
+                    };
                     if txv.is_finite() && th.is_finite() {
-                        chart.draw_series(std::iter::once(Rectangle::new(
-                            [(txv - width / 2.0, y0), (txv + width / 2.0, th)],
-                            fill_style,
-                        ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw bar: {}", e)))?;
+                        chart
+                            .draw_series(std::iter::once(Rectangle::new(
+                                [(txv - width / 2.0, y0), (txv + width / 2.0, th)],
+                                fill_style,
+                            )))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("Failed to draw bar: {}", e))
+                            })?;
                     }
                 }
             }
-            PlotElement::BarH { y, width, height, color, color_idx, .. } => {
-                let c = if color.is_empty() { default_color(*color_idx) } else { parse_color(color, *color_idx)? };
+            PlotElement::BarH {
+                y,
+                width,
+                height,
+                color,
+                color_idx,
+                ..
+            } => {
+                let c = if color.is_empty() {
+                    default_color(*color_idx)
+                } else {
+                    parse_color(color, *color_idx)?
+                };
                 let rgb = to_plotters_color(c);
                 let fill_style: ShapeStyle = rgb.filled();
                 for (&yv, &wv) in y.iter().zip(width.iter()) {
@@ -690,16 +855,34 @@ where
                     let twv = tx(wv);
                     let bar_y0 = tyv - height / 2.0;
                     let bar_y1 = tyv + height / 2.0;
-                    chart.draw_series(std::iter::once(Rectangle::new(
-                        [(0.0, bar_y0), (twv, bar_y1)],
-                        fill_style,
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw barh: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(Rectangle::new(
+                            [(0.0, bar_y0), (twv, bar_y1)],
+                            fill_style,
+                        )))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw barh: {}", e))
+                        })?;
                 }
             }
-            PlotElement::Hist { data_all, bins: num_bins_user, density, histtype, alpha, colors, color_idx, bin_edges, label: _ } => {
-                if data_all.is_empty() { continue; }
+            PlotElement::Hist {
+                data_all,
+                bins: num_bins_user,
+                density,
+                histtype,
+                alpha,
+                colors,
+                color_idx,
+                bin_edges,
+                label: _,
+            } => {
+                if data_all.is_empty() {
+                    continue;
+                }
                 let all_data: Vec<f64> = data_all.iter().flatten().cloned().collect();
-                if all_data.is_empty() { continue; }
+                if all_data.is_empty() {
+                    continue;
+                }
                 let (global_min, global_max) = if let Some(edges) = bin_edges {
                     (edges[0], edges[edges.len() - 1])
                 } else {
@@ -715,20 +898,27 @@ where
                     edges.clone()
                 } else {
                     let bw = global_range / *num_bins_user as f64;
-                    (0..=*num_bins_user).map(|i| global_min + i as f64 * bw).collect()
+                    (0..=*num_bins_user)
+                        .map(|i| global_min + i as f64 * bw)
+                        .collect()
                 };
                 let effective_bins = bin_edges_list.len() - 1;
                 let total_all = all_data.len() as f64;
                 for (di, dataset) in data_all.iter().enumerate() {
-                    if dataset.is_empty() { continue; }
+                    if dataset.is_empty() {
+                        continue;
+                    }
                     let col_str = colors.get(di).map(|s| s.as_str()).unwrap_or("");
-                    let col = parse_color(col_str, *color_idx + di).unwrap_or(default_color(*color_idx + di));
+                    let col = parse_color(col_str, *color_idx + di)
+                        .unwrap_or(default_color(*color_idx + di));
                     let rgb = to_plotters_color(col);
                     let fill_style: ShapeStyle = rgb.mix(*alpha).filled();
                     let outline_style: ShapeStyle = rgb.mix(*alpha).stroke_width(1);
                     let mut counts = vec![0usize; effective_bins];
                     for &val in dataset {
-                        if val < global_min || val > global_max { continue; }
+                        if val < global_min || val > global_max {
+                            continue;
+                        }
                         let bin = bin_edges_list.partition_point(|&e| e <= val) - 1;
                         if bin < effective_bins {
                             counts[bin] += 1;
@@ -737,36 +927,73 @@ where
                     for (i, &count) in counts.iter().enumerate() {
                         let bin_left = bin_edges_list[i];
                         let bin_right = bin_edges_list[i + 1];
-                        let h = if *density { count as f64 / (total_all * (bin_right - bin_left)) } else { count as f64 };
-                        if h <= 0.0 { continue; }
-                        if histtype == "stepfilled" {
-                            chart.draw_series(std::iter::once(Rectangle::new(
-                                [(bin_left, 0.0), (bin_right, h)],
-                                fill_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw hist fill: {}", e)))?;
-                            chart.draw_series(std::iter::once(Rectangle::new(
-                                [(bin_left, 0.0), (bin_right, h)],
-                                outline_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw hist outline: {}", e)))?;
+                        let h = if *density {
+                            count as f64 / (total_all * (bin_right - bin_left))
                         } else {
-                            chart.draw_series(std::iter::once(Rectangle::new(
-                                [(bin_left, 0.0), (bin_right, h)],
-                                fill_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw hist: {}", e)))?;
+                            count as f64
+                        };
+                        if h <= 0.0 {
+                            continue;
+                        }
+                        if histtype == "stepfilled" {
+                            chart
+                                .draw_series(std::iter::once(Rectangle::new(
+                                    [(bin_left, 0.0), (bin_right, h)],
+                                    fill_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "Failed to draw hist fill: {}",
+                                        e
+                                    ))
+                                })?;
+                            chart
+                                .draw_series(std::iter::once(Rectangle::new(
+                                    [(bin_left, 0.0), (bin_right, h)],
+                                    outline_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "Failed to draw hist outline: {}",
+                                        e
+                                    ))
+                                })?;
+                        } else {
+                            chart
+                                .draw_series(std::iter::once(Rectangle::new(
+                                    [(bin_left, 0.0), (bin_right, h)],
+                                    fill_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Failed to draw hist: {}", e))
+                                })?;
                         }
                     }
                 }
             }
             PlotElement::Image { data, cmap } => {
-                if data.is_empty() || data[0].is_empty() { continue; }
+                if data.is_empty() || data[0].is_empty() {
+                    continue;
+                }
                 let d_min = data.iter().flatten().cloned().fold(f64::INFINITY, f64::min);
-                let d_max = data.iter().flatten().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let d_range = if (d_max - d_min).abs() < 1e-10 { 1.0 } else { d_max - d_min };
+                let d_max = data
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let d_range = if (d_max - d_min).abs() < 1e-10 {
+                    1.0
+                } else {
+                    d_max - d_min
+                };
                 for (r, row) in data.iter().enumerate() {
                     for (c, &val) in row.iter().enumerate() {
                         let normalized = (val - d_min) / d_range;
                         let rgb = match cmap.as_str() {
-                            "gray" | "grey" => { let v = (normalized * 255.0) as u8; RGBColor(v, v, v) }
+                            "gray" | "grey" => {
+                                let v = (normalized * 255.0) as u8;
+                                RGBColor(v, v, v)
+                            }
                             "hot" => {
                                 let r = (normalized * 3.0).clamp(0.0, 1.0);
                                 let g = (normalized * 3.0 - 1.0).clamp(0.0, 1.0);
@@ -783,70 +1010,128 @@ where
                             "winter" => winter_color(normalized),
                             _ => viridis_color(normalized),
                         };
-                        chart.draw_series(std::iter::once(Rectangle::new(
-                            [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
-                            rgb.filled(),
-                        ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+                        chart
+                            .draw_series(std::iter::once(Rectangle::new(
+                                [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
+                                rgb.filled(),
+                            )))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
+                            })?;
                     }
                 }
             }
-            PlotElement::Text { x, y, text, fontsize, color, font_family } => {
+            PlotElement::Text {
+                x,
+                y,
+                text,
+                fontsize,
+                color,
+                font_family,
+            } => {
                 let txv = tx(*x);
                 let tyv = ty(*y);
-                if !txv.is_finite() || !tyv.is_finite() { continue; }
+                if !txv.is_finite() || !tyv.is_finite() {
+                    continue;
+                }
                 let fs = scale_font(*fontsize, font_scale);
                 let family_name = font_stack::resolve_font_family(text, font_family.as_deref());
                 let font: FontDesc = (family_name.as_str(), fs).into();
                 let colored_font = font.color(&to_plotters_color(*color));
                 // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
                 // 与 axhline/axvline 在同一坐标时的视觉位置一致。
-                let text_style = colored_font
-                    .pos(Pos::new(HPos::Left, VPos::Center));
-                chart.draw_series(std::iter::once(plotters::element::Text::new(
-                    text.to_string(),
-                    (txv, tyv),
-                    text_style,
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw text: {}", e)))?;
+                let text_style = colored_font.pos(Pos::new(HPos::Left, VPos::Center));
+                chart
+                    .draw_series(std::iter::once(plotters::element::Text::new(
+                        text.to_string(),
+                        (txv, tyv),
+                        text_style,
+                    )))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw text: {}", e)))?;
             }
-            PlotElement::HLine { y, color, linewidth, color_idx, .. } => {
+            PlotElement::HLine {
+                y,
+                color,
+                linewidth,
+                color_idx,
+                ..
+            } => {
                 let tyv = ty(*y);
-                if !tyv.is_finite() { continue; }
+                if !tyv.is_finite() {
+                    continue;
+                }
                 let col = parse_color(color, *color_idx).unwrap_or(RgbColor(0, 0, 0));
                 draw_single_line(chart, x_min, tyv, x_max, tyv, col, *linewidth, font_scale)?;
             }
-            PlotElement::VLine { x, color, linewidth, color_idx, .. } => {
+            PlotElement::VLine {
+                x,
+                color,
+                linewidth,
+                color_idx,
+                ..
+            } => {
                 let txv = tx(*x);
-                if !txv.is_finite() { continue; }
+                if !txv.is_finite() {
+                    continue;
+                }
                 let col = parse_color(color, *color_idx).unwrap_or(RgbColor(0, 0, 0));
                 draw_single_line(chart, txv, y_min, txv, y_max, col, *linewidth, font_scale)?;
             }
-            PlotElement::HSpan { y1, y2, color, alpha } => {
+            PlotElement::HSpan {
+                y1,
+                y2,
+                color,
+                alpha,
+            } => {
                 let ty1 = ty(*y1);
                 let ty2 = ty(*y2);
-                if !ty1.is_finite() || !ty2.is_finite() { continue; }
+                if !ty1.is_finite() || !ty2.is_finite() {
+                    continue;
+                }
                 let col = parse_color(color, 0).unwrap_or(RgbColor(128, 128, 128));
                 let rgb = to_plotters_color(col);
                 let top = ty1.max(ty2);
                 let bottom = ty1.min(ty2);
-                chart.draw_series(std::iter::once(Rectangle::new(
-                    [(x_min, bottom), (x_max, top)],
-                    rgb.mix(*alpha).filled(),
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw axhspan: {}", e)))?;
+                chart
+                    .draw_series(std::iter::once(Rectangle::new(
+                        [(x_min, bottom), (x_max, top)],
+                        rgb.mix(*alpha).filled(),
+                    )))
+                    .map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw axhspan: {}", e))
+                    })?;
             }
-            PlotElement::VSpan { x1, x2, color, alpha } => {
+            PlotElement::VSpan {
+                x1,
+                x2,
+                color,
+                alpha,
+            } => {
                 let tx1 = tx(*x1);
                 let tx2 = tx(*x2);
-                if !tx1.is_finite() || !tx2.is_finite() { continue; }
+                if !tx1.is_finite() || !tx2.is_finite() {
+                    continue;
+                }
                 let col = parse_color(color, 0).unwrap_or(RgbColor(128, 128, 128));
                 let rgb = to_plotters_color(col);
                 let left = tx1.min(tx2);
                 let right = tx1.max(tx2);
-                chart.draw_series(std::iter::once(Rectangle::new(
-                    [(left, y_min), (right, y_max)],
-                    rgb.mix(*alpha).filled(),
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw axvspan: {}", e)))?;
+                chart
+                    .draw_series(std::iter::once(Rectangle::new(
+                        [(left, y_min), (right, y_max)],
+                        rgb.mix(*alpha).filled(),
+                    )))
+                    .map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw axvspan: {}", e))
+                    })?;
             }
-            PlotElement::AxLine { xy1, xy2, color, linestyle, linewidth } => {
+            PlotElement::AxLine {
+                xy1,
+                xy2,
+                color,
+                linestyle,
+                linewidth,
+            } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let tx1 = tx(xy1.0);
                 let ty1 = ty(xy1.1);
@@ -857,43 +1142,76 @@ where
                     let _ = linestyle;
                 }
             }
-            PlotElement::Arrow { x1, y1, x2, y2, color, linewidth, head_size } => {
+            PlotElement::Arrow {
+                x1,
+                y1,
+                x2,
+                y2,
+                color,
+                linewidth,
+                head_size,
+            } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let tx1 = tx(*x1);
                 let ty1 = ty(*y1);
                 let tx2 = tx(*x2);
                 let ty2 = ty(*y2);
-                if !(tx1.is_finite() && ty1.is_finite() && tx2.is_finite() && ty2.is_finite()) { continue; }
+                if !(tx1.is_finite() && ty1.is_finite() && tx2.is_finite() && ty2.is_finite()) {
+                    continue;
+                }
                 draw_single_line(chart, tx1, ty1, tx2, ty2, col, *linewidth, font_scale)?;
                 // 箭头头部：简单三角形
                 let dx = tx2 - tx1;
                 let dy = ty2 - ty1;
                 let len = (dx * dx + dy * dy).sqrt();
-                if len < 1e-10 { continue; }
+                if len < 1e-10 {
+                    continue;
+                }
                 let nx = dx / len;
                 let ny = dy / len;
                 let head = *head_size;
                 let p1 = (tx2, ty2);
-                let p2 = (tx2 - head * nx - head * 0.5 * ny, ty2 - head * ny + head * 0.5 * nx);
-                let p3 = (tx2 - head * nx + head * 0.5 * ny, ty2 - head * ny - head * 0.5 * nx);
+                let p2 = (
+                    tx2 - head * nx - head * 0.5 * ny,
+                    ty2 - head * ny + head * 0.5 * nx,
+                );
+                let p3 = (
+                    tx2 - head * nx + head * 0.5 * ny,
+                    ty2 - head * ny - head * 0.5 * nx,
+                );
                 let rgb = to_plotters_color(col);
-                chart.draw_series(std::iter::once(Polygon::new(
-                    vec![p1, p2, p3],
-                    rgb.filled(),
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw arrow: {}", e)))?;
+                chart
+                    .draw_series(std::iter::once(Polygon::new(
+                        vec![p1, p2, p3],
+                        rgb.filled(),
+                    )))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw arrow: {}", e)))?;
             }
-            PlotElement::Pie { x, labels, colors, autopct, startangle } => {
+            PlotElement::Pie {
+                x,
+                labels,
+                colors,
+                autopct,
+                startangle,
+            } => {
                 let total: f64 = x.iter().sum();
-                if total <= 0.0 { continue; }
+                if total <= 0.0 {
+                    continue;
+                }
                 let mut current_angle = startangle.to_radians();
-                let pie_colors = colors.as_ref().map(|c| c.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+                let pie_colors = colors
+                    .as_ref()
+                    .map(|c| c.iter().map(|s| s.as_str()).collect::<Vec<_>>());
                 for (i, &val) in x.iter().enumerate() {
-                    if val <= 0.0 { continue; }
+                    if val <= 0.0 {
+                        continue;
+                    }
                     let angle = (val / total) * 360.0_f64;
                     let angle_rad = angle.to_radians();
                     let end_angle = current_angle + angle_rad;
                     let col = if let Some(ref pc) = pie_colors {
-                        let ci = parse_color(pc.get(i).unwrap_or(&""), i).unwrap_or(default_color(i));
+                        let ci =
+                            parse_color(pc.get(i).unwrap_or(&""), i).unwrap_or(default_color(i));
                         to_plotters_color(ci)
                     } else {
                         to_plotters_color(default_color(i))
@@ -904,9 +1222,14 @@ where
                         let a = current_angle + (j as f64 / steps as f64) * angle_rad;
                         vertices.push((a.cos(), a.sin()));
                     }
-                    chart.draw_series(std::iter::once(Polygon::new(
-                        vertices, col.mix(0.85).filled(),
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(Polygon::new(
+                            vertices,
+                            col.mix(0.85).filled(),
+                        )))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw pie: {}", e))
+                        })?;
                     let mid_angle = current_angle + angle_rad / 2.0;
                     if let Some(lbls) = labels
                         && let Some(l) = lbls.get(i)
@@ -916,12 +1239,19 @@ where
                         let ly = mid_angle.sin() * label_r;
                         // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
                         let pie_family = font_stack::select_family(l);
-                        let pie_label_style: TextStyle = FontDesc::from((pie_family.as_str(), scale_font(12.0, font_scale)))
-                            .color(&BLACK)
-                            .pos(Pos::new(HPos::Center, VPos::Center));
-                        chart.draw_series(std::iter::once(plotters::element::Text::new(
-                            l.to_string(), (lx, ly), pie_label_style,
-                        ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw pie label: {}", e)))?;
+                        let pie_label_style: TextStyle =
+                            FontDesc::from((pie_family.as_str(), scale_font(12.0, font_scale)))
+                                .color(&BLACK)
+                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        chart
+                            .draw_series(std::iter::once(plotters::element::Text::new(
+                                l.to_string(),
+                                (lx, ly),
+                                pie_label_style,
+                            )))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("Failed to draw pie label: {}", e))
+                            })?;
                     }
                     if let Some(fmt) = autopct {
                         let pct = val / total * 100.0;
@@ -936,72 +1266,133 @@ where
                         let tx = mid_angle.cos() * text_r;
                         let ty = mid_angle.sin() * text_r;
                         let autopct_family = font_stack::select_family(&text);
-                        let autopct_style: TextStyle = FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))
-                            .color(&BLACK)
-                            .pos(Pos::new(HPos::Center, VPos::Center));
-                        chart.draw_series(std::iter::once(plotters::element::Text::new(
-                            text, (tx, ty), autopct_style,
-                        ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw autopct: {}", e)))?;
+                        let autopct_style: TextStyle =
+                            FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))
+                                .color(&BLACK)
+                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        chart
+                            .draw_series(std::iter::once(plotters::element::Text::new(
+                                text,
+                                (tx, ty),
+                                autopct_style,
+                            )))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("Failed to draw autopct: {}", e))
+                            })?;
                     }
                     current_angle = end_angle;
                 }
             }
-            PlotElement::FillBetween { x, y1, y2, color, alpha, .. } => {
+            PlotElement::FillBetween {
+                x,
+                y1,
+                y2,
+                color,
+                alpha,
+                ..
+            } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 128, 0));
                 let rgb = to_plotters_color(col);
-                if x.len() != y1.len() || x.is_empty() { continue; }
+                if x.len() != y1.len() || x.is_empty() {
+                    continue;
+                }
                 let mut points: Vec<(f64, f64)> = Vec::with_capacity(x.len() * 2);
                 for (&xv, &yv) in x.iter().zip(y1.iter()) {
                     let txv = tx(xv);
                     let tyv = ty(yv);
-                    if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                    if txv.is_finite() && tyv.is_finite() {
+                        points.push((txv, tyv));
+                    }
                 }
                 for i in (0..x.len()).rev() {
                     let y2v = if i < y2.len() { y2[i] } else { 0.0 };
                     let txv = tx(x[i]);
                     let tyv = ty(y2v);
-                    if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                    if txv.is_finite() && tyv.is_finite() {
+                        points.push((txv, tyv));
+                    }
                 }
-                if points.len() < 3 { continue; }
-                chart.draw_series(std::iter::once(Polygon::new(
-                    points, rgb.mix(*alpha).filled(),
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw fill_between: {}", e)))?;
+                if points.len() < 3 {
+                    continue;
+                }
+                chart
+                    .draw_series(std::iter::once(Polygon::new(
+                        points,
+                        rgb.mix(*alpha).filled(),
+                    )))
+                    .map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw fill_between: {}", e))
+                    })?;
             }
-            PlotElement::Stack { x, y_series, colors, alpha, .. } => {
-                if x.is_empty() || y_series.is_empty() { continue; }
+            PlotElement::Stack {
+                x,
+                y_series,
+                colors,
+                alpha,
+                ..
+            } => {
+                if x.is_empty() || y_series.is_empty() {
+                    continue;
+                }
                 // 计算累加值：从最底层开始绘制
                 let mut cumulative: Vec<f64> = vec![0.0; x.len()];
                 for (si, series) in y_series.iter().enumerate() {
-                    let color_str = colors.as_ref()
+                    let color_str = colors
+                        .as_ref()
                         .and_then(|c| c.get(si).cloned())
                         .unwrap_or_default();
-                    let col = parse_color(&color_str, 0)
-                        .unwrap_or(default_color(si));
+                    let col = parse_color(&color_str, 0).unwrap_or(default_color(si));
                     let rgb = to_plotters_color(col);
                     // 构造当前层的上下边界点
                     let mut points: Vec<(f64, f64)> = Vec::with_capacity(x.len() * 2);
                     for (i, &xv) in x.iter().enumerate() {
-                        let upper = if i < series.len() { cumulative[i] + series[i] } else { cumulative[i] };
+                        let upper = if i < series.len() {
+                            cumulative[i] + series[i]
+                        } else {
+                            cumulative[i]
+                        };
                         let txv = tx(xv);
                         let tyv = ty(upper);
-                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                     }
                     for i in (0..x.len()).rev() {
                         let txv = tx(x[i]);
                         let tyv = ty(cumulative[i]);
-                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                     }
                     // 累加
                     for (i, v) in series.iter().enumerate() {
-                        if i < cumulative.len() { cumulative[i] += v; }
+                        if i < cumulative.len() {
+                            cumulative[i] += v;
+                        }
                     }
-                    if points.len() < 3 { continue; }
-                    chart.draw_series(std::iter::once(Polygon::new(
-                        points, rgb.mix(*alpha).filled(),
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw stack: {}", e)))?;
+                    if points.len() < 3 {
+                        continue;
+                    }
+                    chart
+                        .draw_series(std::iter::once(Polygon::new(
+                            points,
+                            rgb.mix(*alpha).filled(),
+                        )))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw stack: {}", e))
+                        })?;
                 }
             }
-            PlotElement::ErrorBar { x, y, yerr, xerr, fmt, color, capsize, .. } => {
+            PlotElement::ErrorBar {
+                x,
+                y,
+                yerr,
+                xerr,
+                fmt,
+                color,
+                capsize,
+                ..
+            } => {
                 let idx = 0;
                 let col = parse_color(color, idx).unwrap_or(default_color(idx));
                 let rgb = to_plotters_color(col);
@@ -1010,47 +1401,94 @@ where
                 for (i, (&xv, &yv)) in x.iter().zip(y.iter()).enumerate() {
                     let txv = tx(xv);
                     let tyv = ty(yv);
-                    if !txv.is_finite() || !tyv.is_finite() { continue; }
-                    let ye = if let Some(vec) = yerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0_f64 } } else { 0.0 };
-                    let xe = if let Some(vec) = xerr.as_ref() { if i < vec.len() { vec[i] } else { 0.0_f64 } } else { 0.0 };
+                    if !txv.is_finite() || !tyv.is_finite() {
+                        continue;
+                    }
+                    let ye = if let Some(vec) = yerr.as_ref() {
+                        if i < vec.len() { vec[i] } else { 0.0_f64 }
+                    } else {
+                        0.0
+                    };
+                    let xe = if let Some(vec) = xerr.as_ref() {
+                        if i < vec.len() { vec[i] } else { 0.0_f64 }
+                    } else {
+                        0.0
+                    };
                     if ye != 0.0 {
                         let ty_lo = ty(yv - ye);
                         let ty_hi = ty(yv + ye);
                         if ty_lo.is_finite() && ty_hi.is_finite() {
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(txv, ty_lo), (txv, ty_hi)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar line: {}", e)))?;
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(txv - cap_half, ty_lo), (txv + cap_half, ty_lo)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar cap: {}", e)))?;
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(txv - cap_half, ty_hi), (txv + cap_half, ty_hi)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar cap: {}", e)))?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(txv, ty_lo), (txv, ty_hi)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("ErrorBar line: {}", e))
+                                })?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(txv - cap_half, ty_lo), (txv + cap_half, ty_lo)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("ErrorBar cap: {}", e))
+                                })?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(txv - cap_half, ty_hi), (txv + cap_half, ty_hi)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("ErrorBar cap: {}", e))
+                                })?;
                         }
                     }
                     if xe != 0.0 {
                         let tx_lo = tx(xv - xe);
                         let tx_hi = tx(xv + xe);
                         if tx_lo.is_finite() && tx_hi.is_finite() {
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(tx_lo, tyv), (tx_hi, tyv)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar xline: {}", e)))?;
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(tx_lo, tyv - cap_half), (tx_lo, tyv + cap_half)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar xcap: {}", e)))?;
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(tx_hi, tyv - cap_half), (tx_hi, tyv + cap_half)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("ErrorBar xcap: {}", e)))?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(tx_lo, tyv), (tx_hi, tyv)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("ErrorBar xline: {}", e))
+                                })?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(tx_lo, tyv - cap_half), (tx_lo, tyv + cap_half)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("ErrorBar xcap: {}", e))
+                                })?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(tx_hi, tyv - cap_half), (tx_hi, tyv + cap_half)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("ErrorBar xcap: {}", e))
+                                })?;
                         }
                     }
                     if !fmt.is_empty() {
                         let marker_name = fmt;
-                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb)
-                            .map_err(|e| PyRuntimeError::new_err(format!("ErrorBar marker: {}", e)))?;
+                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb).map_err(|e| {
+                            PyRuntimeError::new_err(format!("ErrorBar marker: {}", e))
+                        })?;
                     }
                 }
             }
-            PlotElement::Stem { x, y, linefmt, markerfmt, .. } => {
+            PlotElement::Stem {
+                x,
+                y,
+                linefmt,
+                markerfmt,
+                ..
+            } => {
                 let col = RgbColor(0, 0, 200);
                 let rgb = to_plotters_color(col);
                 let baseline = ty(0.0);
@@ -1060,43 +1498,68 @@ where
                     for (&xv, &yv) in x.iter().zip(y.iter()) {
                         let txv = tx(xv);
                         let tyv = ty(yv);
-                        if !txv.is_finite() || !tyv.is_finite() || !baseline.is_finite() { continue; }
-                        chart.draw_series(std::iter::once(PathElement::new(
-                            vec![(txv, baseline), (txv, tyv)], line_style,
-                        ))).map_err(|e| PyRuntimeError::new_err(format!("Stem line: {}", e)))?;
+                        if !txv.is_finite() || !tyv.is_finite() || !baseline.is_finite() {
+                            continue;
+                        }
+                        chart
+                            .draw_series(std::iter::once(PathElement::new(
+                                vec![(txv, baseline), (txv, tyv)],
+                                line_style,
+                            )))
+                            .map_err(|e| PyRuntimeError::new_err(format!("Stem line: {}", e)))?;
                     }
                 } else {
                     for (&xv, &yv) in x.iter().zip(y.iter()) {
                         let txv = tx(xv);
                         let tyv = ty(yv);
-                        if !txv.is_finite() || !tyv.is_finite() || !baseline.is_finite() { continue; }
+                        if !txv.is_finite() || !tyv.is_finite() || !baseline.is_finite() {
+                            continue;
+                        }
                         draw_single_line(chart, txv, baseline, txv, tyv, col, 1.0, font_scale)?;
                     }
                 }
                 for (&xv, &yv) in x.iter().zip(y.iter()) {
                     let txv = tx(xv);
                     let tyv = ty(yv);
-                    if !txv.is_finite() || !tyv.is_finite() { continue; }
+                    if !txv.is_finite() || !tyv.is_finite() {
+                        continue;
+                    }
                     draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb)
                         .map_err(|e| PyRuntimeError::new_err(format!("Stem marker: {}", e)))?;
                 }
             }
-            PlotElement::Step { x, y, where_, color, linestyle: _, linewidth, .. } => {
+            PlotElement::Step {
+                x,
+                y,
+                where_,
+                color,
+                linestyle: _,
+                linewidth,
+                ..
+            } => {
                 let idx = 0;
                 let col = parse_color(color, idx).unwrap_or(default_color(idx));
-                if x.len() < 2 || x.len() != y.len() { continue; }
+                if x.len() < 2 || x.len() != y.len() {
+                    continue;
+                }
                 let mut points = Vec::new();
                 match where_.as_str() {
                     "pre" => {
                         let txv = tx(x[0]);
                         let tyv = ty(y[0]);
-                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                         for i in 1..x.len() {
                             let txv = tx(x[i]);
                             let tyv_prev = ty(y[i - 1]);
                             let tyv = ty(y[i]);
-                            if txv.is_finite() && tyv_prev.is_finite() { points.push((txv, tyv_prev)); }
-                            if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                            if txv.is_finite() && tyv_prev.is_finite() {
+                                points.push((txv, tyv_prev));
+                            }
+                            if txv.is_finite() && tyv.is_finite() {
+                                points.push((txv, tyv));
+                            }
                         }
                     }
                     "post" => {
@@ -1104,40 +1567,59 @@ where
                             let txv = tx(x[i]);
                             let tyv = ty(y[i]);
                             let tyv_next = ty(y[i + 1]);
-                            if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
-                            if txv.is_finite() && tyv_next.is_finite() { points.push((txv, tyv_next)); }
+                            if txv.is_finite() && tyv.is_finite() {
+                                points.push((txv, tyv));
+                            }
+                            if txv.is_finite() && tyv_next.is_finite() {
+                                points.push((txv, tyv_next));
+                            }
                         }
                         let txv = tx(x[x.len() - 1]);
                         let tyv = ty(y[y.len() - 1]);
-                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                     }
                     _ => {
                         let txv = tx(x[0]);
                         let tyv = ty(y[0]);
-                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                         for i in 1..x.len() {
                             let mid = (x[i - 1] + x[i]) / 2.0;
                             let tmid = tx(mid);
                             let tyv_prev = ty(y[i - 1]);
                             let tyv = ty(y[i]);
-                            if tmid.is_finite() && tyv_prev.is_finite() { points.push((tmid, tyv_prev)); }
-                            if tmid.is_finite() && tyv.is_finite() { points.push((tmid, tyv)); }
+                            if tmid.is_finite() && tyv_prev.is_finite() {
+                                points.push((tmid, tyv_prev));
+                            }
+                            if tmid.is_finite() && tyv.is_finite() {
+                                points.push((tmid, tyv));
+                            }
                         }
                         let txv = tx(x[x.len() - 1]);
                         let tyv = ty(y[y.len() - 1]);
-                        if txv.is_finite() && tyv.is_finite() { points.push((txv, tyv)); }
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                     }
                 }
-                if points.len() < 2 { continue; }
+                if points.len() < 2 {
+                    continue;
+                }
                 let lw_px = ((*linewidth) * font_scale).round().max(1.0) as u32;
                 let style: ShapeStyle = to_plotters_color(col).stroke_width(lw_px);
-                chart.draw_series(LineSeries::new(points, style))
+                chart
+                    .draw_series(LineSeries::new(points, style))
                     .map_err(|e| PyRuntimeError::new_err(format!("Step draw: {}", e)))?;
             }
             PlotElement::BoxPlot { data, labels, .. } => {
                 let box_width = 0.6;
                 for (i, series) in data.iter().enumerate() {
-                    if series.is_empty() { continue; }
+                    if series.is_empty() {
+                        continue;
+                    }
                     let mut sorted = series.clone();
                     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                     let n = sorted.len();
@@ -1164,44 +1646,87 @@ where
                     let tmed = ty(med);
                     let tlower = ty(lower_whisker);
                     let tupper = ty(upper_whisker);
-                    if !tq1.is_finite() || !tq3.is_finite() || !tmed.is_finite() || !tlower.is_finite() || !tupper.is_finite() { continue; }
+                    if !tq1.is_finite()
+                        || !tq3.is_finite()
+                        || !tmed.is_finite()
+                        || !tlower.is_finite()
+                        || !tupper.is_finite()
+                    {
+                        continue;
+                    }
                     let cx = (i + 1) as f64;
                     let col = to_plotters_color(default_color(i));
                     let fill_style: ShapeStyle = col.mix(0.3).filled();
                     let line_style: ShapeStyle = col.stroke_width(2);
-                    chart.draw_series(std::iter::once(PathElement::new(
-                        vec![(cx, tlower), (cx, tupper)], line_style,
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot whisker: {}", e)))?;
-                    chart.draw_series(std::iter::once(Rectangle::new(
-                        [(cx - box_width / 2.0, tq1), (cx + box_width / 2.0, tq3)], fill_style,
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot box: {}", e)))?;
-                    chart.draw_series(std::iter::once(Rectangle::new(
-                        [(cx - box_width / 2.0, tq1), (cx + box_width / 2.0, tq3)], line_style,
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot border: {}", e)))?;
-                    chart.draw_series(std::iter::once(PathElement::new(
-                        vec![(cx - box_width / 2.0, tmed), (cx + box_width / 2.0, tmed)],
-                        col.stroke_width(2).filled(),
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot median: {}", e)))?;
-                    chart.draw_series(std::iter::once(PathElement::new(
-                        vec![(cx - box_width / 4.0, tlower), (cx + box_width / 4.0, tlower)], line_style,
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot cap: {}", e)))?;
-                    chart.draw_series(std::iter::once(PathElement::new(
-                        vec![(cx - box_width / 4.0, tupper), (cx + box_width / 4.0, tupper)], line_style,
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot cap: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(PathElement::new(
+                            vec![(cx, tlower), (cx, tupper)],
+                            line_style,
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("BoxPlot whisker: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(Rectangle::new(
+                            [(cx - box_width / 2.0, tq1), (cx + box_width / 2.0, tq3)],
+                            fill_style,
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("BoxPlot box: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(Rectangle::new(
+                            [(cx - box_width / 2.0, tq1), (cx + box_width / 2.0, tq3)],
+                            line_style,
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("BoxPlot border: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(PathElement::new(
+                            vec![(cx - box_width / 2.0, tmed), (cx + box_width / 2.0, tmed)],
+                            col.stroke_width(2).filled(),
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("BoxPlot median: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(PathElement::new(
+                            vec![
+                                (cx - box_width / 4.0, tlower),
+                                (cx + box_width / 4.0, tlower),
+                            ],
+                            line_style,
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("BoxPlot cap: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(PathElement::new(
+                            vec![
+                                (cx - box_width / 4.0, tupper),
+                                (cx + box_width / 4.0, tupper),
+                            ],
+                            line_style,
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("BoxPlot cap: {}", e)))?;
                     if let Some(lbls) = labels
                         && let Some(l) = lbls.get(i)
                     {
                         let box_family = font_stack::select_family(l);
-                        let box_label_style: TextStyle = FontDesc::from((box_family.as_str(), scale_font(11.0, font_scale)))
-                            .color(&BLACK)
-                            .pos(Pos::new(HPos::Center, VPos::Center));
-                        chart.draw_series(std::iter::once(plotters::element::Text::new(
-                            l.to_string(), (cx, -0.3), box_label_style,
-                        ))).map_err(|e| PyRuntimeError::new_err(format!("BoxPlot label: {}", e)))?;
+                        let box_label_style: TextStyle =
+                            FontDesc::from((box_family.as_str(), scale_font(11.0, font_scale)))
+                                .color(&BLACK)
+                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        chart
+                            .draw_series(std::iter::once(plotters::element::Text::new(
+                                l.to_string(),
+                                (cx, -0.3),
+                                box_label_style,
+                            )))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("BoxPlot label: {}", e))
+                            })?;
                     }
                 }
             }
-            PlotElement::Annotate { text, xy, xytext, fontsize, color } => {
+            PlotElement::Annotate {
+                text,
+                xy,
+                xytext,
+                fontsize,
+                color,
+            } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let rgb = to_plotters_color(col);
                 let (txy_x, txy_y) = xytext.unwrap_or((xy.0, xy.1));
@@ -1209,18 +1734,32 @@ where
                 let txy_y = ty(txy_y);
                 let txy_xy_x = tx(xy.0);
                 let txy_xy_y = ty(xy.1);
-                if !txy_x.is_finite() || !txy_y.is_finite() || !txy_xy_x.is_finite() || !txy_xy_y.is_finite() { continue; }
+                if !txy_x.is_finite()
+                    || !txy_y.is_finite()
+                    || !txy_xy_x.is_finite()
+                    || !txy_xy_y.is_finite()
+                {
+                    continue;
+                }
                 let arrow_style: ShapeStyle = rgb.stroke_width(1);
-                chart.draw_series(std::iter::once(PathElement::new(
-                    vec![(txy_x, txy_y), (txy_xy_x, txy_xy_y)], arrow_style,
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate arrow: {}", e)))?;
+                chart
+                    .draw_series(std::iter::once(PathElement::new(
+                        vec![(txy_x, txy_y), (txy_xy_x, txy_xy_y)],
+                        arrow_style,
+                    )))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Annotate arrow: {}", e)))?;
                 let anno_family = font_stack::select_family(text);
-                let anno_style: TextStyle = FontDesc::from((anno_family.as_str(), scale_font(*fontsize, font_scale)))
-                    .color(&rgb)
-                    .pos(Pos::new(HPos::Center, VPos::Center));
-                chart.draw_series(std::iter::once(plotters::element::Text::new(
-                    text.to_string(), (txy_x, txy_y), anno_style,
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Annotate text: {}", e)))?;
+                let anno_style: TextStyle =
+                    FontDesc::from((anno_family.as_str(), scale_font(*fontsize, font_scale)))
+                        .color(&rgb)
+                        .pos(Pos::new(HPos::Center, VPos::Center));
+                chart
+                    .draw_series(std::iter::once(plotters::element::Text::new(
+                        text.to_string(),
+                        (txy_x, txy_y),
+                        anno_style,
+                    )))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Annotate text: {}", e)))?;
             }
         }
     }
@@ -1273,15 +1812,25 @@ where
     }
     // 应用 y_shift 后的端点（与已绘制的线段严格对齐）
     let p0 = (points[0].0, points[0].1 - cap_y_shift);
-    let p1 = (points[points.len() - 1].0, points[points.len() - 1].1 - cap_y_shift);
+    let p1 = (
+        points[points.len() - 1].0,
+        points[points.len() - 1].1 - cap_y_shift,
+    );
     // 内点（用于计算切线方向）也要应用相同 y_shift，否则 cap 的切线方向会偏
     let next1 = (points[1].0, points[1].1 - cap_y_shift);
-    let prev_n = (points[points.len() - 2].0, points[points.len() - 2].1 - cap_y_shift);
+    let prev_n = (
+        points[points.len() - 2].0,
+        points[points.len() - 2].1 - cap_y_shift,
+    );
     if capstyle.eq_ignore_ascii_case("round") {
         // 圆头：直径 = cap_lw_px（与线段 stroke_w 严格相等），构造 SVG 路径半圆。
         // 为保证光滑，使用 64 段直线逼近整个半圆，肉眼完全无折线感。
-        draw_round_cap(chart, p0, next1, cap_lw_px, x_min, x_max, y_min, y_max, rgb, true)?;
-        draw_round_cap(chart, p1, prev_n, cap_lw_px, x_min, x_max, y_min, y_max, rgb, false)?;
+        draw_round_cap(
+            chart, p0, next1, cap_lw_px, x_min, x_max, y_min, y_max, rgb, true,
+        )?;
+        draw_round_cap(
+            chart, p1, prev_n, cap_lw_px, x_min, x_max, y_min, y_max, rgb, false,
+        )?;
         return Ok(());
     }
     if capstyle.eq_ignore_ascii_case("projecting") {
@@ -1321,33 +1870,37 @@ where
         //  b: 端点外侧 + 法线 +cap/2
         //  c: 端点 + 法线 +cap/2
         //  d: 端点 + 法线 -cap/2
-        let sa = (start_pt.0 + s_tan_x - s_nor_x,
-                  start_pt.1 + s_tan_y - s_nor_y);
-        let sb = (start_pt.0 + s_tan_x + s_nor_x,
-                  start_pt.1 + s_tan_y + s_nor_y);
-        let sc = (start_pt.0 + s_nor_x,
-                  start_pt.1 + s_nor_y);
-        let sd = (start_pt.0 - s_nor_x,
-                  start_pt.1 - s_nor_y);
-        chart.draw_series(std::iter::once(Polygon::new(
-            vec![sa, sb, sc, sd], rgb.filled(),
-        ))).map_err(|e| PyRuntimeError::new_err(format!("Cap square (start): {}", e)))?;
+        let sa = (
+            start_pt.0 + s_tan_x - s_nor_x,
+            start_pt.1 + s_tan_y - s_nor_y,
+        );
+        let sb = (
+            start_pt.0 + s_tan_x + s_nor_x,
+            start_pt.1 + s_tan_y + s_nor_y,
+        );
+        let sc = (start_pt.0 + s_nor_x, start_pt.1 + s_nor_y);
+        let sd = (start_pt.0 - s_nor_x, start_pt.1 - s_nor_y);
+        chart
+            .draw_series(std::iter::once(Polygon::new(
+                vec![sa, sb, sc, sd],
+                rgb.filled(),
+            )))
+            .map_err(|e| PyRuntimeError::new_err(format!("Cap square (start): {}", e)))?;
         // 结束端矩形（沿切线反方向延伸）
         let e_tan_x = cap_px * eux * x_per_pix;
         let e_tan_y = cap_px * euy * y_per_pix;
         let e_nor_x = cap_px * (-euy) * x_per_pix;
         let e_nor_y = cap_px * (eux) * y_per_pix;
-        let ea = (end_pt.0 + e_tan_x - e_nor_x,
-                  end_pt.1 + e_tan_y - e_nor_y);
-        let eb = (end_pt.0 + e_tan_x + e_nor_x,
-                  end_pt.1 + e_tan_y + e_nor_y);
-        let ec = (end_pt.0 + e_nor_x,
-                  end_pt.1 + e_nor_y);
-        let ed = (end_pt.0 - e_nor_x,
-                  end_pt.1 - e_nor_y);
-        chart.draw_series(std::iter::once(Polygon::new(
-            vec![ea, eb, ec, ed], rgb.filled(),
-        ))).map_err(|e| PyRuntimeError::new_err(format!("Cap square (end): {}", e)))?;
+        let ea = (end_pt.0 + e_tan_x - e_nor_x, end_pt.1 + e_tan_y - e_nor_y);
+        let eb = (end_pt.0 + e_tan_x + e_nor_x, end_pt.1 + e_tan_y + e_nor_y);
+        let ec = (end_pt.0 + e_nor_x, end_pt.1 + e_nor_y);
+        let ed = (end_pt.0 - e_nor_x, end_pt.1 - e_nor_y);
+        chart
+            .draw_series(std::iter::once(Polygon::new(
+                vec![ea, eb, ec, ed],
+                rgb.filled(),
+            )))
+            .map_err(|e| PyRuntimeError::new_err(format!("Cap square (end): {}", e)))?;
         return Ok(());
     }
     // 未知 capstyle：静默忽略
@@ -1375,7 +1928,10 @@ fn draw_round_cap<DB: DrawingBackend>(
     endpoint: (f64, f64),
     _next_point: (f64, f64),
     cap_lw_px: f64,
-    _x_min: f64, _x_max: f64, _y_min: f64, _y_max: f64,
+    _x_min: f64,
+    _x_max: f64,
+    _y_min: f64,
+    _y_max: f64,
     rgb: &plotters::style::RGBColor,
     _is_start: bool,
 ) -> PyResult<()>
@@ -1391,7 +1947,8 @@ where
     let radius_px = (cap_lw_px / 2.0).max(0.5);
     let style: ShapeStyle = rgb.filled();
     let circle_elem = Circle::new((cx, cy), radius_px, style);
-    chart.draw_series(std::iter::once(circle_elem))
+    chart
+        .draw_series(std::iter::once(circle_elem))
         .map_err(|e| PyRuntimeError::new_err(format!("Cap round circle: {}", e)))?;
     Ok(())
 }

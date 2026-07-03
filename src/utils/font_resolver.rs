@@ -1,10 +1,10 @@
+use owned_ttf_parser::{Face, name_id};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use owned_ttf_parser::{Face, name_id};
 
 /// 字体族名 → 候选文件路径映射（OnceLock 缓存，仅初始化一次）
 fn font_name_to_paths() -> &'static Vec<(&'static str, Vec<&'static str>)> {
@@ -13,98 +13,121 @@ fn font_name_to_paths() -> &'static Vec<(&'static str, Vec<&'static str>)> {
         vec![
             // macOS
             #[cfg(target_os = "macos")]
-            ("Arial Unicode MS", vec![
-                "/Library/Fonts/Arial Unicode.ttf",
-                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-            ]),
+            (
+                "Arial Unicode MS",
+                vec![
+                    "/Library/Fonts/Arial Unicode.ttf",
+                    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                ],
+            ),
             #[cfg(target_os = "macos")]
-            ("Arial", vec![
-                "/Library/Fonts/Arial.ttf",
-                "/System/Library/Fonts/Supplemental/Arial.ttf",
-            ]),
+            (
+                "Arial",
+                vec![
+                    "/Library/Fonts/Arial.ttf",
+                    "/System/Library/Fonts/Supplemental/Arial.ttf",
+                ],
+            ),
             #[cfg(target_os = "macos")]
-            ("Helvetica", vec![
-                "/System/Library/Fonts/Helvetica.ttc",
-                "/System/Library/Fonts/HelveticaNeue.ttc",
-            ]),
+            (
+                "Helvetica",
+                vec![
+                    "/System/Library/Fonts/Helvetica.ttc",
+                    "/System/Library/Fonts/HelveticaNeue.ttc",
+                ],
+            ),
             #[cfg(target_os = "macos")]
-            ("Helvetica Neue", vec![
-                "/System/Library/Fonts/HelveticaNeue.ttc",
-            ]),
+            (
+                "Helvetica Neue",
+                vec!["/System/Library/Fonts/HelveticaNeue.ttc"],
+            ),
             #[cfg(target_os = "macos")]
-            ("PingFang SC", vec![
-                "/System/Library/Fonts/PingFang.ttc",
-            ]),
+            ("PingFang SC", vec!["/System/Library/Fonts/PingFang.ttc"]),
             #[cfg(target_os = "macos")]
-            ("Heiti SC", vec![
-                "/System/Library/Fonts/STHeiti Light.ttc",
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-            ]),
+            (
+                "Heiti SC",
+                vec![
+                    "/System/Library/Fonts/STHeiti Light.ttc",
+                    "/System/Library/Fonts/STHeiti Medium.ttc",
+                ],
+            ),
             #[cfg(target_os = "macos")]
-            ("Hiragino Sans GB", vec![
-                "/System/Library/Fonts/Hiragino Sans GB W3.otf",
-                "/System/Library/Fonts/Hiragino Sans GB W6.otf",
-            ]),
+            (
+                "Hiragino Sans GB",
+                vec![
+                    "/System/Library/Fonts/Hiragino Sans GB W3.otf",
+                    "/System/Library/Fonts/Hiragino Sans GB W6.otf",
+                ],
+            ),
             #[cfg(target_os = "macos")]
-            ("Courier", vec![
-                "/System/Library/Fonts/Supplemental/Courier New.ttf",
-                "/System/Library/Fonts/Courier.ttc",
-            ]),
+            (
+                "Courier",
+                vec![
+                    "/System/Library/Fonts/Supplemental/Courier New.ttf",
+                    "/System/Library/Fonts/Courier.ttc",
+                ],
+            ),
             #[cfg(target_os = "macos")]
-            ("Courier New", vec![
-                "/System/Library/Fonts/Supplemental/Courier New.ttf",
-            ]),
+            (
+                "Courier New",
+                vec!["/System/Library/Fonts/Supplemental/Courier New.ttf"],
+            ),
             #[cfg(target_os = "macos")]
-            ("Menlo", vec![
-                "/System/Library/Fonts/Menlo.ttc",
-            ]),
+            ("Menlo", vec!["/System/Library/Fonts/Menlo.ttc"]),
             #[cfg(target_os = "macos")]
-            ("Monaco", vec![
-                "/System/Library/Fonts/Monaco.ttf",
-            ]),
+            ("Monaco", vec!["/System/Library/Fonts/Monaco.ttf"]),
             #[cfg(target_os = "macos")]
-            ("Times New Roman", vec![
-                "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
-            ]),
+            (
+                "Times New Roman",
+                vec!["/System/Library/Fonts/Supplemental/Times New Roman.ttf"],
+            ),
             #[cfg(target_os = "macos")]
-            ("Georgia", vec![
-                "/System/Library/Fonts/Supplemental/Georgia.ttf",
-            ]),
+            (
+                "Georgia",
+                vec!["/System/Library/Fonts/Supplemental/Georgia.ttf"],
+            ),
             // Linux
             #[cfg(target_os = "linux")]
-            ("DejaVu Sans", vec![
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-            ]),
+            (
+                "DejaVu Sans",
+                vec![
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                ],
+            ),
             #[cfg(target_os = "linux")]
-            ("Liberation Sans", vec![
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            ]),
+            (
+                "Liberation Sans",
+                vec!["/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"],
+            ),
             #[cfg(target_os = "linux")]
-            ("Noto Sans CJK SC", vec![
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-            ]),
+            (
+                "Noto Sans CJK SC",
+                vec![
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+                ],
+            ),
             #[cfg(target_os = "linux")]
-            ("WenQuanYi Micro Hei", vec![
-                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            ]),
+            (
+                "WenQuanYi Micro Hei",
+                vec!["/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"],
+            ),
             // Windows
             #[cfg(target_os = "windows")]
-            ("Microsoft YaHei", vec![
-                "C:/Windows/Fonts/msyh.ttc",
-                "C:/Windows/Fonts/msyh.ttf",
-                "C:/Windows/Fonts/msyhbd.ttc",
-            ]),
+            (
+                "Microsoft YaHei",
+                vec![
+                    "C:/Windows/Fonts/msyh.ttc",
+                    "C:/Windows/Fonts/msyh.ttf",
+                    "C:/Windows/Fonts/msyhbd.ttc",
+                ],
+            ),
             #[cfg(target_os = "windows")]
-            ("SimHei", vec![
-                "C:/Windows/Fonts/simhei.ttf",
-            ]),
+            ("SimHei", vec!["C:/Windows/Fonts/simhei.ttf"]),
             #[cfg(target_os = "windows")]
-            ("SimSun", vec![
-                "C:/Windows/Fonts/simsun.ttc",
-            ]),
+            ("SimSun", vec!["C:/Windows/Fonts/simsun.ttc"]),
         ]
     })
 }
@@ -209,15 +232,11 @@ fn collect_font_names(data: &[u8]) -> Vec<String> {
                     }
                     names.push(s);
                 }
-                name_id::SUBFAMILY => {
-                    if subfamily.is_none() {
-                        subfamily = Some(s);
-                    }
+                name_id::SUBFAMILY if subfamily.is_none() => {
+                    subfamily = Some(s);
                 }
-                name_id::TYPOGRAPHIC_SUBFAMILY => {
-                    if typo_subfamily.is_none() {
-                        typo_subfamily = Some(s);
-                    }
+                name_id::TYPOGRAPHIC_SUBFAMILY if typo_subfamily.is_none() => {
+                    typo_subfamily = Some(s);
                 }
                 _ => {}
             }
@@ -250,7 +269,10 @@ fn collect_font_files(dir: &Path, out: &mut Vec<(PathBuf, u64, u64)>, depth: usi
             continue;
         }
         let is_font = matches!(
-            path.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref(),
+            path.extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_lowercase)
+                .as_deref(),
             Some("ttf") | Some("otf") | Some("ttc") | Some("otc")
         );
         if !is_font {
@@ -348,7 +370,11 @@ fn save_font_cache(path: &Path, signature: u64, map: &HashMap<String, String>) {
     out.push_str(&format!("SIG={}\n", signature));
     for (name, font_path) in map {
         // 名称/路径若含制表符或换行则跳过，避免破坏行格式
-        if name.contains('\t') || name.contains('\n') || font_path.contains('\t') || font_path.contains('\n') {
+        if name.contains('\t')
+            || name.contains('\n')
+            || font_path.contains('\t')
+            || font_path.contains('\n')
+        {
             continue;
         }
         out.push_str(name);
@@ -373,7 +399,8 @@ fn build_index_from_files(files: &[(PathBuf, u64, u64)]) -> HashMap<String, Stri
         let path_str = path.to_string_lossy().to_string();
         for name in collect_font_names(&data) {
             // 先注册者优先（系统目录先于用户目录时不会被覆盖）
-            map.entry(name.to_lowercase()).or_insert_with(|| path_str.clone());
+            map.entry(name.to_lowercase())
+                .or_insert_with(|| path_str.clone());
         }
     }
     map
@@ -566,7 +593,13 @@ pub fn apply_rcparams_font(py: Python) -> PyResult<Option<String>> {
             }
         };
 
-        if rsplotlib.call_method1("register_sans_serif_font", (path.clone(), family.to_string())).is_ok() {
+        if rsplotlib
+            .call_method1(
+                "register_sans_serif_font",
+                (path.clone(), family.to_string()),
+            )
+            .is_ok()
+        {
             last_registered = Some(path);
         }
     }
