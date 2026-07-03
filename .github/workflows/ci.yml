@@ -32,6 +32,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Linux runner 默认不带字体，plotters 渲染文本会报 FontUnavailable。
+      # DejaVu 会安装到 /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf，正是解析器的 Linux 首选路径。
+      - name: Install fonts (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
