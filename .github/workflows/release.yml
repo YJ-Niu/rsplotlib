@@ -125,9 +125,8 @@ jobs:
       - name: Publish
         uses: PyO3/maturin-action@v1
         env:
-          # 在 GitHub 仓库 Settings → Secrets and variables → Actions 中
-          # 新建 PYPI_API_TOKEN，值为 PyPI 生成的 token（以 pypi- 开头）。
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          # 仓库 Settings → Secrets and variables → Actions 中的 secret 名（值为 PyPI token，以 pypi- 开头）。
+          MATURIN_PYPI_TOKEN: ${{ secrets.YJ_NIU }}
         with:
           command: upload
           args: --non-interactive --skip-existing dist/*

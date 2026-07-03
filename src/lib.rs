@@ -83,11 +83,15 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     #[cfg(target_os = "linux")]
     {
-        // Linux: 优先注册 Noto Sans CJK（多数发行版自带，覆盖 CJK + 拉丁）
+        // Linux: 优先注册 Noto Sans CJK（多数发行版自带，覆盖 CJK + 拉丁），
+        // 若系统未安装 Noto，则退回到常见的 DejaVu Sans 或 Liberation Sans。
         let font_candidates: Vec<String> = vec![
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc".to_string(),
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc".to_string(),
             "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc".to_string(),
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf".to_string(),
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf".to_string(),
         ];
         let mut registered = false;
         for path in &font_candidates {
@@ -101,7 +105,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             }
         }
         if !registered {
-            // 退回 DejaVu Sans
+            // 退回 DejaVu Sans (可能来自虚拟环境中的 matplotlib 数据)
             for prefix in [
                 std::env::var("VIRTUAL_ENV").ok(),
                 Some(
