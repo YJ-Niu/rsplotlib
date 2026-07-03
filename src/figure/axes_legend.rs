@@ -2,16 +2,16 @@
 //!
 //! 在指定位置绘制图例框，包含每个 plot 调用对应的标签、线段、marker。
 
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::prelude::*;
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, VPos};
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 
-use crate::figure::axes::scale_font;
 use crate::core::colors::{RgbColor, to_plotters_color};
 use crate::core::marker::draw_marker;
+use crate::figure::axes::scale_font;
 use crate::utils::font_stack;
 
 /// 渲染图例（如果设置了 `legend_loc` 且 `legend_labels` 非空）
@@ -49,21 +49,11 @@ where
                 let cy = (y_min + y_max) / 2.0;
                 (cx, cy, HPos::Center, VPos::Center)
             }
-            "right" => {
-                (x_max, (y_min + y_max) / 2.0, HPos::Right, VPos::Center)
-            }
-            "center left" => {
-                (x_min, (y_min + y_max) / 2.0, HPos::Left, VPos::Center)
-            }
-            "center right" => {
-                (x_max, (y_min + y_max) / 2.0, HPos::Right, VPos::Center)
-            }
-            "lower center" => {
-                ((x_min + x_max) / 2.0, y_min, HPos::Center, VPos::Bottom)
-            }
-            "upper center" => {
-                ((x_min + x_max) / 2.0, y_max, HPos::Center, VPos::Top)
-            }
+            "right" => (x_max, (y_min + y_max) / 2.0, HPos::Right, VPos::Center),
+            "center left" => (x_min, (y_min + y_max) / 2.0, HPos::Left, VPos::Center),
+            "center right" => (x_max, (y_min + y_max) / 2.0, HPos::Right, VPos::Center),
+            "lower center" => ((x_min + x_max) / 2.0, y_min, HPos::Center, VPos::Bottom),
+            "upper center" => ((x_min + x_max) / 2.0, y_max, HPos::Center, VPos::Top),
             _ => {
                 let try_x = x_max - (x_max - x_min) * 0.3;
                 let try_y = y_max - (y_max - y_min) * 0.1;
@@ -86,25 +76,23 @@ where
         let (box_y1, box_y2) = match v_pos {
             VPos::Top => (y_anchor - legend_height, y_anchor),
             VPos::Bottom => (y_anchor, y_anchor + legend_height),
-            VPos::Center => (y_anchor - legend_height / 2.0, y_anchor + legend_height / 2.0),
+            VPos::Center => (
+                y_anchor - legend_height / 2.0,
+                y_anchor + legend_height / 2.0,
+            ),
         };
 
         let bg_fill: ShapeStyle = RGBColor(255, 255, 255).mix(0.85).filled();
         let bg_border: ShapeStyle = RGBColor(180, 180, 180).stroke_width(1);
 
-        let bg_rect = Rectangle::new(
-            [(box_x1, box_y1), (box_x2, box_y2)],
-            bg_fill,
-        );
+        let bg_rect = Rectangle::new([(box_x1, box_y1), (box_x2, box_y2)], bg_fill);
         let bg_elements = vec![
             bg_rect,
-            Rectangle::new(
-                [(box_x1, box_y1), (box_x2, box_y2)],
-                bg_border,
-            ),
+            Rectangle::new([(box_x1, box_y1), (box_x2, box_y2)], bg_border),
         ];
         for elem in bg_elements {
-            chart.draw_series(std::iter::once(elem))
+            chart
+                .draw_series(std::iter::once(elem))
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend bg: {}", e)))?;
         }
 
@@ -129,11 +117,20 @@ where
                     let mut pos = x_line_start;
                     let mut drawing = true;
                     while pos < x_line_end {
-                        let seg_end = if drawing { (pos + dash_len).min(x_line_end) } else { (pos + gap_len).min(x_line_end) };
+                        let seg_end = if drawing {
+                            (pos + dash_len).min(x_line_end)
+                        } else {
+                            (pos + gap_len).min(x_line_end)
+                        };
                         if drawing {
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(pos, y_pos), (seg_end, y_pos)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Legend dashed: {}", e)))?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(pos, y_pos), (seg_end, y_pos)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Legend dashed: {}", e))
+                                })?;
                         }
                         pos = seg_end;
                         drawing = !drawing;
@@ -145,11 +142,20 @@ where
                     let mut pos = x_line_start;
                     let mut drawing = true;
                     while pos < x_line_end {
-                        let seg_end = if drawing { (pos + dot_len).min(x_line_end) } else { (pos + gap_len).min(x_line_end) };
+                        let seg_end = if drawing {
+                            (pos + dot_len).min(x_line_end)
+                        } else {
+                            (pos + gap_len).min(x_line_end)
+                        };
                         if drawing {
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![(pos, y_pos), (seg_end, y_pos)], line_style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Legend dotted: {}", e)))?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    vec![(pos, y_pos), (seg_end, y_pos)],
+                                    line_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Legend dotted: {}", e))
+                                })?;
                         }
                         pos = seg_end;
                         drawing = !drawing;
@@ -164,9 +170,14 @@ where
                     while pos < x_line_end {
                         let mark_len = if is_dash { dash_len } else { dot_len };
                         let seg_end = (pos + mark_len).min(x_line_end);
-                        chart.draw_series(std::iter::once(PathElement::new(
-                            vec![(pos, y_pos), (seg_end, y_pos)], line_style,
-                        ))).map_err(|e| PyRuntimeError::new_err(format!("Legend dash-dot: {}", e)))?;
+                        chart
+                            .draw_series(std::iter::once(PathElement::new(
+                                vec![(pos, y_pos), (seg_end, y_pos)],
+                                line_style,
+                            )))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("Legend dash-dot: {}", e))
+                            })?;
                         pos = seg_end;
                         let gap_end = (pos + gap_len).min(x_line_end);
                         pos = gap_end;
@@ -175,9 +186,14 @@ where
                 }
                 _ => {
                     // 实线
-                    chart.draw_series(std::iter::once(PathElement::new(
-                        vec![(x_line_start, y_pos), (x_line_end, y_pos)], line_style,
-                    ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend line: {}", e)))?;
+                    chart
+                        .draw_series(std::iter::once(PathElement::new(
+                            vec![(x_line_start, y_pos), (x_line_end, y_pos)],
+                            line_style,
+                        )))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw legend line: {}", e))
+                        })?;
                 }
             }
 
@@ -185,20 +201,24 @@ where
                 && !mkr.is_empty()
             {
                 let mid_x = (x_line_start + x_line_end) / 2.0;
-                draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb, rgb)
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e)))?;
+                draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb, rgb).map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e))
+                })?;
             }
 
             let legend_family = font_stack::select_family(label);
             let legend_font: TextStyle = (legend_family.as_str(), scale_font(11.0, font_scale))
                 .into_font()
-                .color(&BLACK)
-                .into();
-            chart.draw_series(std::iter::once(plotters::element::Text::new(
-                label.to_string(),
-                (x_text, y_pos),
-                legend_font,
-            ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e)))?;
+                .color(&BLACK);
+            chart
+                .draw_series(std::iter::once(plotters::element::Text::new(
+                    label.to_string(),
+                    (x_text, y_pos),
+                    legend_font,
+                )))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e))
+                })?;
         }
     }
     Ok(())

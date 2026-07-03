@@ -1,7 +1,7 @@
+use plotters::prelude::*;
+use plotters::style::ShapeStyle;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use plotters::style::ShapeStyle;
-use plotters::prelude::*;
 
 #[derive(Clone, Copy)]
 pub struct RgbColor(pub u8, pub u8, pub u8);
@@ -21,8 +21,8 @@ const DEFAULT_COLOR_VALUES: [RgbColor; 10] = [
 ];
 
 pub const DEFAULT_COLORS: &[&str] = &[
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+    "#bcbd22", "#17becf",
 ];
 
 /// 颜色名到 RgbColor 的静态映射，直接匹配全名避免首字母冲突（如 "black" 以 b 开头但不是 blue）
@@ -221,7 +221,9 @@ pub fn to_plotters_color(c: RgbColor) -> RGBColor {
 
 pub fn median(data: &[f64]) -> f64 {
     let n = data.len();
-    if n == 0 { return 0.0; }
+    if n == 0 {
+        return 0.0;
+    }
     if n.is_multiple_of(2) {
         (data[n / 2 - 1] + data[n / 2]) / 2.0
     } else {

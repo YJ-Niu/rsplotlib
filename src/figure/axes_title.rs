@@ -4,15 +4,15 @@
 //! 字体大小根据 plotters 字体可见字符高度与 matplotlib 的差异做 1.20 倍补偿，
 //! 以匹配 matplotlib 的视觉高度。
 
+use plotters::coord::Shift;
+use plotters::coord::types::RangedCoordf64;
+use plotters::prelude::*;
+use plotters::style::text_anchor::{HPos, Pos, VPos};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use plotters::coord::types::RangedCoordf64;
-use plotters::coord::Shift;
-use plotters::prelude::*;
-use plotters::style::text_anchor::{HPos, VPos, Pos};
 
-use crate::figure::axes::scale_font;
 use crate::core::colors::RgbColor;
+use crate::figure::axes::scale_font;
 use crate::utils::font_stack;
 
 /// 渲染 axes 标题
@@ -59,7 +59,11 @@ where
     // 偏移量设为数据范围的极小比例，确保文字位于 margin_top 区域内
     let title_y = y_max + y_range * 0.01;
     // 使用用户指定的 fontsize；若未指定则取 matplotlib 默认 12pt
-    let title_size = if title_fontsize > 0.0 { title_fontsize } else { 12.0 };
+    let title_size = if title_fontsize > 0.0 {
+        title_fontsize
+    } else {
+        12.0
+    };
     // plotters 的 ab_glyph 字体可见字符高度约 0.94em，而 matplotlib DejaVu Sans 约 1.13em。
     // 为匹配 matplotlib 视觉高度，乘以 1.25 补偿。
     // 优先使用用户通过 fontdict{"family": ...} 指定的字体族，否则按文本自动选择。
@@ -68,11 +72,13 @@ where
     let rgb = RGBColor(title_color.0, title_color.1, title_color.2);
     let colored_font = font.color(&rgb);
     let text_style: TextStyle = colored_font.pos(Pos::new(h_pos, VPos::Bottom));
-    chart.draw_series(std::iter::once(plotters::element::Text::new(
-        title.to_string(),
-        (title_x, title_y),
-        text_style,
-    ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw title: {}", e)))?;
+    chart
+        .draw_series(std::iter::once(plotters::element::Text::new(
+            title.to_string(),
+            (title_x, title_y),
+            text_style,
+        )))
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw title: {}", e)))?;
     Ok(())
 }
 
@@ -116,13 +122,21 @@ where
         "right" => (data_right, HPos::Right),
         _ => ((data_left + data_right) / 2.0, HPos::Center),
     };
-    let size = if fontsize > 0.0 { fontsize } else { default_size };
+    let size = if fontsize > 0.0 {
+        fontsize
+    } else {
+        default_size
+    };
     let fam = font_stack::resolve_font_family(text, family);
     let font: FontDesc = (fam.as_str(), size).into();
     let rgb = RGBColor(color.0, color.1, color.2);
     let style: TextStyle = font.color(&rgb).pos(Pos::new(h_pos, VPos::Bottom));
-    root.draw_text(text, &style, (anchor_x.round() as i32, anchor_y.round() as i32))
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw xlabel: {}", e)))?;
+    root.draw_text(
+        text,
+        &style,
+        (anchor_x.round() as i32, anchor_y.round() as i32),
+    )
+    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw xlabel: {}", e)))?;
     Ok(())
 }
 
@@ -164,7 +178,11 @@ where
         "bottom" => (data_bottom, HPos::Left),
         _ => ((data_top + data_bottom) / 2.0, HPos::Center),
     };
-    let size = if fontsize > 0.0 { fontsize } else { default_size };
+    let size = if fontsize > 0.0 {
+        fontsize
+    } else {
+        default_size
+    };
     let fam = font_stack::resolve_font_family(text, family);
     let font: FontDesc = (fam.as_str(), size).into();
     let rgb = RGBColor(color.0, color.1, color.2);
@@ -173,7 +191,11 @@ where
         .color(&rgb)
         .transform(FontTransform::Rotate270)
         .pos(Pos::new(h_pos, VPos::Top));
-    root.draw_text(text, &style, (anchor_x.round() as i32, anchor_y.round() as i32))
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw ylabel: {}", e)))?;
+    root.draw_text(
+        text,
+        &style,
+        (anchor_x.round() as i32, anchor_y.round() as i32),
+    )
+    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw ylabel: {}", e)))?;
     Ok(())
 }

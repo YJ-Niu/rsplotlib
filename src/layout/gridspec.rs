@@ -87,7 +87,10 @@ impl GridSpec {
         }
     }
 
-    fn get_subplot_params(&self, _figure: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<(String, Option<f64>)>> {
+    fn get_subplot_params(
+        &self,
+        _figure: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Vec<(String, Option<f64>)>> {
         Ok(vec![
             ("left".to_string(), self.left),
             ("bottom".to_string(), self.bottom),
@@ -98,7 +101,11 @@ impl GridSpec {
         ])
     }
 
-    fn tight_layout(&self, _figure: Option<&Bound<'_, PyAny>>, _renderer: Option<&Bound<'_, PyAny>>) {
+    fn tight_layout(
+        &self,
+        _figure: Option<&Bound<'_, PyAny>>,
+        _renderer: Option<&Bound<'_, PyAny>>,
+    ) {
         // 占位实现
     }
 }
@@ -160,7 +167,13 @@ pub struct SubplotSpec {
 impl SubplotSpec {
     #[new]
     #[pyo3(signature = (gridspec, row_start=0, row_end=1, col_start=0, col_end=1))]
-    fn new(gridspec: Option<GridSpec>, row_start: i32, row_end: i32, col_start: i32, col_end: i32) -> Self {
+    fn new(
+        gridspec: Option<GridSpec>,
+        row_start: i32,
+        row_end: i32,
+        col_start: i32,
+        col_end: i32,
+    ) -> Self {
         let (num_rows, num_cols) = if let Some(ref gs) = gridspec {
             (gs.nrows, gs.ncols)
         } else {

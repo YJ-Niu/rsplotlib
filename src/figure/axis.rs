@@ -1,5 +1,5 @@
-use pyo3::prelude::*;
 use crate::figure::axes::Axes;
+use pyo3::prelude::*;
 
 #[pyclass]
 pub struct Axis {
@@ -51,7 +51,15 @@ impl Axis {
 
     #[allow(unused_variables)]
     #[pyo3(signature = (visible=None, which="major", ls=None, c=None, lw=None))]
-    fn grid(&mut self, py: Python<'_>, visible: Option<bool>, which: &str, ls: Option<&str>, c: Option<&str>, lw: Option<f64>) {
+    fn grid(
+        &mut self,
+        py: Python<'_>,
+        visible: Option<bool>,
+        which: &str,
+        ls: Option<&str>,
+        c: Option<&str>,
+        lw: Option<f64>,
+    ) {
         self.grid_visible = visible.unwrap_or(true);
         if "minor".eq_ignore_ascii_case(which) || "both".eq_ignore_ascii_case(which) {
             self.minor_grid_color = c.map(|s| s.to_string());
@@ -225,7 +233,14 @@ impl SpineDict {
     pub fn new() -> Self {
         let names = ["top", "bottom", "left", "right"];
         SpineDict {
-            spines: names.iter().map(|n| Spine { name: n.to_string(), visible: true, parent: None }).collect(),
+            spines: names
+                .iter()
+                .map(|n| Spine {
+                    name: n.to_string(),
+                    visible: true,
+                    parent: None,
+                })
+                .collect(),
             parent: None,
         }
     }
@@ -239,7 +254,10 @@ impl SpineDict {
     }
 
     fn items(&self, _py: Python<'_>) -> Vec<(String, Spine)> {
-        self.spines.iter().map(|s| (s.name.clone(), s.clone())).collect()
+        self.spines
+            .iter()
+            .map(|s| (s.name.clone(), s.clone()))
+            .collect()
     }
 }
 

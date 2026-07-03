@@ -1,3 +1,6 @@
+use owned_ttf_parser::{AsFaceRef, OwnedFace};
+use pyo3::prelude::*;
+use std::sync::OnceLock;
 /// 全局字体栈，支持多字体的 glyph 回退（fallback）。
 ///
 /// # 原理
@@ -14,10 +17,7 @@
 /// - 含 CJK 的文本（"中文测试"、"中文 ABC"）→ 使用第二个字体（Arial Unicode MS），
 ///   该字体同时覆盖拉丁和 CJK 字符。
 use std::sync::RwLock;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use pyo3::prelude::*;
-use owned_ttf_parser::{OwnedFace, AsFaceRef};
 
 /// 字体栈中的一条记录
 struct FontEntry {
@@ -52,21 +52,19 @@ pub fn extract_family_name(data: &[u8]) -> Option<String> {
             Err(_) => break,
         };
         for name in face.names() {
-            if name.name_id == owned_ttf_parser::name_id::TYPOGRAPHIC_FAMILY {
-                if let Some(s) = name.to_string() {
-                    if !s.is_empty() {
-                        return Some(s);
-                    }
-                }
+            if name.name_id == owned_ttf_parser::name_id::TYPOGRAPHIC_FAMILY
+                && let Some(s) = name.to_string()
+                && !s.is_empty()
+            {
+                return Some(s);
             }
         }
         for name in face.names() {
-            if name.name_id == owned_ttf_parser::name_id::FAMILY {
-                if let Some(s) = name.to_string() {
-                    if !s.is_empty() {
-                        return Some(s);
-                    }
-                }
+            if name.name_id == owned_ttf_parser::name_id::FAMILY
+                && let Some(s) = name.to_string()
+                && !s.is_empty()
+            {
+                return Some(s);
             }
         }
     }
@@ -76,7 +74,8 @@ pub fn extract_family_name(data: &[u8]) -> Option<String> {
 /// 检查某个字体是否包含指定文本中的**所有**字符。
 /// 使用预解析的 OwnedFace，避免重复解析字体文件。
 fn can_render_text(face: &OwnedFace, text: &str) -> bool {
-    text.chars().all(|c| face.as_face_ref().glyph_index(c).is_some())
+    text.chars()
+        .all(|c| face.as_face_ref().glyph_index(c).is_some())
 }
 
 /// 将一个字体添加到全局字体栈。
@@ -137,10 +136,11 @@ pub fn select_family(text: &str) -> String {
 /// 这是渲染端统一的"字体选择入口"，所有硬编码 "sans-serif" 的地方都应替换为
 /// 此函数调用。
 pub fn resolve_font_family(text: &str, explicit_family: Option<&str>) -> String {
-    if let Some(family) = explicit_family {
-        if !family.is_empty() && family != "sans-serif" {
-            return family.to_string();
-        }
+    if let Some(family) = explicit_family
+        && !family.is_empty()
+        && family != "sans-serif"
+    {
+        return family.to_string();
     }
     select_family(text)
 }

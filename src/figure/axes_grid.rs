@@ -5,10 +5,10 @@
 //! - `draw_thick_polyline()`: 使用填充多边形绘制指定像素宽度的实线（后备方案）
 //! - `filter_minor_ticks()`: 过滤与主刻度位置重叠的副刻度，避免副网格线覆盖主网格线
 
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::prelude::*;
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 
 use crate::core::colors::{RgbColor, to_plotters_color};
 
@@ -19,10 +19,14 @@ pub fn filter_minor_ticks(minor: &[f64], major: &[f64]) -> Vec<f64> {
     if major.len() < 2 {
         return minor.to_vec();
     }
-    let tol = major.windows(2).map(|w| (w[1] - w[0]).abs())
-        .fold(f64::INFINITY, f64::min) * 1e-6;
+    let tol = major
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(f64::INFINITY, f64::min)
+        * 1e-6;
     let tol = tol.max(1e-9);
-    minor.iter()
+    minor
+        .iter()
         .filter(|m| !major.iter().any(|mj| (*m - mj).abs() < tol))
         .cloned()
         .collect()
@@ -90,9 +94,21 @@ where
     let dash_px = (stroke_w as f64 * 4.0).max(2.0);
     let gap_px = (stroke_w as f64 * 2.0).max(2.0);
     let dot_px = (stroke_w as f64 * 1.0).max(1.0);
-    let dash_len = if vertical { dash_px * y_per_pix_p } else { dash_px * x_per_pix_p };
-    let gap_len = if vertical { gap_px * y_per_pix_p } else { gap_px * x_per_pix_p };
-    let dot_len = if vertical { dot_px * y_per_pix_p } else { dot_px * x_per_pix_p };
+    let dash_len = if vertical {
+        dash_px * y_per_pix_p
+    } else {
+        dash_px * x_per_pix_p
+    };
+    let gap_len = if vertical {
+        gap_px * y_per_pix_p
+    } else {
+        gap_px * x_per_pix_p
+    };
+    let dot_len = if vertical {
+        dot_px * y_per_pix_p
+    } else {
+        dot_px * x_per_pix_p
+    };
 
     match ls {
         Some("--") => {
@@ -112,9 +128,11 @@ where
                         if drawing {
                             let p1 = (path[0].0 + unit_x * pos, path[0].1 + unit_y * pos);
                             let p2 = (path[0].0 + unit_x * end_pos, path[0].1 + unit_y * end_pos);
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![p1, p2], style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Dashed grid: {}", e)))?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(vec![p1, p2], style)))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Dashed grid: {}", e))
+                                })?;
                         }
                         pos = end_pos;
                         drawing = !drawing;
@@ -139,9 +157,11 @@ where
                         if drawing {
                             let p1 = (path[0].0 + unit_x * pos, path[0].1 + unit_y * pos);
                             let p2 = (path[0].0 + unit_x * end_pos, path[0].1 + unit_y * end_pos);
-                            chart.draw_series(std::iter::once(PathElement::new(
-                                vec![p1, p2], style,
-                            ))).map_err(|e| PyRuntimeError::new_err(format!("Dotted grid: {}", e)))?;
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(vec![p1, p2], style)))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Dotted grid: {}", e))
+                                })?;
                         }
                         pos = end_pos;
                         drawing = !drawing;
@@ -152,7 +172,8 @@ where
         _ => {
             // 实线网格
             for path in paths {
-                chart.draw_series(std::iter::once(PathElement::new(path, style)))
+                chart
+                    .draw_series(std::iter::once(PathElement::new(path, style)))
                     .map_err(|e| PyRuntimeError::new_err(format!("Grid line: {}", e)))?;
             }
         }
@@ -174,14 +195,18 @@ pub fn draw_thick_polyline<DB: DrawingBackend>(
 where
     DB::ErrorType: 'static,
 {
-    if points.len() < 2 || width_px < 1 { return Ok(()); }
+    if points.len() < 2 || width_px < 1 {
+        return Ok(());
+    }
     let rgb = to_plotters_color(color);
     // 获取绘图区域的像素尺寸，用于计算像素到数据坐标的换算
     let area = chart.plotting_area();
     let dim = area.dim_in_pixel();
     let pw = dim.0 as f64;
     let ph = dim.1 as f64;
-    if pw < 1.0 || ph < 1.0 { return Ok(()); }
+    if pw < 1.0 || ph < 1.0 {
+        return Ok(());
+    }
     // 数据坐标每像素对应的数据单位
     let x_range = x_max - x_min;
     let y_range = y_max - y_min;
@@ -204,7 +229,9 @@ where
         let dx = x2 - x1;
         let dy = y2 - y1;
         let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-10 { continue; }
+        if len < 1e-10 {
+            continue;
+        }
         // 单位垂直向量在数据坐标空间中的偏移
         let perp_x = -dy / len * half_w_adj * x_per_pix;
         let perp_y = dx / len * half_w_adj * y_per_pix;
@@ -214,7 +241,8 @@ where
             (x2 - perp_x, y2 - perp_y),
             (x2 + perp_x, y2 + perp_y),
         ];
-        chart.draw_series(std::iter::once(Polygon::new(poly, fill)))
+        chart
+            .draw_series(std::iter::once(Polygon::new(poly, fill)))
             .map_err(|e| PyRuntimeError::new_err(format!("Thick line: {}", e)))?;
     }
     Ok(())

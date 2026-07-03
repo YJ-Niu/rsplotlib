@@ -1,11 +1,13 @@
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
-use pyo3::prelude::*;
-use pyo3::types::{PyList, PyAny, PyTuple};
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::prelude::*;
+use pyo3::types::{PyAny, PyList, PyTuple};
 
-use crate::core::colors::{RgbColor, parse_color, default_color, default_color_str, to_plotters_color};
+use crate::core::colors::{
+    RgbColor, default_color, default_color_str, parse_color, to_plotters_color,
+};
 use crate::core::elements::PlotElement;
 use crate::utils::font_stack;
 
@@ -255,7 +257,10 @@ impl Clone for Axes {
 /// 返回 (marker, linestyle, color) 三元组，如果字符串不是 fmt 格式则返回 None
 fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
     // 已知 marker 字符
-    const MARKERS: &[&str] = &["o", "s", "^", "v", "D", "d", "*", "+", "x", ".", ",", "|", "_", "h", "H", "p", "P", "<", ">", "1", "2", "3", "4"];
+    const MARKERS: &[&str] = &[
+        "o", "s", "^", "v", "D", "d", "*", "+", "x", ".", ",", "|", "_", "h", "H", "p", "P", "<",
+        ">", "1", "2", "3", "4",
+    ];
     // 已知 color
     const COLORS: &[&str] = &["b", "g", "r", "c", "m", "y", "k", "w"];
 
@@ -281,7 +286,7 @@ fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option
 
     // 解析 color（单字符）
     if i < fmt.len() {
-        let c = &fmt[i..i+1];
+        let c = &fmt[i..i + 1];
         if COLORS.contains(&c) {
             found_color = Some(c.to_string());
             i += 1;
@@ -290,14 +295,14 @@ fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option
 
     // 解析 marker
     if i < fmt.len() {
-        let m1 = &fmt[i..i+1];
+        let m1 = &fmt[i..i + 1];
         if MARKERS.contains(&m1) {
             found_marker = Some(m1.to_string());
             i += 1;
         }
         // 检查是否还有更多 marker 字符
         while i < fmt.len() {
-            let m = &fmt[i..i+1];
+            let m = &fmt[i..i + 1];
             if MARKERS.contains(&m) {
                 found_marker = Some(m.to_string());
                 i += 1;
@@ -462,7 +467,8 @@ impl Axes {
         // matplotlib 兼容：linestyle='' 或 'None'/'none' 都表示无线条
         let linestyle_eff = if linestyle.is_empty()
             || linestyle.eq_ignore_ascii_case("none")
-            || linestyle.eq_ignore_ascii_case("null") {
+            || linestyle.eq_ignore_ascii_case("null")
+        {
             " ".to_string()
         } else {
             linestyle_val.clone()
@@ -482,8 +488,10 @@ impl Axes {
             markeredgecolor,
         });
         if let Some(lbl) = actual_label {
-            let c = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, c, linestyle_val, None, linewidth));
+            let c =
+                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, c, linestyle_val, None, linewidth));
         }
         Ok(())
     }
@@ -518,8 +526,10 @@ impl Axes {
             color_idx: idx,
         });
         if let Some(lbl) = label {
-            let col = parse_color(&c.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), Some(marker_val), 1.5));
+            let col =
+                parse_color(&c.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, "-".to_string(), Some(marker_val), 1.5));
         }
         Ok(())
     }
@@ -548,8 +558,10 @@ impl Axes {
             color_idx: idx,
         });
         if let Some(lbl) = label {
-            let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+            let col =
+                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, "-".to_string(), None, 1.5));
         }
         Ok(())
     }
@@ -578,8 +590,10 @@ impl Axes {
             color_idx: idx,
         });
         if let Some(lbl) = label {
-            let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+            let col =
+                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, "-".to_string(), None, 1.5));
         }
         Ok(())
     }
@@ -601,31 +615,46 @@ impl Axes {
     ) -> PyResult<(Py<PyAny>, Vec<f64>, Option<Vec<Vec<f64>>>)> {
         let x_parsed: Vec<Vec<f64>> = Self::parse_hist_data(&x)?;
         let bins = bins.unwrap_or_else(|| pyo3::types::PyInt::new(py, 10).as_any().clone());
-        let (num_bins, custom_edges): (usize, Option<Vec<f64>>) = if let Ok(n) = bins.extract::<usize>() {
-            (n, None)
-        } else if let Ok(n) = bins.extract::<i64>() {
-            if n <= 0 {
-                return Err(PyValueError::new_err("bins must be positive"));
-            }
-            (n as usize, None)
-        } else if let Ok(edges) = py_to_vec_f64(&bins) {
-            if edges.len() < 2 {
-                return Err(PyValueError::new_err("bin_edges must have at least 2 elements"));
-            }
-            (edges.len() - 1, Some(edges))
-        } else if let Ok(edges) = bins.extract::<Vec<i64>>() {
-            if edges.len() < 2 {
-                return Err(PyValueError::new_err("bin_edges must have at least 2 elements"));
-            }
-            (edges.len() - 1, Some(edges.iter().map(|&x| x as f64).collect()))
-        } else if let Ok(edges) = bins.extract::<Vec<usize>>() {
-            if edges.len() < 2 {
-                return Err(PyValueError::new_err("bin_edges must have at least 2 elements"));
-            }
-            (edges.len() - 1, Some(edges.iter().map(|&x| x as f64).collect()))
-        } else {
-            return Err(PyValueError::new_err("bins must be an integer or a list of bin edges"));
-        };
+        let (num_bins, custom_edges): (usize, Option<Vec<f64>>) =
+            if let Ok(n) = bins.extract::<usize>() {
+                (n, None)
+            } else if let Ok(n) = bins.extract::<i64>() {
+                if n <= 0 {
+                    return Err(PyValueError::new_err("bins must be positive"));
+                }
+                (n as usize, None)
+            } else if let Ok(edges) = py_to_vec_f64(&bins) {
+                if edges.len() < 2 {
+                    return Err(PyValueError::new_err(
+                        "bin_edges must have at least 2 elements",
+                    ));
+                }
+                (edges.len() - 1, Some(edges))
+            } else if let Ok(edges) = bins.extract::<Vec<i64>>() {
+                if edges.len() < 2 {
+                    return Err(PyValueError::new_err(
+                        "bin_edges must have at least 2 elements",
+                    ));
+                }
+                (
+                    edges.len() - 1,
+                    Some(edges.iter().map(|&x| x as f64).collect()),
+                )
+            } else if let Ok(edges) = bins.extract::<Vec<usize>>() {
+                if edges.len() < 2 {
+                    return Err(PyValueError::new_err(
+                        "bin_edges must have at least 2 elements",
+                    ));
+                }
+                (
+                    edges.len() - 1,
+                    Some(edges.iter().map(|&x| x as f64).collect()),
+                )
+            } else {
+                return Err(PyValueError::new_err(
+                    "bins must be an integer or a list of bin edges",
+                ));
+            };
         let colors: Vec<String> = if let Some(fc) = facecolor {
             Self::parse_color_list(&fc, x_parsed.len())?
         } else if let Some(c) = color {
@@ -638,52 +667,92 @@ impl Axes {
         self.element_count += 1;
 
         // 先计算统计量（使用 &x_parsed），再 move 进 PlotElement
-        let (global_min, global_max) = x_parsed.iter().flatten().fold(
-            (f64::INFINITY, f64::NEG_INFINITY),
-            |(mn, mx), &v| (mn.min(v), mx.max(v)),
-        );
-        let global_min = if global_min.is_finite() { global_min } else { 0.0 };
-        let global_max = if global_max.is_finite() { global_max } else { 1.0 };
+        let (global_min, global_max) = x_parsed
+            .iter()
+            .flatten()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                (mn.min(v), mx.max(v))
+            });
+        let global_min = if global_min.is_finite() {
+            global_min
+        } else {
+            0.0
+        };
+        let global_max = if global_max.is_finite() {
+            global_max
+        } else {
+            1.0
+        };
         let global_range = global_max - global_min;
-        let bin_width = if global_range < 1e-10 { 1.0 } else { global_range / num_bins as f64 };
-        let n: Vec<Vec<f64>> = x_parsed.iter().map(|dataset| {
-            if dataset.is_empty() {
-                return vec![0.0; num_bins];
-            }
-            let mut counts = vec![0usize; num_bins];
-            if let Some(ref edges) = custom_edges {
-                let edge_min = edges[0];
-                let edge_max = edges[edges.len() - 1];
-                for &val in dataset {
-                    if val < edge_min || val > edge_max { continue; }
-                    let bin = edges.partition_point(|&e| e <= val).saturating_sub(1);
-                    if bin < num_bins {
+        let bin_width = if global_range < 1e-10 {
+            1.0
+        } else {
+            global_range / num_bins as f64
+        };
+        let n: Vec<Vec<f64>> = x_parsed
+            .iter()
+            .map(|dataset| {
+                if dataset.is_empty() {
+                    return vec![0.0; num_bins];
+                }
+                let mut counts = vec![0usize; num_bins];
+                if let Some(ref edges) = custom_edges {
+                    let edge_min = edges[0];
+                    let edge_max = edges[edges.len() - 1];
+                    for &val in dataset {
+                        if val < edge_min || val > edge_max {
+                            continue;
+                        }
+                        let bin = edges.partition_point(|&e| e <= val).saturating_sub(1);
+                        if bin < num_bins {
+                            counts[bin] += 1;
+                        }
+                    }
+                    let total = dataset.len() as f64;
+                    if density {
+                        counts
+                            .iter()
+                            .enumerate()
+                            .map(|(i, &c)| {
+                                let bw = edges[i + 1] - edges[i];
+                                if bw > 0.0 {
+                                    c as f64 / (total * bw)
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .collect()
+                    } else {
+                        counts.iter().map(|&c| c as f64).collect()
+                    }
+                } else {
+                    for &val in dataset {
+                        let mut bin = ((val - global_min) / bin_width).floor() as usize;
+                        if bin >= num_bins {
+                            bin = num_bins - 1;
+                        }
                         counts[bin] += 1;
                     }
+                    let total = dataset.len() as f64;
+                    counts
+                        .iter()
+                        .map(|&c| {
+                            if density {
+                                c as f64 / (total * bin_width)
+                            } else {
+                                c as f64
+                            }
+                        })
+                        .collect()
                 }
-                let total = dataset.len() as f64;
-                if density {
-                    counts.iter().enumerate().map(|(i, &c)| {
-                        let bw = edges[i + 1] - edges[i];
-                        if bw > 0.0 { c as f64 / (total * bw) } else { 0.0 }
-                    }).collect()
-                } else {
-                    counts.iter().map(|&c| c as f64).collect()
-                }
-            } else {
-                for &val in dataset {
-                    let mut bin = ((val - global_min) / bin_width).floor() as usize;
-                    if bin >= num_bins { bin = num_bins - 1; }
-                    counts[bin] += 1;
-                }
-                let total = dataset.len() as f64;
-                counts.iter().map(|&c| if density { c as f64 / (total * bin_width) } else { c as f64 }).collect()
-            }
-        }).collect();
+            })
+            .collect();
         let bin_edges: Vec<f64> = if let Some(ref edges) = custom_edges {
             edges.clone()
         } else {
-            (0..=num_bins).map(|i| global_min + i as f64 * bin_width).collect()
+            (0..=num_bins)
+                .map(|i| global_min + i as f64 * bin_width)
+                .collect()
         };
 
         let x_parsed_len = x_parsed.len();
@@ -700,18 +769,27 @@ impl Axes {
             bin_edges: custom_edges,
         });
         if let Some(lbl) = label {
-            let col = parse_color(colors.first().unwrap_or(&String::new()), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+            let col = parse_color(colors.first().unwrap_or(&String::new()), idx)
+                .unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, "-".to_string(), None, 1.5));
         }
         let n_obj: Py<PyAny> = if x_parsed_len <= 1 {
             let empty: Vec<f64> = Vec::new();
             let data = n.first().unwrap_or(&empty);
-            PyList::new(py, data.as_slice()).unwrap().into_any().unbind()
+            PyList::new(py, data.as_slice())
+                .unwrap()
+                .into_any()
+                .unbind()
         } else {
-            let lists: Vec<Bound<'_, PyList>> = n.iter()
+            let lists: Vec<Bound<'_, PyList>> = n
+                .iter()
                 .map(|inner| PyList::new(py, inner.as_slice()).unwrap())
                 .collect();
-            PyList::new(py, lists.as_slice()).unwrap().into_any().unbind()
+            PyList::new(py, lists.as_slice())
+                .unwrap()
+                .into_any()
+                .unbind()
         };
         Ok((n_obj, bin_edges, None))
     }
@@ -822,7 +900,14 @@ impl Axes {
     }
 
     #[pyo3(signature = (visible=None, c=None, ls=None, lw=None, axis=None))]
-    pub fn grid(&mut self, visible: Option<bool>, c: Option<String>, ls: Option<String>, lw: Option<f64>, axis: Option<String>) {
+    pub fn grid(
+        &mut self,
+        visible: Option<bool>,
+        c: Option<String>,
+        ls: Option<String>,
+        lw: Option<f64>,
+        axis: Option<String>,
+    ) {
         self.grid_visible = visible.unwrap_or(true);
         if let Some(a) = axis {
             self.grid_axis = a;
@@ -912,15 +997,17 @@ impl Axes {
         family: Option<String>,
     ) {
         let color = c.or(color);
-        let text_str: String = text.extract::<String>().unwrap_or_else(|_| {
-            text.str().map(|s| s.to_string()).unwrap_or_default()
-        });
-        let col = parse_color(&color.unwrap_or_else(|| "black".to_string()), 0).unwrap_or(RgbColor(0, 0, 0));
+        let text_str: String = text
+            .extract::<String>()
+            .unwrap_or_else(|_| text.str().map(|s| s.to_string()).unwrap_or_default());
+        let col = parse_color(&color.unwrap_or_else(|| "black".to_string()), 0)
+            .unwrap_or(RgbColor(0, 0, 0));
         // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters，
         // 使用实际字体家族名称（而非 "sans-serif"），确保只影响指定文字。
         let font_family = family.and_then(|family_name| {
             if let Ok(resolver_mod) = py.import("rsplotlib.utils._font_resolver")
-                && let Ok(path_obj) = resolver_mod.call_method1("resolve_font_path", (&family_name,))
+                && let Ok(path_obj) =
+                    resolver_mod.call_method1("resolve_font_path", (&family_name,))
                 && let Ok(Some(path)) = path_obj.extract::<Option<String>>()
                 && let Ok(font_data) = std::fs::read(&path)
             {
@@ -1093,8 +1180,10 @@ impl Axes {
             label: label.clone(),
         });
         if let Some(lbl) = label {
-            let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+            let col =
+                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, "-".to_string(), None, 1.5));
         }
         Ok(())
     }
@@ -1132,11 +1221,16 @@ impl Axes {
         if let Some(lbls) = labels {
             for (i, lbl) in lbls.into_iter().enumerate() {
                 let col = parse_color(
-                    colors.as_ref().and_then(|c| c.get(i)).map(|s| s.as_str()).unwrap_or(""),
+                    colors
+                        .as_ref()
+                        .and_then(|c| c.get(i))
+                        .map(|s| s.as_str())
+                        .unwrap_or(""),
                     idx,
                 )
                 .unwrap_or_else(|_| default_color(idx + i));
-                self.legend_labels.push((lbl, col, "-".to_string(), None, 1.5));
+                self.legend_labels
+                    .push((lbl, col, "-".to_string(), None, 1.5));
             }
         }
         Ok(())
@@ -1188,8 +1282,10 @@ impl Axes {
             capsize,
         });
         if let Some(lbl) = label {
-            let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, "-".to_string(), Some(fmt.to_string()), 1.5));
+            let col =
+                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, "-".to_string(), Some(fmt.to_string()), 1.5));
         }
         Ok(())
     }
@@ -1217,7 +1313,13 @@ impl Axes {
         });
         if let Some(lbl) = label {
             let col = default_color(idx);
-            self.legend_labels.push((lbl, col, linefmt.to_string(), Some(markerfmt.to_string()), 1.5));
+            self.legend_labels.push((
+                lbl,
+                col,
+                linefmt.to_string(),
+                Some(markerfmt.to_string()),
+                1.5,
+            ));
         }
         Ok(())
     }
@@ -1250,20 +1352,25 @@ impl Axes {
             linewidth,
         });
         if let Some(lbl) = label {
-            let col = parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
-            self.legend_labels.push((lbl, col, linestyle.to_string(), None, linewidth));
+            let col =
+                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, linestyle.to_string(), None, linewidth));
         }
         Ok(())
     }
 
     #[pyo3(signature = (x, labels=None, vert=true))]
-    pub fn boxplot(&mut self, _py: Python<'_>, x: Bound<'_, PyAny>, labels: Option<Vec<String>>, vert: bool) -> PyResult<()> {
+    pub fn boxplot(
+        &mut self,
+        _py: Python<'_>,
+        x: Bound<'_, PyAny>,
+        labels: Option<Vec<String>>,
+        vert: bool,
+    ) -> PyResult<()> {
         let data = py_to_vec_vec_f64(&x)?;
-        self.elements.push(PlotElement::BoxPlot {
-            data,
-            labels,
-            vert,
-        });
+        self.elements
+            .push(PlotElement::BoxPlot { data, labels, vert });
         Ok(())
     }
 
@@ -1360,7 +1467,8 @@ impl Axes {
     #[pyo3(signature = (y1, y2, color=None, alpha=0.3))]
     pub fn axhspan(&mut self, y1: f64, y2: f64, color: Option<String>, alpha: f64) {
         self.elements.push(PlotElement::HSpan {
-            y1, y2,
+            y1,
+            y2,
             color: color.unwrap_or_default(),
             alpha,
         });
@@ -1370,7 +1478,8 @@ impl Axes {
     #[pyo3(signature = (x1, x2, color=None, alpha=0.3))]
     pub fn axvspan(&mut self, x1: f64, x2: f64, color: Option<String>, alpha: f64) {
         self.elements.push(PlotElement::VSpan {
-            x1, x2,
+            x1,
+            x2,
             color: color.unwrap_or_default(),
             alpha,
         });
@@ -1378,9 +1487,17 @@ impl Axes {
 
     #[doc = "通过两点绘制任意斜率的直线 (贯穿整张图)\n\n参数:\n    xy1: 起点坐标 (x1, y1)\n    xy2: 终点坐标 (x2, y2)\n    color: 线颜色\n    linestyle: 线型\n    linewidth: 线宽"]
     #[pyo3(signature = (xy1, xy2, color=None, linestyle=None, linewidth=None))]
-    pub fn axline(&mut self, xy1: (f64, f64), xy2: (f64, f64), color: Option<String>, linestyle: Option<String>, linewidth: Option<f64>) {
+    pub fn axline(
+        &mut self,
+        xy1: (f64, f64),
+        xy2: (f64, f64),
+        color: Option<String>,
+        linestyle: Option<String>,
+        linewidth: Option<f64>,
+    ) {
         self.elements.push(PlotElement::AxLine {
-            xy1, xy2,
+            xy1,
+            xy2,
             color: color.unwrap_or_default(),
             linestyle: linestyle.unwrap_or_else(|| "-".to_string()),
             linewidth: linewidth.unwrap_or(1.5),
@@ -1443,12 +1560,31 @@ impl Axes {
 
     #[pyo3(signature = (axis="both", labelsize=None, rotation=None, bottom=None, top=None, left=None, right=None))]
     #[allow(unused_variables)]
-    pub fn tick_params(&mut self, axis: &str, labelsize: Option<f64>, rotation: Option<f64>, bottom: Option<bool>, top: Option<bool>, left: Option<bool>, right: Option<bool>) {
-        if let Some(v) = labelsize { self.tick_labelsize = v; }
-        if let Some(v) = bottom { self.tick_bottom = v; }
-        if let Some(v) = top { self.tick_top = v; }
-        if let Some(v) = left { self.tick_left = v; }
-        if let Some(v) = right { self.tick_right = v; }
+    pub fn tick_params(
+        &mut self,
+        axis: &str,
+        labelsize: Option<f64>,
+        rotation: Option<f64>,
+        bottom: Option<bool>,
+        top: Option<bool>,
+        left: Option<bool>,
+        right: Option<bool>,
+    ) {
+        if let Some(v) = labelsize {
+            self.tick_labelsize = v;
+        }
+        if let Some(v) = bottom {
+            self.tick_bottom = v;
+        }
+        if let Some(v) = top {
+            self.tick_top = v;
+        }
+        if let Some(v) = left {
+            self.tick_left = v;
+        }
+        if let Some(v) = right {
+            self.tick_right = v;
+        }
     }
 
     pub fn _axis_off(&mut self) {
@@ -1478,8 +1614,7 @@ impl Axes {
         self.minor_grid_y_visible = false;
     }
 
-    pub fn set_aspect(&mut self, _aspect: &str) {
-    }
+    pub fn set_aspect(&mut self, _aspect: &str) {}
 
     pub fn set_xaxis_major_locator(&mut self, locator: Py<PyAny>) {
         self.xaxis_major_locator = Some(locator);
@@ -1546,9 +1681,14 @@ impl Axes {
     pub fn compute_bounds(&self) -> ((f64, f64), (f64, f64)) {
         let xlog = self.xscale == "log";
         let ylog = self.yscale == "log";
-        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) = crate::figure::axes_bounds::compute_bounds(
-            &self.elements, self.xlim, self.ylim, xlog, ylog,
-        );
+        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) =
+            crate::figure::axes_bounds::compute_bounds(
+                &self.elements,
+                self.xlim,
+                self.ylim,
+                xlog,
+                ylog,
+            );
         // 应用轴反转
         if self.x_axis_inverted {
             std::mem::swap(&mut x_min, &mut x_max);
@@ -1578,8 +1718,12 @@ impl Axes {
         // 当 axis("off") 被调用时，子图背景设为透明（不填充）
         if fill_bg && !self.axis_off {
             let bg_color = parse_color(&self.facecolor, 0).unwrap_or(RgbColor(255, 255, 255));
-            chart.plotting_area().fill(&to_plotters_color(bg_color))
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to fill background: {}", e)))?;
+            chart
+                .plotting_area()
+                .fill(&to_plotters_color(bg_color))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to fill background: {}", e))
+                })?;
         }
 
         // 在 chart 进入可变借用前，先取出绘图区像素尺寸（用于判断副刻度密度）
@@ -1600,15 +1744,25 @@ impl Axes {
             &self.yaxis_major_locator,
             &self.xaxis_minor_locator,
             &self.yaxis_minor_locator,
-            x_min, x_max, y_min, y_max,
-            plot_pixel_width, plot_pixel_height,
-            self.minor_grid_x_visible, self.minor_grid_y_visible, self.minor_grid_visible,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            plot_pixel_width,
+            plot_pixel_height,
+            self.minor_grid_x_visible,
+            self.minor_grid_y_visible,
+            self.minor_grid_visible,
         );
 
         // 计算网格线颜色/线宽/样式
         let grid_style = crate::figure::axes_mesh::compute_grid_style(
-            &self.grid_color, self.grid_linewidth, &self.grid_linestyle,
-            &self.minor_grid_color, self.minor_grid_linewidth, &self.minor_grid_linestyle,
+            &self.grid_color,
+            self.grid_linewidth,
+            &self.grid_linestyle,
+            &self.minor_grid_color,
+            self.minor_grid_linewidth,
+            &self.minor_grid_linestyle,
         );
 
         // 配置并绘制 mesh（与 ChartContext 的借用密切相关，必须内联）
@@ -1623,21 +1777,42 @@ impl Axes {
             // desc_family 字符串，故其必须与 mesh_builder 同作用域。
             let x_has_custom = self.xlabel_family.is_some()
                 || self.xlabel_fontsize > 0.0
-                || !(self.xlabel_color.0 == 0 && self.xlabel_color.1 == 0 && self.xlabel_color.2 == 0);
+                || !(self.xlabel_color.0 == 0
+                    && self.xlabel_color.1 == 0
+                    && self.xlabel_color.2 == 0);
             let y_has_custom = self.ylabel_family.is_some()
                 || self.ylabel_fontsize > 0.0
-                || !(self.ylabel_color.0 == 0 && self.ylabel_color.1 == 0 && self.ylabel_color.2 == 0);
+                || !(self.ylabel_color.0 == 0
+                    && self.ylabel_color.1 == 0
+                    && self.ylabel_color.2 == 0);
             let (desc_family_opt, desc_fontsize, desc_color) = if x_has_custom {
-                (self.xlabel_family.clone(), self.xlabel_fontsize, self.xlabel_color)
+                (
+                    self.xlabel_family.clone(),
+                    self.xlabel_fontsize,
+                    self.xlabel_color,
+                )
             } else if y_has_custom {
-                (self.ylabel_family.clone(), self.ylabel_fontsize, self.ylabel_color)
+                (
+                    self.ylabel_family.clone(),
+                    self.ylabel_fontsize,
+                    self.ylabel_color,
+                )
             } else {
                 (None, 0.0, RgbColor(0, 0, 0))
             };
             // family：显式指定优先，否则按标签文本自动选字（含 CJK 回退）。
-            let desc_text = if !self.xlabel.is_empty() { self.xlabel.as_str() } else { self.ylabel.as_str() };
-            let axis_desc_family = font_stack::resolve_font_family(desc_text, desc_family_opt.as_deref());
-            let axis_desc_size = if desc_fontsize > 0.0 { scale_font(desc_fontsize, font_scale) } else { label_size };
+            let desc_text = if !self.xlabel.is_empty() {
+                self.xlabel.as_str()
+            } else {
+                self.ylabel.as_str()
+            };
+            let axis_desc_family =
+                font_stack::resolve_font_family(desc_text, desc_family_opt.as_deref());
+            let axis_desc_size = if desc_fontsize > 0.0 {
+                scale_font(desc_fontsize, font_scale)
+            } else {
+                label_size
+            };
             let axis_desc_rgb = to_plotters_color(desc_color);
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
@@ -1650,12 +1825,24 @@ impl Axes {
             // xlabel/ylabel 用 plotters 内置 x_desc/y_desc 自动定位，共用 axis_desc_style。
             // 但 plotters 只能居中；当 loc 非居中时，此处传空串禁用内置绘制，
             // 改由 figure.rs 在 root 上按绝对像素手动绘制（见 axes_title::draw_{x,y}label_manual）。
-            let x_desc_text = if self.xlabel_loc == "center" { self.xlabel.clone() } else { String::new() };
-            let y_desc_text = if self.ylabel_loc == "center" { self.ylabel.clone() } else { String::new() };
+            let x_desc_text = if self.xlabel_loc == "center" {
+                self.xlabel.clone()
+            } else {
+                String::new()
+            };
+            let y_desc_text = if self.ylabel_loc == "center" {
+                self.ylabel.clone()
+            } else {
+                String::new()
+            };
             mesh_builder
                 .x_desc(x_desc_text)
                 .y_desc(y_desc_text)
-                .axis_desc_style((axis_desc_family.as_str(), axis_desc_size).into_font().color(&axis_desc_rgb));
+                .axis_desc_style(
+                    (axis_desc_family.as_str(), axis_desc_size)
+                        .into_font()
+                        .color(&axis_desc_rgb),
+                );
 
             if xlog {
                 mesh_builder.x_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
@@ -1663,8 +1850,10 @@ impl Axes {
             if ylog {
                 mesh_builder.y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
             } else {
-                mesh_builder.y_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
-                mesh_builder.x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
+                mesh_builder
+                    .y_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
+                mesh_builder
+                    .x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
             }
 
             if !self.spine_bottom && !self.spine_top {
@@ -1695,14 +1884,24 @@ impl Axes {
             let spine_lw = self.spine_linewidth.round().max(1.0) as u32;
             let spine_style: ShapeStyle = spine_rgb.stroke_width(spine_lw);
             if self.spine_top {
-                chart.draw_series(std::iter::once(PathElement::new(
-                    vec![(x_min, y_max), (x_max, y_max)], spine_style,
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw top spine: {}", e)))?;
+                chart
+                    .draw_series(std::iter::once(PathElement::new(
+                        vec![(x_min, y_max), (x_max, y_max)],
+                        spine_style,
+                    )))
+                    .map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw top spine: {}", e))
+                    })?;
             }
             if self.spine_right {
-                chart.draw_series(std::iter::once(PathElement::new(
-                    vec![(x_max, y_min), (x_max, y_max)], spine_style,
-                ))).map_err(|e| PyRuntimeError::new_err(format!("Failed to draw right spine: {}", e)))?;
+                chart
+                    .draw_series(std::iter::once(PathElement::new(
+                        vec![(x_max, y_min), (x_max, y_max)],
+                        spine_style,
+                    )))
+                    .map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw right spine: {}", e))
+                    })?;
             }
         }
 
@@ -1711,16 +1910,32 @@ impl Axes {
             let major_ls = grid_style.major_ls.as_deref();
             if self.grid_axis == "both" || self.grid_axis == "x" {
                 crate::figure::axes_grid::draw_grid_lines(
-                    chart, true, &ticks_info.xticks,
-                    grid_style.major_color, grid_style.major_lw, major_ls,
-                    font_scale, x_min, x_max, y_min, y_max,
+                    chart,
+                    true,
+                    &ticks_info.xticks,
+                    grid_style.major_color,
+                    grid_style.major_lw,
+                    major_ls,
+                    font_scale,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
                 )?;
             }
             if self.grid_axis == "both" || self.grid_axis == "y" {
                 crate::figure::axes_grid::draw_grid_lines(
-                    chart, false, &ticks_info.yticks,
-                    grid_style.major_color, grid_style.major_lw, major_ls,
-                    font_scale, x_min, x_max, y_min, y_max,
+                    chart,
+                    false,
+                    &ticks_info.yticks,
+                    grid_style.major_color,
+                    grid_style.major_lw,
+                    major_ls,
+                    font_scale,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
                 )?;
             }
         }
@@ -1737,46 +1952,81 @@ impl Axes {
             });
             let show_x_minor = self.minor_grid_x_visible || !self.minor_grid_y_visible;
             let show_y_minor = self.minor_grid_y_visible || !self.minor_grid_x_visible;
-            if show_x_minor
-                && let Some(ref ticks) = xmin_filtered
-            {
+            if show_x_minor && let Some(ref ticks) = xmin_filtered {
                 crate::figure::axes_grid::draw_grid_lines(
-                    chart, true, ticks,
-                    grid_style.minor_color, grid_style.minor_lw, minor_ls,
-                    font_scale, x_min, x_max, y_min, y_max,
+                    chart,
+                    true,
+                    ticks,
+                    grid_style.minor_color,
+                    grid_style.minor_lw,
+                    minor_ls,
+                    font_scale,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
                 )?;
             }
-            if show_y_minor
-                && let Some(ref ticks) = ymin_filtered
-            {
+            if show_y_minor && let Some(ref ticks) = ymin_filtered {
                 crate::figure::axes_grid::draw_grid_lines(
-                    chart, false, ticks,
-                    grid_style.minor_color, grid_style.minor_lw, minor_ls,
-                    font_scale, x_min, x_max, y_min, y_max,
+                    chart,
+                    false,
+                    ticks,
+                    grid_style.minor_color,
+                    grid_style.minor_lw,
+                    minor_ls,
+                    font_scale,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
                 )?;
             }
         }
 
         // 渲染所有数据元素（线、散点、柱状图、填充、误差棒、饼图等）
         crate::figure::axes_render_elements::render_elements(
-            chart, &self.elements, font_scale, marker_scale, xlog, ylog,
-            x_min, x_max, y_min, y_max, bitmap,
+            chart,
+            &self.elements,
+            font_scale,
+            marker_scale,
+            xlog,
+            ylog,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            bitmap,
         )?;
 
         if let Some(loc) = &self.legend_loc.clone()
             && !self.legend_labels.is_empty()
         {
             crate::figure::axes_legend::draw_legend(
-                chart, Some(loc), &self.legend_labels, font_scale,
-                x_min, x_max, y_min, y_max,
+                chart,
+                Some(loc),
+                &self.legend_labels,
+                font_scale,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
             )?;
         }
 
         // 渲染 axes 标题（在数据区域上方的 margin_top 区域内）
         crate::figure::axes_title::draw_title(
-            chart, &self.title, self.title_fontsize, font_scale,
-            self.title_color, self.title_family.as_deref(), &self.title_loc,
-            x_min, x_max, y_min, y_max,
+            chart,
+            &self.title,
+            self.title_fontsize,
+            font_scale,
+            self.title_color,
+            self.title_family.as_deref(),
+            &self.title_loc,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
         )?;
 
         Ok(())
@@ -1788,23 +2038,34 @@ impl Axes {
                 return Ok(Vec::new());
             }
             if lst[0].extract::<f64>().is_ok() {
-                let flat: Vec<f64> = lst.iter().map(|item| item.extract::<f64>())
+                let flat: Vec<f64> = lst
+                    .iter()
+                    .map(|item| item.extract::<f64>())
                     .collect::<Result<Vec<f64>, _>>()
                     .map_err(|e| PyValueError::new_err(format!("hist data parse error: {}", e)))?;
                 Ok(vec![flat])
             } else {
-                let multi: Vec<Vec<f64>> = lst.iter().map(|item| {
-                    item.extract::<Vec<f64>>()
-                        .map_err(|e| PyValueError::new_err(format!("hist multi-data parse error: {}", e)))
-                }).collect::<Result<Vec<Vec<f64>>, _>>()?;
+                let multi: Vec<Vec<f64>> = lst
+                    .iter()
+                    .map(|item| {
+                        item.extract::<Vec<f64>>().map_err(|e| {
+                            PyValueError::new_err(format!("hist multi-data parse error: {}", e))
+                        })
+                    })
+                    .collect::<Result<Vec<Vec<f64>>, _>>()?;
                 Ok(multi)
             }
         } else {
-            Err(PyValueError::new_err("hist data must be a list or list of lists"))
+            Err(PyValueError::new_err(
+                "hist data must be a list or list of lists",
+            ))
         }
     }
 
-    pub fn parse_color_list(color: &Bound<'_, PyAny>, expected_len: usize) -> PyResult<Vec<String>> {
+    pub fn parse_color_list(
+        color: &Bound<'_, PyAny>,
+        expected_len: usize,
+    ) -> PyResult<Vec<String>> {
         if let Ok(single) = color.extract::<String>() {
             Ok(vec![single; expected_len])
         } else if let Ok(lst) = color.extract::<Vec<String>>() {
