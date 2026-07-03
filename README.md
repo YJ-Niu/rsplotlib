@@ -2,7 +2,7 @@
 
 > A high-performance Python plotting library powered by Rust, with a Matplotlib-compatible API
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyO3](https://img.shields.io/badge/PyO3-0.29-2c2d72)](https://pyo3.rs/)
@@ -97,13 +97,13 @@
 
 | Dependency | Version | Notes                                   |
 | ---------- | ------- | --------------------------------------- |
-| Python     | 3.8+    | CPython implementation                  |
+| Python     | 3.10+   | CPython implementation                  |
 | Rust       | 1.70+   | Required only when building from source |
 | maturin    | 1.13+   | Rust-Python package build tool          |
 
 ### Method 1: Install from PyPI (recommended)
 
-Prebuilt wheels are published for Linux (x86_64/aarch64), macOS (universal2), and Windows (x64) across Python 3.8-3.14. No Rust toolchain required:
+Prebuilt wheels are published for Linux (x86_64/aarch64), macOS (universal2), and Windows (x64) across Python 3.10-3.14. No Rust toolchain required:
 
 ```bash
 pip install rsplotlib

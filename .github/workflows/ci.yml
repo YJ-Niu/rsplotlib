@@ -22,13 +22,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.9", "3.13", "3.14"]
+        python-version: ["3.10", "3.13", "3.14"]
         # 补测最低支持版本 3.8；macOS(arm64) 对 3.8 支持不稳定，故仅在 Linux/Windows 上测。
         include:
           - os: ubuntu-latest
-            python-version: "3.8"
+            python-version: "3.10"
           - os: windows-latest
-            python-version: "3.8"
+            python-version: "3.10"
     steps:
       - uses: actions/checkout@v4
 
