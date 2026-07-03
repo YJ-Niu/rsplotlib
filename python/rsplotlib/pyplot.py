@@ -814,7 +814,7 @@ def grid(visible=True, **kwargs):
         linewidth/lw: 线宽
         axis: 坐标轴 ('x', 'y', 或 'both')
     """
-    c = kwargs.get('c')
+    c = kwargs.get('color') or kwargs.get('c')
     ls = kwargs.get('linestyle') or kwargs.get('ls')
     lw = kwargs.get('linewidth') or kwargs.get('lw')
     axis = kwargs.get('axis')
