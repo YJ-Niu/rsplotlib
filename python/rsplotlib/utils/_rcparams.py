@@ -11,7 +11,11 @@ from typing import Any
 
 # 默认配置：与 matplotlib 保持一致的常用项
 _DEFAULT_RC = {
-    'font.sans-serif': ['Helvetica', 'Arial', 'sans-serif'],
+    # 跨平台无衬线字体回退链：macOS/Windows 优先 Helvetica/Arial，其后回退到
+    # DejaVu Sans / Liberation Sans（Linux 常见字体，也是 matplotlib 的默认字体）。
+    # 这些名字按家族名从系统字体索引解析，不依赖具体安装路径，因此在没有
+    # Helvetica/Arial 的 Linux 上也能解析到真实字体，避免渲染时回退到无法解析的 "sans-serif"。
+    'font.sans-serif': ['Helvetica', 'Arial', 'DejaVu Sans', 'Liberation Sans', 'sans-serif'],
     'axes.unicode_minus': True,
     'font.size': 10,
     'figure.figsize': [6.4, 4.8],
