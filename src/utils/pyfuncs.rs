@@ -303,7 +303,7 @@ pub fn bar<'a>(
     x: Bound<'a, PyAny>,
     height: Bound<'a, PyAny>,
     width: f64,
-    color: Option<String>,
+    color: Option<Bound<'a, PyAny>>,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
@@ -849,7 +849,7 @@ pub fn barh<'a>(
     y: Bound<'a, PyAny>,
     width: Bound<'a, PyAny>,
     height: f64,
-    color: Option<String>,
+    color: Option<Bound<'a, PyAny>>,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {

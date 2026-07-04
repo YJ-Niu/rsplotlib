@@ -439,7 +439,15 @@ def barh(y, width, height=0.8, color=None, label=None):
     """
     y = _to_list(y)
     width = _to_list(width)
-    return _route_to_ax('barh', _rsplotlib.barh, y, width, height, color, label)
+    # 类别型 y：y 为字符串序列时，柱子落在 0,1,2,... 位置，字符串作为 y 轴刻度标签。
+    tick_labels = None
+    if isinstance(y, (list, tuple)) and any(isinstance(v, str) for v in y):
+        tick_labels = [str(v) for v in y]
+        y = list(range(len(y)))
+    result = _route_to_ax('barh', _rsplotlib.barh, y, width, height, color, label)
+    if tick_labels is not None:
+        yticks(y, tick_labels)
+    return result
 
 
 def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs):

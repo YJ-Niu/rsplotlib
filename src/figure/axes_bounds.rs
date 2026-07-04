@@ -120,14 +120,15 @@ pub fn compute_bounds(
                     y_sticky_min = true;
                 }
             }
-            PlotElement::BarH { y, width, .. } => {
+            PlotElement::BarH { y, width, height, .. } => {
+                let hh = *height / 2.0;
                 for &v in y {
                     let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min {
-                        y_min = tv;
+                    if tv > f64::NEG_INFINITY && tv - hh < y_min {
+                        y_min = tv - hh;
                     }
-                    if tv > y_max {
-                        y_max = tv;
+                    if tv + hh > y_max {
+                        y_max = tv + hh;
                     }
                 }
                 for &v in width {

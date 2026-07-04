@@ -660,6 +660,7 @@ impl Figure {
                 marker_scale,
                 true,
                 fill_bg,
+                ss,
                 Some(&fig_subplot_info),
             )?;
 
@@ -774,6 +775,7 @@ impl Figure {
                     marker_scale,
                     false,
                     fill_bg,
+                    ss,
                     None,
                 )?;
             }

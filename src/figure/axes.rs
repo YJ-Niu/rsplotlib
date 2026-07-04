@@ -1,6 +1,8 @@
+use plotters::coord::ranged1d::{BoldPoints, Ranged};
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
+use plotters::style::text_anchor::{HPos, Pos, VPos};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyList, PyTuple};
@@ -549,25 +551,31 @@ impl Axes {
         x: Bound<'_, PyAny>,
         height: Bound<'_, PyAny>,
         width: f64,
-        color: Option<String>,
+        color: Option<Bound<'_, PyAny>>,
         label: Option<String>,
     ) -> PyResult<()> {
         let x_vec = py_to_vec_f64(&x)?;
         let height_vec = py_to_vec_f64(&height)?;
         let idx = self.element_count;
         self.element_count += 1;
-        let color_val = color.clone().unwrap_or_default();
+        // color 可为单色字符串或每柱一色的列表；None 时留空，渲染回退到默认色。
+        let colors_vec = match &color {
+            Some(c) => Self::parse_color_list(c, x_vec.len())?,
+            None => Vec::new(),
+        };
         self.elements.push(PlotElement::Bar {
             x: x_vec,
             height: height_vec,
             width,
-            color: color_val.clone(),
+            colors: colors_vec.clone(),
             label: label.clone(),
             color_idx: idx,
         });
         if let Some(lbl) = label {
-            let col =
-                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            let col = colors_vec
+                .first()
+                .map(|c| parse_color(c, idx).unwrap_or_else(|_| default_color(idx)))
+                .unwrap_or_else(|| default_color(idx));
             self.legend_labels
                 .push((lbl, col, "-".to_string(), None, 1.5));
         }
@@ -581,25 +589,31 @@ impl Axes {
         y: Bound<'_, PyAny>,
         width: Bound<'_, PyAny>,
         height: f64,
-        color: Option<String>,
+        color: Option<Bound<'_, PyAny>>,
         label: Option<String>,
     ) -> PyResult<()> {
         let y_vec = py_to_vec_f64(&y)?;
         let width_vec = py_to_vec_f64(&width)?;
         let idx = self.element_count;
         self.element_count += 1;
-        let color_val = color.clone().unwrap_or_default();
+        // color 可为单色字符串或每柱一色的列表；None 时留空，渲染回退到默认色。
+        let colors_vec = match &color {
+            Some(c) => Self::parse_color_list(c, y_vec.len())?,
+            None => Vec::new(),
+        };
         self.elements.push(PlotElement::BarH {
             y: y_vec,
             width: width_vec,
             height,
-            color: color_val.clone(),
+            colors: colors_vec.clone(),
             label: label.clone(),
             color_idx: idx,
         });
         if let Some(lbl) = label {
-            let col =
-                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            let col = colors_vec
+                .first()
+                .map(|c| parse_color(c, idx).unwrap_or_else(|_| default_color(idx)))
+                .unwrap_or_else(|| default_color(idx));
             self.legend_labels
                 .push((lbl, col, "-".to_string(), None, 1.5));
         }
@@ -1743,6 +1757,7 @@ impl Axes {
         marker_scale: f64,
         fill_bg: bool,
         bitmap: bool,
+        ss: f64,
         _subplot_info: Option<&(f64, f64, f64, f64)>,
     ) -> PyResult<()>
     where
@@ -1867,6 +1882,44 @@ impl Axes {
                 }
                 crate::figure::axes_mesh::format_linear_tick(*v)
             };
+            // 类别型 y 轴：与 x 轴对称（如 barh 的类别名），落在 yticks_val 位置的刻度渲染
+            // 为对应字符串标签，其余回退数值格式。
+            let ytick_label_map: Vec<(f64, String)> = match (&self.yticks_val, &self.ytick_labels) {
+                (Some(ticks), Some(labels)) => {
+                    ticks.iter().cloned().zip(labels.iter().cloned()).collect()
+                }
+                _ => Vec::new(),
+            };
+            let has_ycat = !ytick_label_map.is_empty();
+            let y_cat_fmt = move |v: &f64| -> String {
+                for (t, l) in &ytick_label_map {
+                    if (t - *v).abs() < 1e-6 {
+                        return l.clone();
+                    }
+                }
+                crate::figure::axes_mesh::format_linear_tick(*v)
+            };
+            // 主刻度线像素长度（matplotlib 风格，向外）。plotters 中 label_dist = 2*tick_px。
+            let tick_px = (3.5 * font_scale).round().max(1.0) as i32;
+            // 仅主轴（非 twin）的底部 x 轴：抑制 plotters 内置刻度标签文本，改在 mesh
+            // 绘制后手动绘制，使标签相对 plotters 默认位置再下移 2 个最终像素（渲染像素 =
+            // round(2*ss)）。刻度线仍由 plotters 在相同 key points 处绘制，保证标签与刻度线
+            // 水平对齐。twin 轴的 x 标签在顶部，位置不同，故不处理。
+            let x_axis_on = self.spine_bottom || self.spine_top;
+            let x_labels_on = self.tick_bottom || self.tick_top;
+            let do_manual_x = !self.is_twin_x && !self.is_twin_y && x_axis_on && x_labels_on;
+            // 取 plotters 实际用于底部 x 标签的 key points（与刻度线位置一致）。
+            let x_key_points: Vec<f64> = if do_manual_x {
+                let n_x = ticks_info.xticks.len().max(2);
+                chart
+                    .plotting_area()
+                    .as_coord_spec()
+                    .x_spec()
+                    .key_points(BoldPoints(n_x))
+            } else {
+                Vec::new()
+            };
+
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
                 .x_labels(ticks_info.xticks.len().max(2))
@@ -1912,6 +1965,10 @@ impl Axes {
             if has_xcat {
                 mesh_builder.x_label_formatter(&x_cat_fmt);
             }
+            // 类别标签覆盖 y 轴数值格式（barh 等场景）。
+            if has_ycat {
+                mesh_builder.y_label_formatter(&y_cat_fmt);
+            }
 
             if !self.spine_bottom && !self.spine_top {
                 mesh_builder.disable_x_axis();
@@ -1928,12 +1985,15 @@ impl Axes {
 
             // matplotlib 风格刻度线：向外、长度约 3.5pt（正值 = 向外）。
             // plotters 默认刻度长为绘图区的 5%，在本项目自定义布局下渲染极短（~1px），
-            // 故显式设为固定像素。draw_impl 中 label_dist = 2*tick_size，
-            // 因此 3.5pt 刻度同时给出约 7pt 的刻度标签间距（= matplotlib 的 tick 3.5pt + pad 3.5pt）。
-            let tick_px = (3.5 * font_scale).round().max(1.0) as i32;
+            // 故显式设为固定像素（tick_px，见上文）。draw_impl 中 label_dist = 2*tick_size。
             mesh_builder
                 .set_tick_mark_size(LabelAreaPosition::Bottom, tick_px)
                 .set_tick_mark_size(LabelAreaPosition::Left, tick_px);
+
+            // 主轴底部 x 标签改为手动绘制：用空串抑制 plotters 内置标签文本（刻度线保留）。
+            if do_manual_x {
+                mesh_builder.x_label_formatter(&|_: &f64| String::new());
+            }
 
             // 手动绘制 mesh：禁用内置网格线（由 axes_grid 模块统一绘制）
             mesh_builder
@@ -1941,6 +2001,46 @@ impl Axes {
                 .disable_y_mesh()
                 .draw()
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
+
+            // 手动绘制底部 x 刻度标签：相对 plotters 默认位置（label_dist = 2*tick_px）
+            // 再向下偏移 2 个最终像素（渲染像素 = round(2*ss)）。锚点 (t, y_min) 映射到
+            // 绘图区底边，Text 的像素偏移 (0, offset_y) 使文字顶端下移，与刻度线对齐。
+            if do_manual_x {
+                drop(mesh_builder);
+                let (x_lo, x_hi) = (x_min.min(x_max), x_min.max(x_max));
+                let offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
+                let text_style: TextStyle = ("sans-serif", label_size)
+                    .into_font()
+                    .color(&BLACK)
+                    .pos(Pos::new(HPos::Center, VPos::Top));
+                for &t in &x_key_points {
+                    if t < x_lo || t > x_hi {
+                        continue;
+                    }
+                    let text = if xlog {
+                        format!("{:.1e}", 10.0f64.powf(t))
+                    } else if has_xcat {
+                        x_cat_fmt(&t)
+                    } else {
+                        crate::figure::axes_mesh::format_linear_tick(t)
+                    };
+                    chart
+                        .draw_series(std::iter::once(
+                            plotters::element::EmptyElement::at((t, y_min))
+                                + plotters::element::Text::new(
+                                    text,
+                                    (0, offset_y),
+                                    text_style.clone(),
+                                ),
+                        ))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "Failed to draw x tick label: {}",
+                                e
+                            ))
+                        })?;
+                }
+            }
         }
 
         // 手动绘制顶部和右侧 spine（plotters mesh 只绘制左侧和底部边框）

@@ -812,14 +812,18 @@ where
                 x,
                 height,
                 width,
-                color,
+                colors,
                 color_idx,
                 ..
             } => {
-                let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
-                let rgb = to_plotters_color(col);
-                let fill_style: ShapeStyle = rgb.filled();
-                for (&xv, &h) in x.iter().zip(height.iter()) {
+                for (i, (&xv, &h)) in x.iter().zip(height.iter()).enumerate() {
+                    let col = match colors.get(i) {
+                        Some(s) if !s.is_empty() => {
+                            parse_color(s, *color_idx + i).unwrap_or(default_color(*color_idx + i))
+                        }
+                        _ => default_color(*color_idx),
+                    };
+                    let fill_style: ShapeStyle = to_plotters_color(col).filled();
                     let txv = tx(xv);
                     let th = ty(h);
                     let y0 = if ylog {
@@ -843,18 +847,18 @@ where
                 y,
                 width,
                 height,
-                color,
+                colors,
                 color_idx,
                 ..
             } => {
-                let c = if color.is_empty() {
-                    default_color(*color_idx)
-                } else {
-                    parse_color(color, *color_idx)?
-                };
-                let rgb = to_plotters_color(c);
-                let fill_style: ShapeStyle = rgb.filled();
-                for (&yv, &wv) in y.iter().zip(width.iter()) {
+                for (i, (&yv, &wv)) in y.iter().zip(width.iter()).enumerate() {
+                    let col = match colors.get(i) {
+                        Some(s) if !s.is_empty() => {
+                            parse_color(s, *color_idx + i).unwrap_or(default_color(*color_idx + i))
+                        }
+                        _ => default_color(*color_idx),
+                    };
+                    let fill_style: ShapeStyle = to_plotters_color(col).filled();
                     let tyv = ty(yv);
                     let twv = tx(wv);
                     let bar_y0 = tyv - height / 2.0;
