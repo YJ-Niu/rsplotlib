@@ -495,7 +495,7 @@ def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs)
                         facecolor=None, align=align, histtype=histtype)
 
 
-def pie(x, labels=None, colors=None, autopct=False, **kwargs):
+def pie(x, labels=None, colors=None, autopct=False, startangle=0.0, explode=None, **kwargs):
     """绘制饼图。
 
     用法:
@@ -506,6 +506,8 @@ def pie(x, labels=None, colors=None, autopct=False, **kwargs):
         labels: 每部分的标签列表
         colors: 每部分的颜色列表
         autopct: 百分比格式字符串 (如 '%1.1f%%'), 或布尔值 True
+        startangle: 起始角度 (度), 默认从 x 轴正方向逆时针画起
+        explode: 各扇形沿半径方向向外偏移的比例列表 (如 (0, 0.1, 0, 0))
         **kwargs: 其他关键字参数
     """
     x = _to_list(x)
@@ -515,7 +517,8 @@ def pie(x, labels=None, colors=None, autopct=False, **kwargs):
         autopct_str = "%1.1f%%"
     else:
         autopct_str = None
-    return _route_to_ax('pie', _rsplotlib.pie, x, labels, colors, autopct_str)
+    explode_list = _to_list(explode) if explode is not None else None
+    return _route_to_ax('pie', _rsplotlib.pie, x, labels, colors, autopct_str, startangle, explode_list)
 
 
 def boxplot(x, labels=None, vert=True, **kwargs):

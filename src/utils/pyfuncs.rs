@@ -435,7 +435,7 @@ pub fn imshow<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0))]
+#[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0, explode=None))]
 pub fn pie<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -443,6 +443,7 @@ pub fn pie<'a>(
     colors: Option<Vec<String>>,
     autopct: Option<String>,
     startangle: f64,
+    explode: Option<Vec<f64>>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
         let x_vec = if let Ok(v) = x.extract::<Vec<f64>>() {
@@ -453,7 +454,7 @@ pub fn pie<'a>(
         } else {
             x.extract::<Vec<f64>>()?
         };
-        ax.pie(x_vec, labels, colors, autopct, startangle);
+        ax.pie(x_vec, labels, colors, autopct, startangle, explode);
     })
 }
 

@@ -95,6 +95,7 @@ pub enum PlotElement {
         colors: Option<Vec<String>>,
         autopct: Option<String>,
         startangle: f64,
+        explode: Option<Vec<f64>>,
     },
     FillBetween {
         x: Vec<f64>,

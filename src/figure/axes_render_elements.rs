@@ -1181,11 +1181,28 @@ where
                 colors,
                 autopct,
                 startangle,
+                explode,
             } => {
                 let total: f64 = x.iter().sum();
                 if total <= 0.0 {
                     continue;
                 }
+                // 使饼图呈正圆：按绘图区像素宽高比压缩 x/y 数据半径，
+                // 让单位圆在两个方向上映射到相同的像素半径（等效 matplotlib 的 aspect='equal'）。
+                let (pw, ph) = chart.plotting_area().dim_in_pixel();
+                let px_per_x = if x_max > x_min {
+                    pw as f64 / (x_max - x_min)
+                } else {
+                    1.0
+                };
+                let px_per_y = if y_max > y_min {
+                    ph as f64 / (y_max - y_min)
+                } else {
+                    1.0
+                };
+                let s = px_per_x.min(px_per_y);
+                let sx = if px_per_x > 0.0 { s / px_per_x } else { 1.0 };
+                let sy = if px_per_y > 0.0 { s / px_per_y } else { 1.0 };
                 let mut current_angle = startangle.to_radians();
                 let pie_colors = colors
                     .as_ref()
@@ -1197,6 +1214,15 @@ where
                     let angle = (val / total) * 360.0_f64;
                     let angle_rad = angle.to_radians();
                     let end_angle = current_angle + angle_rad;
+                    let mid_angle = current_angle + angle_rad / 2.0;
+                    // explode：沿扇形中线方向向外偏移 explode[i] 倍半径
+                    let exp = explode
+                        .as_ref()
+                        .and_then(|e| e.get(i))
+                        .copied()
+                        .unwrap_or(0.0);
+                    let ox = mid_angle.cos() * exp * sx;
+                    let oy = mid_angle.sin() * exp * sy;
                     let col = if let Some(ref pc) = pie_colors {
                         let ci =
                             parse_color(pc.get(i).unwrap_or(&""), i).unwrap_or(default_color(i));
@@ -1205,10 +1231,10 @@ where
                         to_plotters_color(default_color(i))
                     };
                     let steps = ((angle_rad / 0.05).ceil() as usize).max(3);
-                    let mut vertices = vec![(0.0, 0.0)];
+                    let mut vertices = vec![(ox, oy)];
                     for j in 0..=steps {
                         let a = current_angle + (j as f64 / steps as f64) * angle_rad;
-                        vertices.push((a.cos(), a.sin()));
+                        vertices.push((a.cos() * sx + ox, a.sin() * sy + oy));
                     }
                     chart
                         .draw_series(std::iter::once(Polygon::new(
@@ -1218,13 +1244,12 @@ where
                         .map_err(|e| {
                             PyRuntimeError::new_err(format!("Failed to draw pie: {}", e))
                         })?;
-                    let mid_angle = current_angle + angle_rad / 2.0;
                     if let Some(lbls) = labels
                         && let Some(l) = lbls.get(i)
                     {
                         let label_r = 1.3;
-                        let lx = mid_angle.cos() * label_r;
-                        let ly = mid_angle.sin() * label_r;
+                        let lx = mid_angle.cos() * label_r * sx + ox;
+                        let ly = mid_angle.sin() * label_r * sy + oy;
                         // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
                         let pie_family = font_stack::select_family(l);
                         let pie_label_style: TextStyle =
@@ -1251,8 +1276,8 @@ where
                             format!("{:.1}%", pct)
                         };
                         let text_r = 0.7;
-                        let tx = mid_angle.cos() * text_r;
-                        let ty = mid_angle.sin() * text_r;
+                        let tx = mid_angle.cos() * text_r * sx + ox;
+                        let ty = mid_angle.sin() * text_r * sy + oy;
                         let autopct_family = font_stack::select_family(&text);
                         let autopct_style: TextStyle =
                             FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))

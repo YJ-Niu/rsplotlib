@@ -1173,7 +1173,7 @@ impl Axes {
         Ok(())
     }
 
-    #[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0))]
+    #[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0, explode=None))]
     pub fn pie(
         &mut self,
         x: Vec<f64>,
@@ -1181,6 +1181,7 @@ impl Axes {
         colors: Option<Vec<String>>,
         autopct: Option<String>,
         startangle: f64,
+        explode: Option<Vec<f64>>,
     ) {
         self.elements.push(PlotElement::Pie {
             x,
@@ -1188,6 +1189,7 @@ impl Axes {
             colors,
             autopct,
             startangle,
+            explode,
         });
     }
 
@@ -2034,10 +2036,7 @@ impl Axes {
                                 ),
                         ))
                         .map_err(|e| {
-                            PyRuntimeError::new_err(format!(
-                                "Failed to draw x tick label: {}",
-                                e
-                            ))
+                            PyRuntimeError::new_err(format!("Failed to draw x tick label: {}", e))
                         })?;
                 }
             }

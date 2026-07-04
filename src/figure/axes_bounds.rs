@@ -120,7 +120,9 @@ pub fn compute_bounds(
                     y_sticky_min = true;
                 }
             }
-            PlotElement::BarH { y, width, height, .. } => {
+            PlotElement::BarH {
+                y, width, height, ..
+            } => {
                 let hh = *height / 2.0;
                 for &v in y {
                     let tv = ty(v);
