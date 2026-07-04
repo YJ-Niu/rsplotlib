@@ -201,9 +201,9 @@ where
                 && !mkr.is_empty()
             {
                 let mid_x = (x_line_start + x_line_end) / 2.0;
-                draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb, rgb).map_err(|e| {
-                    PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e))
-                })?;
+                draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb, rgb, 1.0).map_err(
+                    |e| PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e)),
+                )?;
             }
 
             let legend_family = font_stack::select_family(label);

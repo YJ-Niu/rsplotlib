@@ -49,6 +49,105 @@ def _to_list_recursive(obj):
     return obj
 
 
+def _is_scatter_sequence(obj):
+    """判断是否为序列（含 numpy 数组），但排除字符串标量。"""
+    if obj is None or isinstance(obj, str):
+        return False
+    return hasattr(obj, 'tolist') or isinstance(obj, (list, tuple))
+
+
+def _rgba_to_hex(row):
+    """将 (r, g, b[, a]) (0-1 浮点) 转为 '#rrggbb' 十六进制颜色。"""
+    row = list(row)
+
+    def _ch(v):
+        return max(0, min(255, int(round(float(v) * 255))))
+
+    return '#{:02x}{:02x}{:02x}'.format(_ch(row[0]), _ch(row[1]), _ch(row[2]))
+
+
+def _resolve_scatter_colors(c_vals, cmap, vmin, vmax):
+    """把 c 序列解析为逐点颜色字符串列表 + colorbar 所需的 mappable 元数据。
+
+    返回 (colors, mappable):
+    - 颜色字符串序列 / RGB(A) 二维行数组: mappable 为 None
+    - 数值序列: 经 colormap 映射为 hex，mappable = (cmap名, vmin, vmax)
+    """
+    if len(c_vals) == 0:
+        return None, None
+    first = c_vals[0]
+    if _is_scatter_sequence(first):  # RGB(A) 二维行数组
+        return [_rgba_to_hex(row) for row in c_vals], None
+    if isinstance(first, str):       # 颜色字符串序列
+        return [str(v) for v in c_vals], None
+    vals = [float(v) for v in c_vals]  # 数值 -> colormap
+    name = cmap if isinstance(cmap, str) else 'viridis'
+    lo = min(vals) if vmin is None else float(vmin)
+    hi = max(vals) if vmax is None else float(vmax)
+    colors = list(_rsplotlib.colormap_hex(vals, name, lo, hi))
+    return colors, (name, lo, hi)
+
+
+def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
+    """将 matplotlib 风格的 scatter 参数规整为对 Rust 层的调用参数。
+
+    返回 (use_multi, args, mappable):
+    - use_multi=False: args = (x, y, s:float, c:str|None, marker, label, alpha)
+    - use_multi=True:  args = (x, y, s:list|None, c:list|None, marker, label, alpha)
+    - mappable: None 或 (cmap名, vmin, vmax)，当 c 为数值数组经 colormap 映射时给出，
+      供随后的 plt.colorbar() 绘制颜色条。
+    """
+    x = _to_list(x)
+    y = _to_list(y)
+    n = len(x) if hasattr(x, '__len__') else 0
+    marker = marker or 'o'
+    if c is None:
+        c = kwargs.pop('color', None)
+    cmap = kwargs.pop('cmap', None)
+    vmin = kwargs.pop('vmin', None)
+    vmax = kwargs.pop('vmax', None)
+    # linewidths / edgecolors / norm / plotnonfinite / data 等参数当前接受但不生效
+
+    s_is_seq = _is_scatter_sequence(s)
+    c_is_seq = _is_scatter_sequence(c)
+
+    c_list = None
+    c_single = None
+    mappable = None
+    if c_is_seq:
+        c_vals = _to_list(c)
+        # 单个 RGB(A)（长度 3/4 的纯数值序列，且与点数不同）视为统一单色
+        is_flat_numeric = all(
+            not isinstance(v, str) and not _is_scatter_sequence(v) for v in c_vals
+        )
+        if is_flat_numeric and len(c_vals) in (3, 4) and len(c_vals) != n:
+            c_single = _rgba_to_hex(c_vals)
+        else:
+            c_list, mappable = _resolve_scatter_colors(c_vals, cmap, vmin, vmax)
+    elif isinstance(c, str):
+        c_single = c
+
+    use_multi = s_is_seq or (c_list is not None)
+    if not use_multi:
+        s_val = 100.0 if s is None else float(s)
+        return False, (x, y, s_val, c_single, marker, label, alpha), mappable
+
+    if s_is_seq:
+        s_arg = [float(v) for v in _to_list(s)]
+    elif s is None:
+        s_arg = None
+    else:
+        s_arg = [float(s)] * n
+
+    if c_list is not None:
+        c_arg = c_list
+    elif c_single is not None:
+        c_arg = [c_single] * n
+    else:
+        c_arg = None
+    return True, (x, y, s_arg, c_arg, marker, label, alpha), mappable
+
+
 def _get_axes():
     """获取当前 axes，如果没有则返回 None"""
     try:
@@ -261,32 +360,44 @@ def plot(*args, **kwargs):
     return result
 
 
-def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
-    """绘制散点图。
+def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
+            vmin=None, vmax=None, alpha=None, linewidths=None,
+            edgecolors=None, plotnonfinite=False, data=None, **kwargs):
+    """绘制散点图，兼容 matplotlib.pyplot.scatter 的参数签名。
 
-    支持每个点独立的颜色和大小:
-        plt.scatter(x, y, s=50, c='red')          # 统一大小和颜色
-        plt.scatter(x, y, s=[10, 20, 30], c=['red', 'green', 'blue'])
+    用法:
+        plt.scatter(x, y)                              # 默认大小 20、默认蓝色
+        plt.scatter(x, y, s=50, c='red')               # 统一大小和颜色
+        plt.scatter(x, y, s=[10, 20, 30], c=['r','g','b'])   # 逐点大小/颜色
+        plt.scatter(x, y, c=values, cmap='viridis')    # 数值经 colormap 映射
+        plt.scatter(x, y, c=[[1,0,0],[0,1,0]])         # RGB(A) 二维行数组
 
     Args:
-        x: x 坐标 (list / tuple / numpy array)
-        y: y 坐标 (list / tuple / numpy array)
-        s: 点大小, 单个浮点数 或 浮点数数组
-        c: 颜色, 单个字符串 或 颜色字符串数组
-        marker: 标记形状 ('o', 's', '^', 'D', '*', 'x', '+')
-        label: 图例标签
+        x, y: 长度相同的数据点坐标 (list / tuple / numpy array)
+        s: 点大小, 默认 20; 可为标量或与点数等长的数组
+        c: 颜色; 默认蓝色; 可为颜色字符串、颜色字符串数组、数值数组
+           (配合 cmap) 或 RGB(A) 二维行数组
+        marker: 标记形状, 默认 'o'
+        cmap: 当 c 为数值数组时使用的 colormap 名称 (如 'viridis')
+        vmin, vmax: colormap 归一化范围
         alpha: 透明度 (0.0 - 1.0)
+        norm / linewidths / edgecolors / plotnonfinite / data: 接受但当前不生效
         **kwargs: 额外关键字参数 (color 将作为 c 的别名)
     """
-    x = _to_list(x)
-    y = _to_list(y)
-    # 支持 color 作为 c 的别名
-    if c is None and 'color' in kwargs:
-        c = kwargs.pop('color')
-    # 如果 s 或 c 是数组, 则路由到 scatter_multi (Rust 层批量实现)
-    if isinstance(s, (list, tuple)) or (isinstance(c, (list, tuple)) and c and isinstance(c[0], str)):
-        return _route_to_ax('scatter_multi', _rsplotlib.scatter_multi, x, y, s, c, marker, label, alpha)
-    return _route_to_ax('scatter', _rsplotlib.scatter, x, y, s, c, marker, label, alpha)
+    kwargs['cmap'] = cmap
+    kwargs['vmin'] = vmin
+    kwargs['vmax'] = vmax
+    a = 1.0 if alpha is None else alpha
+    use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label=None, alpha=a, kwargs=kwargs)
+    if use_multi:
+        result = _route_to_ax('scatter_multi', _rsplotlib.scatter_multi, *args)
+    else:
+        result = _route_to_ax('scatter', _rsplotlib.scatter, *args)
+    if mappable is not None:
+        ax = _get_axes()
+        if ax is not None and hasattr(ax, 'set_mappable'):
+            ax.set_mappable(*mappable)
+    return result
 
 
 def bar(x, height, width=0.8, color=None, label=None):
@@ -804,6 +915,18 @@ def title(label, fontdict=None, loc=None, **kwargs):
     return _rsplotlib.title(label, color, size, family, loc)
 
 
+def suptitle(t, **kwargs):
+    """设置整个图形的总标题（居中显示在所有子图上方）。
+
+    Args:
+        t: 标题文本
+
+    用法:
+        plt.suptitle("总标题")
+    """
+    return _rsplotlib.gcf().suptitle(str(t))
+
+
 def grid(visible=True, **kwargs):
     """显示或隐藏网格线。
 
@@ -906,7 +1029,7 @@ def minorticks_off():
 
 # ==================== 子图与布局 ====================
 
-def subplots(nrows=1, ncols=1, figsize=None, dpi=None, **kwargs):
+def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     """创建子图网格 (Figure + Axes)。
 
     用法:
@@ -919,22 +1042,48 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, **kwargs):
         ncols: 子图列数 (默认 1)
         figsize: 图的尺寸 (width, height), 单位英寸
         dpi: 分辨率 (每英寸点数)
+        squeeze: 是否压缩返回的 Axes 数组维度 (默认 True), 与 matplotlib 一致
         **kwargs: 其他关键字参数
 
     Returns:
-        (Figure, Axes) 或 (Figure, list[Axes]) 元组
+        与 matplotlib 一致的返回值 (squeeze=True 时):
+        - 1x1: (Figure, Axes)
+        - 1xN 或 Nx1: (Figure, 一维 ndarray[Axes])
+        - MxN: (Figure, 二维 ndarray[Axes]), 支持 axs[i, j] 索引
     """
     result = _rsplotlib.subplots(nrows, ncols, figsize, dpi)
-    if nrows == 1 and ncols == 1:
-        return result  # (fig, ax)
     fig = result[0]
-    flat_axes = list(result[1])
-    # 组织为 2D 列表
-    axes_2d = []
+
+    if nrows == 1 and ncols == 1:
+        single = result[1]
+        if squeeze:
+            return fig, single
+        flat = [single]
+    else:
+        flat = list(result[1])
+
+    try:
+        import numpy as np
+    except ImportError:
+        # numpy 不可用时降级为嵌套 list（不支持 axs[i, j] 元组索引）。
+        # matplotlib 本身依赖 numpy，多子图场景下建议安装 numpy。
+        rows = [[flat[r * ncols + c] for c in range(ncols)] for r in range(nrows)]
+        if squeeze:
+            if nrows == 1:
+                return fig, rows[0]
+            if ncols == 1:
+                return fig, [row[0] for row in rows]
+        return fig, rows
+
+    axarr = np.empty((nrows, ncols), dtype=object)
     for r in range(nrows):
-        row = [flat_axes[r * ncols + c] for c in range(ncols)]
-        axes_2d.append(row)
-    return fig, axes_2d
+        for c in range(ncols):
+            axarr[r, c] = flat[r * ncols + c]
+    if squeeze:
+        axarr = axarr.squeeze()
+        if axarr.ndim == 0:
+            return fig, axarr.item()
+    return fig, axarr
 
 
 def subplot(nrows, ncols, index, **kwargs):
@@ -1076,8 +1225,15 @@ def axis(arg=None, **kwargs):
 
 
 def colorbar(mappable=None, **kwargs):
-    """添加颜色条 (占位实现)。"""
-    pass
+    """在当前坐标区右侧添加颜色条。
+
+    颜色条基于最近一次可映射绘制（scatter 数值 c + cmap，或 imshow）记录的
+    (cmap, vmin, vmax) 信息渲染。若此前没有可映射绘制，则按 viridis / [0,1] 兜底。
+    """
+    ax = _get_axes()
+    if ax is not None and hasattr(ax, 'enable_colorbar'):
+        ax.enable_colorbar()
+    return None
 
 
 def get_cmap(name=None, lut=None):
@@ -1152,18 +1308,16 @@ def _patch_axes():
     _rs.Axes.hlines = _hlines
     _rs.Axes.vlines = _vlines
 
-    # scatter: 支持 c/s 为数组
+    # scatter: 支持 c/s 为数组、数值 c + cmap、RGB(A) 二维行数组
     _orig_scatter = _rs.Axes.scatter
 
-    def _scatter(self, x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, **kwargs):
-        color = kwargs.pop('color', None)
-        if c is None and color is not None:
-            c = color
-        is_multi_s = isinstance(s, (list, tuple))
-        is_multi_c = isinstance(c, (list, tuple)) and c and isinstance(c[0], str)
-        if is_multi_s or is_multi_c:
-            return self.scatter_multi(x, y, s if is_multi_s else None, c if is_multi_c else None, marker, label, alpha)
-        return _orig_scatter(self, x, y, s, c, marker, label, alpha)
+    def _scatter(self, x, y, s=None, c=None, marker=None, label=None, alpha=1.0, **kwargs):
+        use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs)
+        if mappable is not None:
+            self.set_mappable(*mappable)
+        if use_multi:
+            return self.scatter_multi(*args)
+        return _orig_scatter(self, *args)
 
     _rs.Axes.scatter = _scatter
 
@@ -1185,6 +1339,20 @@ def _patch_axes():
 
     _rs.Axes.set_xlim = _set_xlim
     _rs.Axes.set_ylim = _set_ylim
+
+    # set(**kwargs): matplotlib 语义, 每个 key 映射到 set_<key>(value)
+    def _ax_set(self, **kwargs):
+        for key, value in kwargs.items():
+            setter = getattr(self, 'set_' + key, None)
+            if setter is None:
+                continue
+            # numpy/rsnumpy 数组转 list, 供 Rust 侧 Vec<f64> 提取; tuple 保留给 set_xlim 处理
+            if hasattr(value, 'tolist'):
+                value = value.tolist()
+            setter(value)
+        return None
+
+    _rs.Axes.set = _ax_set
 
 
 _patch_figure_add_subplot()

@@ -186,6 +186,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(utils::pyfuncs::ylim, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::scatter, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::scatter_multi, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::pyfuncs::colormap_hex, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::bar, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::hist, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::fill_between, m)?)?;

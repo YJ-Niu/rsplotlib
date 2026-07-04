@@ -50,6 +50,8 @@ pub struct Figure {
     pub height: u32,
     pub dpi: f64,
     pub axes_positions: Vec<(f64, f64, f64, f64)>,
+    /// 当前选中的子图下标（plt.subplot 选中后，plt.* 路由到此 axes）
+    pub current_axes_index: usize,
     pub facecolor: String,
     pub subplot_left: f64,
     pub subplot_right: f64,
@@ -80,6 +82,7 @@ impl Figure {
             height: h,
             dpi: DEFAULT_DPI,
             axes_positions: Vec::new(),
+            current_axes_index: 0,
             facecolor: "white".to_string(),
             subplot_left: 0.125,
             subplot_right: 0.9,
@@ -140,12 +143,14 @@ impl Figure {
     fn clear(&mut self) {
         self.axes_list.clear();
         self.axes_positions.clear();
+        self.current_axes_index = 0;
     }
 
     #[doc = "清除所有子图"]
     fn clf(&mut self) {
         self.axes_list.clear();
         self.axes_positions.clear();
+        self.current_axes_index = 0;
     }
 
     #[doc = "添加子图"]
@@ -198,6 +203,7 @@ impl Figure {
         crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
         self.axes_positions.push((left, right, bottom, top));
+        self.current_axes_index = self.axes_list.len() - 1;
         Ok(ax_py)
     }
 
@@ -207,10 +213,16 @@ impl Figure {
         let used_dpi = dpi.unwrap_or(self.dpi);
         let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            // SSAA 超采样：先按 SUPERSAMPLE 倍边长渲染，再盒式滤波缩回目标尺寸，随后写索引 PNG。
-            // 降采样后量化到 256 色调色板：文件体积约为真彩的 1/3~1/4，画质近乎无损。
+            // SSAA 超采样：先按 SUPERSAMPLE 倍边长渲染，再盒式滤波缩回目标尺寸。
+            // 含平滑渐变（colorbar / imshow）时颜色数远超 256，量化会产生明显色带，改写
+            // 真彩 RGB PNG 保留平滑渐变；其余（折线/散点等）量化到 256 色近乎无损且体积仅
+            // 真彩 1/3~1/4。
             let rgb = self.render_downsampled_rgb(py, font_scale)?;
-            self.write_rgb_png_indexed(filename, &rgb, used_dpi)
+            if self.has_gradient_content(py) {
+                self.write_rgb_png_truecolor(filename, &rgb, used_dpi)
+            } else {
+                self.write_rgb_png_indexed(filename, &rgb, used_dpi)
+            }
         } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
             let rgb = self.render_downsampled_rgb(py, font_scale)?;
             self.write_rgb_jpg(filename, &rgb)
@@ -353,6 +365,27 @@ impl Figure {
         Ok(downsample_box(&hi, sw, sh, ss))
     }
 
+    /// 图中是否含平滑渐变内容（colorbar 或 imshow 图像）——决定 PNG 是否用真彩输出。
+    ///
+    /// 折线/散点等即便因抗锯齿产生上万种混合色，量化到 256 色仍近乎无损；只有 colorbar
+    /// 渐变色带与 imshow 栅格图才需要真彩以避免可见色带。
+    fn has_gradient_content(&self, py: Python) -> bool {
+        for ax_py in &self.axes_list {
+            let ax = ax_py.borrow(py);
+            if ax.colorbar.is_some() {
+                return true;
+            }
+            if ax
+                .elements
+                .iter()
+                .any(|e| matches!(e, crate::core::elements::PlotElement::Image { .. }))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// 将 RGB 像素缓冲量化为至多 256 色调色板后写入索引（8-bit indexed）PNG 文件, 内嵌 DPI 元数据。
     ///
     /// 超采样降采样后的图含上万种颜色（多为抗锯齿混合色），真彩 PNG 每像素 3 字节、
@@ -383,6 +416,33 @@ impl Figure {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
         writer
             .write_image_data(&indices)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+        Ok(())
+    }
+
+    /// 将 RGB 像素缓冲写入真彩（24-bit RGB）PNG 文件, 内嵌 DPI 元数据。
+    ///
+    /// 用于含平滑渐变（colorbar / imshow）的图：颜色数远超 256, 索引量化会产生色带,
+    /// 真彩输出可无损保留渐变。
+    fn write_rgb_png_truecolor(&self, filename: &str, rgb: &[u8], dpi: f64) -> PyResult<()> {
+        let ppm = (dpi / 0.0254).round() as u32;
+        let dims = png::PixelDimensions {
+            xppu: ppm,
+            yppu: ppm,
+            unit: png::Unit::Meter,
+        };
+        let file = File::create(filename)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
+        let mut encoder = png::Encoder::new(file, self.width, self.height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_pixel_dims(Some(dims));
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
+        writer
+            .write_image_data(rgb)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
         Ok(())
     }
@@ -448,7 +508,14 @@ impl Figure {
         if !self.suptitle.is_empty() {
             let sup_family = font_stack::select_family(&self.suptitle);
             let sup_size = 21.0 * 1.30 * font_scale;
-            let _ = root.titled(&self.suptitle, (sup_family.as_str(), sup_size));
+            // plotters 的 titled() 会把标题带贴着画布顶边（起始 y=0），显得太靠上。
+            // 先给顶部留一段内边距（约半个字号），使总标题下移，接近 matplotlib
+            // suptitle 默认 y≈0.98 的观感。返回的子区域丢弃，子图仍绘制在原 root 上，
+            // 布局不受影响。
+            let sup_top_pad = (sup_size * 0.5).round() as i32;
+            let _ = root
+                .margin(sup_top_pad, 0, 0, 0)
+                .titled(&self.suptitle, (sup_family.as_str(), sup_size));
         }
 
         let total_w = actual_w as f64;
@@ -643,6 +710,27 @@ impl Figure {
                     chart_x0,
                     data_top,
                     data_bottom,
+                )?;
+            }
+
+            // 颜色条：在数据区右侧空白 margin 内绘制渐变色带 + 刻度标签。
+            // 需在 drop(ax) 之前读取 ax.colorbar。数据区四边像素坐标与 plotters
+            // 布局一致（见上文 xlabel/ylabel 手动绘制处的推导）。
+            if let Some((cb_cmap, cb_vmin, cb_vmax)) = &ax.colorbar {
+                let data_right = chart_x0 + chart_w;
+                let data_top = chart_y0 + margin_top as f64;
+                let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
+                crate::figure::axes_colorbar::draw_colorbar(
+                    &root,
+                    cb_cmap,
+                    *cb_vmin,
+                    *cb_vmax,
+                    data_right,
+                    data_top,
+                    data_bottom,
+                    total_w,
+                    font_scale,
+                    ss,
                 )?;
             }
 

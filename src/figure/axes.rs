@@ -183,6 +183,10 @@ pub struct Axes {
     pub yaxis_minor_locator: Option<Py<PyAny>>,
     pub x_axis_inverted: bool,
     pub y_axis_inverted: bool,
+    /// 最近一次可映射绘制 (scatter 数值 c / imshow) 的 (cmap, vmin, vmax)，供 colorbar 使用
+    pub mappable: Option<(String, f64, f64)>,
+    /// 若为 Some，则渲染时在数据区右侧绘制颜色条 (cmap, vmin, vmax)
+    pub colorbar: Option<(String, f64, f64)>,
 }
 
 impl Clone for Axes {
@@ -249,6 +253,8 @@ impl Clone for Axes {
             yaxis_minor_locator: None,
             x_axis_inverted: self.x_axis_inverted,
             y_axis_inverted: self.y_axis_inverted,
+            mappable: self.mappable.clone(),
+            colorbar: self.colorbar.clone(),
         }
     }
 }
@@ -401,6 +407,8 @@ impl Axes {
             yaxis_minor_locator: None,
             x_axis_inverted: false,
             y_axis_inverted: false,
+            mappable: None,
+            colorbar: None,
         }
     }
 
@@ -496,7 +504,7 @@ impl Axes {
         Ok(())
     }
 
-    #[pyo3(signature = (x, y, s=20.0, c=None, marker="o", label=None, alpha=1.0))]
+    #[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0))]
     #[allow(clippy::too_many_arguments)]
     pub fn scatter(
         &mut self,
@@ -797,10 +805,36 @@ impl Axes {
     #[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
     #[allow(unused_variables)]
     pub fn imshow(&mut self, x: Vec<Vec<f64>>, cmap: &str, aspect: &str) {
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for row in &x {
+            for &v in row {
+                if v.is_finite() {
+                    lo = lo.min(v);
+                    hi = hi.max(v);
+                }
+            }
+        }
+        if lo.is_finite() && hi.is_finite() {
+            self.mappable = Some((cmap.to_string(), lo, hi));
+        }
         self.elements.push(PlotElement::Image {
             data: x,
             cmap: cmap.to_string(),
         });
+    }
+
+    /// 记录最近一次可映射绘制的 (cmap, vmin, vmax)，供随后的 colorbar() 使用。
+    pub fn set_mappable(&mut self, cmap: String, vmin: f64, vmax: f64) {
+        self.mappable = Some((cmap, vmin, vmax));
+    }
+
+    /// 基于当前记录的 mappable 启用颜色条；无 mappable 时按 viridis / [0,1] 兜底。
+    pub fn enable_colorbar(&mut self) {
+        self.colorbar = Some(
+            self.mappable
+                .clone()
+                .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0)),
+        );
     }
 
     #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
@@ -1868,6 +1902,15 @@ impl Axes {
             if !self.tick_left && !self.tick_right {
                 mesh_builder.y_labels(0);
             }
+
+            // matplotlib 风格刻度线：向外、长度约 3.5pt（正值 = 向外）。
+            // plotters 默认刻度长为绘图区的 5%，在本项目自定义布局下渲染极短（~1px），
+            // 故显式设为固定像素。draw_impl 中 label_dist = 2*tick_size，
+            // 因此 3.5pt 刻度同时给出约 7pt 的刻度标签间距（= matplotlib 的 tick 3.5pt + pad 3.5pt）。
+            let tick_px = (3.5 * font_scale).round().max(1.0) as i32;
+            mesh_builder
+                .set_tick_mark_size(LabelAreaPosition::Bottom, tick_px)
+                .set_tick_mark_size(LabelAreaPosition::Left, tick_px);
 
             // 手动绘制 mesh：禁用内置网格线（由 axes_grid 模块统一绘制）
             mesh_builder

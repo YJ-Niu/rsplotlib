@@ -66,9 +66,9 @@ pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
         {
             let fig_ref = fig.borrow();
             if !fig_ref.axes_list.is_empty() {
-                // 返回最后创建的 axes（符合 matplotlib：plt.* 作用于最近操作的 axes）
-                let last_idx = fig_ref.axes_list.len() - 1;
-                return Ok(fig_ref.axes_list[last_idx].clone_ref(py));
+                // 返回当前选中的 axes（plt.subplot 选中的子图；否则为最近创建的那个）
+                let idx = fig_ref.current_axes_index.min(fig_ref.axes_list.len() - 1);
+                return Ok(fig_ref.axes_list[idx].clone_ref(py));
             }
         }
         // 当前 figure 存在但还没有 axes：向其补一个全幅 axes，
@@ -78,6 +78,7 @@ pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
         let mut fig_mut = fig.borrow_mut();
         fig_mut.axes_list.push(ax_py.clone_ref(py));
         fig_mut.axes_positions.push((0.0, 1.0, 0.0, 1.0));
+        fig_mut.current_axes_index = 0;
         return Ok(ax_py);
     }
     // 没有任何当前 figure：按 matplotlib gca() 语义惰性创建 figure + 全幅 axes，
@@ -220,7 +221,7 @@ pub fn ylim(py: Python, bottom: Option<f64>, top: Option<f64>) -> PyResult<()> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=20.0, c=None, marker="o", label=None, alpha=1.0))]
+#[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0))]
 pub fn scatter<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -252,6 +253,47 @@ pub fn scatter_multi<'a>(
     make_fig_ax!(py, |ax| {
         ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
     })
+}
+
+/// 将一组数值按 colormap 映射为 `#rrggbb` 颜色字符串。
+///
+/// 用于 scatter 的 `c=数值数组, cmap=...` 场景：Python 层把数值映射为颜色后，
+/// 再作为逐点颜色传给 `scatter_multi`。未指定 vmin/vmax 时按数据的 min/max 归一化。
+#[pyfunction]
+#[pyo3(signature = (values, cmap="viridis", vmin=None, vmax=None))]
+pub fn colormap_hex(
+    values: Vec<f64>,
+    cmap: &str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+) -> Vec<String> {
+    let vmin = vmin.unwrap_or_else(|| {
+        values
+            .iter()
+            .cloned()
+            .filter(|v| v.is_finite())
+            .fold(f64::INFINITY, f64::min)
+    });
+    let vmax = vmax.unwrap_or_else(|| {
+        values
+            .iter()
+            .cloned()
+            .filter(|v| v.is_finite())
+            .fold(f64::NEG_INFINITY, f64::max)
+    });
+    let range = if (vmax - vmin).abs() < 1e-12 {
+        1.0
+    } else {
+        vmax - vmin
+    };
+    values
+        .iter()
+        .map(|&v| {
+            let t = ((v - vmin) / range).clamp(0.0, 1.0);
+            let color = crate::core::colormap::colormap_color(cmap, t);
+            format!("#{:02x}{:02x}{:02x}", color.0, color.1, color.2)
+        })
+        .collect()
 }
 
 #[pyfunction]
@@ -573,6 +615,27 @@ pub fn set_dpi(py: Python, dpi: f64) -> PyResult<()> {
     Ok(())
 }
 
+/// 计算第 `row` 行、第 `col` 列子图在 [0,1] 网格坐标系中的位置 (left, right, bottom, top)。
+///
+/// 采用与 matplotlib 一致的 wspace/hspace 语义（默认 0.2，即相邻子图间隔为
+/// 单个子图宽/高的 20%），为内侧子图的刻度/坐标标签留出间隙，避免相互重叠。
+/// 行号 0 在最上方（top=1.0 一侧）。
+fn grid_position(row: usize, col: usize, nrows: usize, ncols: usize) -> (f64, f64, f64, f64) {
+    const WSPACE: f64 = 0.2;
+    const HSPACE: f64 = 0.2;
+    let ncols_f = ncols as f64;
+    let nrows_f = nrows as f64;
+    let cell_w = 1.0 / (ncols_f + (ncols_f - 1.0) * WSPACE);
+    let cell_h = 1.0 / (nrows_f + (nrows_f - 1.0) * HSPACE);
+    let gap_w = cell_w * WSPACE;
+    let gap_h = cell_h * HSPACE;
+    let left = col as f64 * (cell_w + gap_w);
+    let right = left + cell_w;
+    let top = 1.0 - row as f64 * (cell_h + gap_h);
+    let bottom = top - cell_h;
+    (left, right, bottom, top)
+}
+
 #[pyfunction]
 #[pyo3(signature = (nrows=1, ncols=1, index=1))]
 pub fn subplot(
@@ -581,19 +644,47 @@ pub fn subplot(
     ncols: usize,
     index: usize,
 ) -> PyResult<Bound<'_, PyTuple>> {
-    if index == 0 || index > nrows * ncols {
+    let total = nrows * ncols;
+    if index == 0 || index > total {
         return Err(PyValueError::new_err("Index out of range"));
     }
-    let result = subplots(py, nrows, ncols, None, None)?;
-    let fig = result.get_item(0)?;
-    let axes_all = result.get_item(1)?;
-    let ax = if nrows * ncols == 1 {
-        axes_all.clone()
-    } else {
-        let lst = axes_all.cast::<PyList>()?;
-        lst.get_item(index - 1)?
+
+    // 复用当前 figure（保留用户已设置的 figsize / dpi 等）；没有则新建一个。
+    let fig_bound = match get_current_figure(py) {
+        Ok(f) => f,
+        Err(_) => {
+            let fig_py = Py::new(py, Figure::new())?;
+            set_current_figure(fig_py.clone_ref(py));
+            fig_py.bind(py).clone()
+        }
     };
-    PyTuple::new(py, [fig, ax])
+
+    // 若现有网格与请求的 nrows×ncols 不一致，则重建为一个空网格，
+    // 并为每个格子写入正确的分数坐标位置；一致时直接复用，仅切换选中项。
+    {
+        let mut fig_ref = fig_bound.borrow_mut();
+        let need_rebuild =
+            fig_ref.nrows != nrows || fig_ref.ncols != ncols || fig_ref.axes_list.len() != total;
+        if need_rebuild {
+            fig_ref.axes_list.clear();
+            fig_ref.axes_positions.clear();
+            fig_ref.nrows = nrows;
+            fig_ref.ncols = ncols;
+            for k in 0..total {
+                let ax_py = Py::new(py, Axes::new())?;
+                init_axes_self_py(&ax_py, py);
+                let pos = grid_position(k / ncols, k % ncols, nrows, ncols);
+                fig_ref.axes_list.push(ax_py.clone_ref(py));
+                fig_ref.axes_positions.push(pos);
+            }
+        }
+        fig_ref.current_axes_index = index - 1;
+    }
+
+    let ax_py = fig_bound.borrow().axes_list[index - 1].clone_ref(py);
+    let fig_obj = fig_bound.as_any().clone();
+    let ax_obj = ax_py.bind(py).as_any().clone();
+    PyTuple::new(py, [fig_obj, ax_obj])
 }
 
 #[pyfunction]
@@ -627,12 +718,13 @@ pub fn subplots(
     set_current_figure(fig_py.clone_ref(py));
 
     if total == 1 {
-        let ax = Axes::new();
-        let ax_py = Py::new(py, ax)?;
+        let ax_py = Py::new(py, Axes::new())?;
         init_axes_self_py(&ax_py, py);
         {
             let mut fig_ref = fig_py.borrow_mut(py);
             fig_ref.axes_list.push(ax_py.clone_ref(py));
+            fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
+            fig_ref.current_axes_index = 0;
         }
         let fig_obj = fig_py.bind(py).as_any().clone();
         let ax_obj = ax_py.bind(py).as_any().clone();
@@ -641,13 +733,15 @@ pub fn subplots(
         let mut py_axes: Vec<Bound<'_, PyAny>> = Vec::new();
         {
             let mut fig_ref = fig_py.borrow_mut(py);
-            for _ in 0..total {
-                let ax = Axes::new();
-                let ax_py = Py::new(py, ax)?;
+            for k in 0..total {
+                let ax_py = Py::new(py, Axes::new())?;
                 init_axes_self_py(&ax_py, py);
+                let pos = grid_position(k / ncols, k % ncols, nrows, ncols);
                 fig_ref.axes_list.push(ax_py.clone_ref(py));
+                fig_ref.axes_positions.push(pos);
                 py_axes.push(ax_py.bind(py).as_any().clone());
             }
+            fig_ref.current_axes_index = 0;
         }
         let fig_obj = fig_py.bind(py).as_any().clone();
         let axes_list = PyList::new(py, py_axes)?;
@@ -733,9 +827,9 @@ pub fn gca(py: Python) -> PyResult<Py<Axes>> {
             "No axes found. Create a figure first.",
         ));
     }
-    // 返回最后创建的axes（更符合matplotlib行为）
-    let last_idx = fig_ref.axes_list.len() - 1;
-    Ok(fig_ref.axes_list[last_idx].clone_ref(py))
+    // 返回当前选中的 axes（plt.subplot 选中的子图；否则为最近创建的那个）
+    let idx = fig_ref.current_axes_index.min(fig_ref.axes_list.len() - 1);
+    Ok(fig_ref.axes_list[idx].clone_ref(py))
 }
 
 #[pyfunction]
@@ -743,6 +837,8 @@ pub fn clf(py: Python) -> PyResult<()> {
     let fig = get_current_figure(py)?;
     let mut fig_ref = fig.borrow_mut();
     fig_ref.axes_list.clear();
+    fig_ref.axes_positions.clear();
+    fig_ref.current_axes_index = 0;
     Ok(())
 }
 

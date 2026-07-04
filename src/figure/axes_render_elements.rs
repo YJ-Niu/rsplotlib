@@ -15,10 +15,7 @@ use pyo3::prelude::*;
 
 use std::cell::RefCell;
 
-use crate::core::colormap::{
-    autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color,
-    viridis_color, winter_color,
-};
+use crate::core::colormap::colormap_color;
 use crate::core::colors::{RgbColor, default_color, median, parse_color, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
@@ -734,6 +731,7 @@ where
                                     marker_size,
                                     face_rgb,
                                     edge_rgb,
+                                    1.0,
                                 )
                                 .map_err(|e| {
                                     PyRuntimeError::new_err(format!("Failed to draw marker: {}", e))
@@ -749,17 +747,20 @@ where
                 s,
                 c,
                 marker,
+                alpha,
                 color_idx,
                 ..
             } => {
                 let col = parse_color(c, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
-                let size = s.sqrt() * 0.4;
+                // matplotlib: s 是 marker 面积 (points²)，故直径 = sqrt(s) points，
+                // 像素直径 = sqrt(s) * marker_scale；draw_marker 的 size 是半径。
+                let size = (s.sqrt() * marker_scale / 2.0).max(1.0);
                 for (&xv, &yv) in x.iter().zip(y.iter()) {
                     let txv = tx(xv);
                     let tyv = ty(yv);
                     if txv.is_finite() && tyv.is_finite() {
-                        draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb).map_err(
+                        draw_marker(chart, marker, txv, tyv, size, rgb, rgb, *alpha).map_err(
                             |e| PyRuntimeError::new_err(format!("Failed to draw scatter: {}", e)),
                         )?;
                     }
@@ -771,6 +772,7 @@ where
                 s_list,
                 c_list,
                 marker,
+                alpha,
                 color_idx,
                 ..
             } => {
@@ -793,13 +795,15 @@ where
                         parse_color(&c_str, *color_idx + i).unwrap_or(default_color(*color_idx + i))
                     };
                     let rgb = to_plotters_color(col);
-                    let size = s_list
+                    let size = (s_list
                         .as_ref()
                         .and_then(|s| s.get(i).cloned())
-                        .unwrap_or(20.0)
+                        .unwrap_or(100.0)
                         .sqrt()
-                        * 0.4;
-                    draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb).map_err(|e| {
+                        * marker_scale
+                        / 2.0)
+                        .max(1.0);
+                    draw_marker(chart, marker, txv, tyv, size, rgb, rgb, *alpha).map_err(|e| {
                         PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e))
                     })?;
                 }
@@ -989,27 +993,7 @@ where
                 for (r, row) in data.iter().enumerate() {
                     for (c, &val) in row.iter().enumerate() {
                         let normalized = (val - d_min) / d_range;
-                        let rgb = match cmap.as_str() {
-                            "gray" | "grey" => {
-                                let v = (normalized * 255.0) as u8;
-                                RGBColor(v, v, v)
-                            }
-                            "hot" => {
-                                let r = (normalized * 3.0).clamp(0.0, 1.0);
-                                let g = (normalized * 3.0 - 1.0).clamp(0.0, 1.0);
-                                let b = (normalized * 3.0 - 2.0).clamp(0.0, 1.0);
-                                RGBColor((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
-                            }
-                            "plasma" => plasma_color(normalized),
-                            "inferno" => inferno_color(normalized),
-                            "magma" => magma_color(normalized),
-                            "cool" => cool_color(normalized),
-                            "spring" => spring_color(normalized),
-                            "summer" => summer_color(normalized),
-                            "autumn" => autumn_color(normalized),
-                            "winter" => winter_color(normalized),
-                            _ => viridis_color(normalized),
-                        };
+                        let rgb = colormap_color(cmap.as_str(), normalized);
                         chart
                             .draw_series(std::iter::once(Rectangle::new(
                                 [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
@@ -1476,9 +1460,9 @@ where
                     }
                     if !fmt.is_empty() {
                         let marker_name = fmt;
-                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb).map_err(|e| {
-                            PyRuntimeError::new_err(format!("ErrorBar marker: {}", e))
-                        })?;
+                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb, 1.0).map_err(
+                            |e| PyRuntimeError::new_err(format!("ErrorBar marker: {}", e)),
+                        )?;
                     }
                 }
             }
@@ -1524,7 +1508,7 @@ where
                     if !txv.is_finite() || !tyv.is_finite() {
                         continue;
                     }
-                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb)
+                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb, 1.0)
                         .map_err(|e| PyRuntimeError::new_err(format!("Stem marker: {}", e)))?;
                 }
             }
