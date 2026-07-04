@@ -412,10 +412,19 @@ def bar(x, height, width=0.8, color=None, label=None):
 
     用法:
         plt.bar([0, 1, 2], [1, 2, 3])
+        plt.bar(["A", "B", "C"], [1, 2, 3])  # 字符串 x 作为类别标签
     """
     x = _to_list(x)
     height = _to_list(height)
-    return _route_to_ax('bar', _rsplotlib.bar, x, height, width, color, label)
+    # 类别型 x：x 为字符串序列时，柱子落在 0,1,2,... 位置，字符串作为 x 轴刻度标签。
+    tick_labels = None
+    if isinstance(x, (list, tuple)) and any(isinstance(v, str) for v in x):
+        tick_labels = [str(v) for v in x]
+        x = list(range(len(x)))
+    result = _route_to_ax('bar', _rsplotlib.bar, x, height, width, color, label)
+    if tick_labels is not None:
+        xticks(x, tick_labels)
+    return result
 
 
 def barh(y, width, height=0.8, color=None, label=None):
@@ -1179,7 +1188,9 @@ def savefig(fname, **kwargs):
 
 
 def show(**kwargs):
-    """在默认应用中显示图形。"""
+    """在默认应用中显示图形。无当前 figure 时静默返回（与 matplotlib 一致）。"""
+    if _get_figure() is None:
+        return None
     return _rsplotlib.show()
 
 

@@ -1848,6 +1848,25 @@ impl Axes {
                 label_size
             };
             let axis_desc_rgb = to_plotters_color(desc_color);
+            // 类别型 x 轴：同时提供刻度位置 (xticks_val) 与字符串标签 (xtick_labels) 时，
+            // 把落在这些位置的刻度渲染成对应字符串（如柱状图的类别名），其余刻度回退为
+            // 数值格式。plotters 仅按数量自动布点，故用位置匹配 (容差 1e-6) 做映射。
+            // 在 mesh_builder 之前声明，保证其生命周期长于持有其引用的 builder。
+            let xtick_label_map: Vec<(f64, String)> = match (&self.xticks_val, &self.xtick_labels) {
+                (Some(ticks), Some(labels)) => {
+                    ticks.iter().cloned().zip(labels.iter().cloned()).collect()
+                }
+                _ => Vec::new(),
+            };
+            let has_xcat = !xtick_label_map.is_empty();
+            let x_cat_fmt = move |v: &f64| -> String {
+                for (t, l) in &xtick_label_map {
+                    if (t - *v).abs() < 1e-6 {
+                        return l.clone();
+                    }
+                }
+                crate::figure::axes_mesh::format_linear_tick(*v)
+            };
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
                 .x_labels(ticks_info.xticks.len().max(2))
@@ -1888,6 +1907,10 @@ impl Axes {
                     .y_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
                 mesh_builder
                     .x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
+            }
+            // 类别标签覆盖 x 轴数值格式（plotters 后一次 x_label_formatter 覆盖前一次）。
+            if has_xcat {
+                mesh_builder.x_label_formatter(&x_cat_fmt);
             }
 
             if !self.spine_bottom && !self.spine_top {

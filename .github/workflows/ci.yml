@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master, dev]
+    branches: [main]
   pull_request:
-    branches: [main, master, dev]
+    branches: [main]
 
 # 同一分支/PR 的新推送会取消仍在进行的旧运行，节省 CI 时间。
 concurrency:

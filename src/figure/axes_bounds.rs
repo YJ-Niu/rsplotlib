@@ -41,6 +41,10 @@ pub fn compute_bounds(
     let mut x_max = f64::NEG_INFINITY;
     let mut y_min = f64::INFINITY;
     let mut y_max = f64::NEG_INFINITY;
+    // 柱状图基线粘附 0（matplotlib sticky edges）：柱子全为正值时，对应轴的起点固定到
+    // 0，且该侧不再追加 5% 留白，使柱子从坐标轴上"长出来"而非悬空。
+    let mut y_sticky_min = false;
+    let mut x_sticky_min = false;
 
     let tx = |v: f64| if xlog { log_transform(v) } else { v };
     let ty = |v: f64| if ylog { log_transform(v) } else { v };
@@ -90,13 +94,16 @@ pub fn compute_bounds(
             PlotElement::Bar {
                 x, height, width, ..
             } => {
+                // 柱子居中于 x（align='center'），左右各延伸 width/2；用其真实边缘参与
+                // 自动缩放，使首/末柱不被裁切，x 轴范围也对称贴合定义的 x 位置。
+                let hw = *width / 2.0;
                 for &v in x {
                     let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min {
-                        x_min = tv;
+                    if tv > f64::NEG_INFINITY && tv - hw < x_min {
+                        x_min = tv - hw;
                     }
-                    if tv > x_max {
-                        x_max = tv;
+                    if tv + hw > x_max {
+                        x_max = tv + hw;
                     }
                 }
                 for &v in height {
@@ -108,15 +115,9 @@ pub fn compute_bounds(
                         y_max = tv;
                     }
                 }
-                if !x.is_empty() && !height.is_empty() {
-                    let last_x = tx(x[x.len() - 1]);
-                    let bar_end = last_x + *width;
-                    if bar_end > x_max {
-                        x_max = bar_end;
-                    }
-                }
                 if !ylog && y_min > 0.0 {
                     y_min = 0.0;
+                    y_sticky_min = true;
                 }
             }
             PlotElement::BarH { y, width, .. } => {
@@ -146,6 +147,7 @@ pub fn compute_bounds(
                 }
                 if !xlog && x_min > 0.0 {
                     x_min = 0.0;
+                    x_sticky_min = true;
                 }
             }
             PlotElement::Hist {
@@ -222,6 +224,7 @@ pub fn compute_bounds(
                 }
                 if !ylog && y_min > 0.0 {
                     y_min = 0.0;
+                    y_sticky_min = true;
                 }
                 let tmax = ty(max_count);
                 if tmax > y_max {
@@ -599,14 +602,18 @@ pub fn compute_bounds(
         x_min = l;
         x_max = r;
     } else {
-        x_min -= x_pad;
+        if !x_sticky_min {
+            x_min -= x_pad;
+        }
         x_max += x_pad;
     }
     if let Some((b, t)) = ylim {
         y_min = b;
         y_max = t;
     } else {
-        y_min -= y_pad;
+        if !y_sticky_min {
+            y_min -= y_pad;
+        }
         y_max += y_pad;
     }
 
