@@ -86,6 +86,14 @@ else
   exit 1
 fi
 
+# ========== 构建前的 Clippy 静态检查（-D warnings：任何告警都当作错误） ==========
+echo "Running clippy checks (cargo clippy --all-targets -- -D warnings) ..."
+if ! cargo clippy --all-targets -- -D warnings; then
+  echo "Error: clippy checks failed. Fix the warnings above before building." >&2
+  exit 1
+fi
+echo "  -> clippy checks passed."
+
 BUILD_ARGS=()
 if $RELEASE; then BUILD_ARGS+=(--release); else BUILD_ARGS+=(--debug); fi
 

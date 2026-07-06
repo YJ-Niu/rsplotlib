@@ -842,10 +842,8 @@ impl Axes {
             Some(l) => {
                 if let Ok(s) = l.extract::<String>() {
                     vec![s]
-                } else if let Ok(v) = l.extract::<Vec<String>>() {
-                    v
                 } else {
-                    Vec::new()
+                    l.extract::<Vec<String>>().unwrap_or_default()
                 }
             }
             None => Vec::new(),

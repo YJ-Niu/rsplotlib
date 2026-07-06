@@ -91,10 +91,10 @@ fn collect_data_points(elements: &[PlotElement]) -> Vec<(f64, f64)> {
                 }
             }
             PlotElement::FillBetween { x, y1, y2, .. } => {
-                for i in 0..x.len() {
+                for (i, &xi) in x.iter().enumerate() {
                     let yl = *y1.get(i).unwrap_or(&0.0);
                     let yh = *y2.get(i).unwrap_or(&0.0);
-                    push_rect(&mut pts, x[i], x[i], yl, yh);
+                    push_rect(&mut pts, xi, xi, yl, yh);
                 }
             }
             PlotElement::Stack { x, y_series, .. } => {
