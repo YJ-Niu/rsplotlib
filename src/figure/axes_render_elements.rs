@@ -485,11 +485,43 @@ where
     }
 }
 
-/// 渲染所有 PlotElement
+/// 网格分层。
+///
+/// matplotlib 默认 `axes.axisbelow = 'line'`：网格线（zorder≈1.5）绘制在填充
+/// patch/collection（zorder≈1，如 bar/hist 柱、fill_between、stackplot、scatter、
+/// axhspan/axvspan）之上，但在折线（Line2D，zorder=2，如 plot、hist 的 step 轮廓）之下。
+/// 因此渲染分两趟：先画 `BelowGrid` 元素 → 画网格 → 再画 `AboveGrid` 元素。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GridLayer {
+    BelowGrid,
+    AboveGrid,
+}
+
+/// 判断某元素（Hist 除外）应绘制在网格下方（true）还是上方（false）。
+///
+/// 与 matplotlib 各 artist 默认 zorder 对齐：填充 patch/collection（zorder=1）在网格下，
+/// 其余（Line2D、Text 等，zorder≥2）在网格上。Hist 需跨两趟（柱在下、step 轮廓在上），
+/// 由其分支内部按 layer 分别处理，不经过此函数。
+fn element_below_grid(el: &PlotElement) -> bool {
+    matches!(
+        el,
+        PlotElement::Bar { .. }
+            | PlotElement::BarH { .. }
+            | PlotElement::FillBetween { .. }
+            | PlotElement::Stack { .. }
+            | PlotElement::HSpan { .. }
+            | PlotElement::VSpan { .. }
+            | PlotElement::Scatter { .. }
+            | PlotElement::ScatterMulti { .. }
+    )
+}
+
+/// 渲染所有 PlotElement（按网格分层 `layer` 只绘制归属该层的元素）
 ///
 /// # 参数
 /// - `chart`: plotters 的 chart 上下文
 /// - `elements`: 所有 plot 调用收集的元素
+/// - `layer`: 当前绘制的网格分层（BelowGrid/AboveGrid）
 /// - `font_scale`: 字体缩放系数
 /// - `xlog`, `ylog`: 是否对数刻度
 /// - `x_min`, `x_max`, `y_min`, `y_max`: 数据范围
@@ -497,6 +529,7 @@ where
 pub fn render_elements<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     elements: &[PlotElement],
+    layer: GridLayer,
     font_scale: f64,
     marker_scale: f64,
     xlog: bool,
@@ -535,6 +568,13 @@ where
     };
 
     for el in elements {
+        // matplotlib 默认 axisbelow='line'：按元素归属的网格分层跳过不属于本趟的元素。
+        // Hist 例外——柱在网格下、step 轮廓在网格上，其分支内部各自按 layer 判断。
+        if !matches!(el, PlotElement::Hist { .. })
+            && element_below_grid(el) != (layer == GridLayer::BelowGrid)
+        {
+            continue;
+        }
         match el {
             PlotElement::Line {
                 x,
@@ -874,108 +914,72 @@ where
                 }
             }
             PlotElement::Hist {
-                data_all,
-                bins: num_bins_user,
-                density,
+                bars,
+                outlines,
                 histtype,
+                orientation,
                 alpha,
                 colors,
                 color_idx,
-                bin_edges,
                 label: _,
             } => {
-                if data_all.is_empty() {
-                    continue;
-                }
-                let all_data: Vec<f64> = data_all.iter().flatten().cloned().collect();
-                if all_data.is_empty() {
-                    continue;
-                }
-                let (global_min, global_max) = if let Some(edges) = bin_edges {
-                    (edges[0], edges[edges.len() - 1])
-                } else {
-                    let mn = all_data.iter().cloned().fold(f64::INFINITY, f64::min);
-                    let mx = all_data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    (mn, mx)
-                };
-                let global_range = global_max - global_min;
-                let bin_edges_list: Vec<f64> = if global_range < 1e-10 {
-                    // 所有值相同 -> 在值两侧各扩 0.5 形成一个单柱
-                    vec![global_min - 0.5, global_min + 0.5]
-                } else if let Some(edges) = bin_edges {
-                    edges.clone()
-                } else {
-                    let bw = global_range / *num_bins_user as f64;
-                    (0..=*num_bins_user)
-                        .map(|i| global_min + i as f64 * bw)
-                        .collect()
-                };
-                let effective_bins = bin_edges_list.len() - 1;
-                let total_all = all_data.len() as f64;
-                for (di, dataset) in data_all.iter().enumerate() {
-                    if dataset.is_empty() {
-                        continue;
+                let is_horizontal = orientation == "horizontal";
+                // 将 (分箱位置轴, 计数轴) 映射到数据坐标 (x, y)，竖直时 pos->x,val->y，
+                // 水平时交换；并套用各轴的 log 变换。
+                let to_xy = |pos: f64, val: f64| -> (f64, f64) {
+                    if is_horizontal {
+                        (tx(val), ty(pos))
+                    } else {
+                        (tx(pos), ty(val))
                     }
+                };
+                let is_step = histtype == "step" || histtype == "stepfilled";
+                let draw_fill = histtype != "step";
+                let n_datasets = bars.len().max(outlines.len());
+                for di in 0..n_datasets {
                     let col_str = colors.get(di).map(|s| s.as_str()).unwrap_or("");
                     let col = parse_color(col_str, *color_idx + di)
                         .unwrap_or(default_color(*color_idx + di));
                     let rgb = to_plotters_color(col);
                     let fill_style: ShapeStyle = rgb.mix(*alpha).filled();
-                    let outline_style: ShapeStyle = rgb.mix(*alpha).stroke_width(1);
-                    let mut counts = vec![0usize; effective_bins];
-                    for &val in dataset {
-                        if val < global_min || val > global_max {
-                            continue;
-                        }
-                        let bin = bin_edges_list.partition_point(|&e| e <= val) - 1;
-                        if bin < effective_bins {
-                            counts[bin] += 1;
-                        }
-                    }
-                    for (i, &count) in counts.iter().enumerate() {
-                        let bin_left = bin_edges_list[i];
-                        let bin_right = bin_edges_list[i + 1];
-                        let h = if *density {
-                            count as f64 / (total_all * (bin_right - bin_left))
-                        } else {
-                            count as f64
-                        };
-                        if h <= 0.0 {
-                            continue;
-                        }
-                        if histtype == "stepfilled" {
+
+                    // 柱（填充 patch，zorder=1）→ 网格下方
+                    if layer == GridLayer::BelowGrid
+                        && draw_fill
+                        && let Some(ds_bars) = bars.get(di)
+                    {
+                        for &(pl, pr, vb, vt) in ds_bars {
+                            if (vt - vb).abs() < 1e-12 {
+                                continue;
+                            }
+                            let c1 = to_xy(pl, vb);
+                            let c2 = to_xy(pr, vt);
                             chart
-                                .draw_series(std::iter::once(Rectangle::new(
-                                    [(bin_left, 0.0), (bin_right, h)],
-                                    fill_style,
-                                )))
-                                .map_err(|e| {
-                                    PyRuntimeError::new_err(format!(
-                                        "Failed to draw hist fill: {}",
-                                        e
-                                    ))
-                                })?;
-                            chart
-                                .draw_series(std::iter::once(Rectangle::new(
-                                    [(bin_left, 0.0), (bin_right, h)],
-                                    outline_style,
-                                )))
-                                .map_err(|e| {
-                                    PyRuntimeError::new_err(format!(
-                                        "Failed to draw hist outline: {}",
-                                        e
-                                    ))
-                                })?;
-                        } else {
-                            chart
-                                .draw_series(std::iter::once(Rectangle::new(
-                                    [(bin_left, 0.0), (bin_right, h)],
-                                    fill_style,
-                                )))
+                                .draw_series(std::iter::once(Rectangle::new([c1, c2], fill_style)))
                                 .map_err(|e| {
                                     PyRuntimeError::new_err(format!("Failed to draw hist: {}", e))
                                 })?;
                         }
+                    }
+
+                    // step 轮廓（Line2D，zorder=2）→ 网格上方
+                    if layer == GridLayer::AboveGrid
+                        && is_step
+                        && let Some(pts) = outlines.get(di)
+                    {
+                        let mapped: Vec<(f64, f64)> =
+                            pts.iter().map(|&(p, v)| to_xy(p, v)).collect();
+                        let lw_px = (1.5 * font_scale).max(1.0).round() as u32;
+                        let stroke_w = (lw_px as i32 - 1).max(1) as u32;
+                        let outline_style = rgb.stroke_width(stroke_w);
+                        chart
+                            .draw_series(std::iter::once(PathElement::new(mapped, outline_style)))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!(
+                                    "Failed to draw hist outline: {}",
+                                    e
+                                ))
+                            })?;
                     }
                 }
             }

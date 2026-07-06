@@ -53,15 +53,17 @@ pub enum PlotElement {
         color_idx: usize,
     },
     Hist {
-        data_all: Vec<Vec<f64>>,
-        bins: usize,
-        density: bool,
+        /// 每个 dataset 的柱子几何: (pos_left, pos_right, val_base, val_top)
+        /// pos = 分箱位置轴, val = 计数轴; 方向(横/竖)在渲染时交换坐标。
+        bars: Vec<Vec<(f64, f64, f64, f64)>>,
+        /// step/stepfilled 的轮廓折线, 每个 dataset 一条: (pos, val)
+        outlines: Vec<Vec<(f64, f64)>>,
         histtype: String,
+        orientation: String,
         label: Option<String>,
         alpha: f64,
         colors: Vec<String>,
         color_idx: usize,
-        bin_edges: Option<Vec<f64>>,
     },
     Image {
         data: Vec<Vec<f64>>,

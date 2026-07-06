@@ -154,84 +154,60 @@ pub fn compute_bounds(
                 }
             }
             PlotElement::Hist {
-                data_all,
-                bins,
-                density,
-                bin_edges,
+                bars,
+                outlines,
+                orientation,
                 ..
             } => {
-                if data_all.is_empty() {
+                let is_horizontal = orientation == "horizontal";
+                // 收集所有 (pos, val) 顶点：柱子四角 + 轮廓折线点
+                let mut pos_vals: Vec<(f64, f64)> = Vec::new();
+                for ds in bars {
+                    for &(pl, pr, vb, vt) in ds {
+                        pos_vals.push((pl, vb));
+                        pos_vals.push((pr, vt));
+                    }
+                }
+                for ds in outlines {
+                    for &(p, v) in ds {
+                        pos_vals.push((p, v));
+                    }
+                }
+                if pos_vals.is_empty() {
                     continue;
                 }
-                let (data_min, data_max) = data_all
-                    .iter()
-                    .flatten()
-                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
-                        (mn.min(v), mx.max(v))
-                    });
-                if !data_max.is_finite() {
-                    continue;
-                }
-                let (x_start, x_end) = if let Some(edges) = bin_edges {
-                    (edges[0], edges[edges.len() - 1])
-                } else {
-                    (data_min, data_max)
-                };
-                let tx_start = tx(x_start);
-                let tx_end = tx(x_end);
-                if tx_start > f64::NEG_INFINITY && tx_start < x_min {
-                    x_min = tx_start;
-                }
-                if tx_end > x_max {
-                    x_max = tx_end;
-                }
-                let total = data_all.iter().flatten().count() as f64;
-                let mut max_count = 0.0f64;
-                for dataset in data_all {
-                    if dataset.is_empty() {
-                        continue;
-                    }
-                    let d_min = dataset.iter().cloned().fold(f64::INFINITY, f64::min);
-                    let d_max = dataset.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    let d_range = d_max - d_min;
-                    if d_range < 1e-10 {
-                        // 所有值相同 -> 算一个单柱，计数为 dataset 长度
-                        let dc = if *density {
-                            dataset.len() as f64 / total
-                        } else {
-                            dataset.len() as f64
-                        };
-                        if dc > max_count {
-                            max_count = dc;
-                        }
-                        continue;
-                    }
-                    let bw = d_range / *bins as f64;
-                    let mut counts = vec![0usize; *bins];
-                    for &val in dataset {
-                        let mut bin = ((val - d_min) / bw).floor() as usize;
-                        if bin >= *bins {
-                            bin = *bins - 1;
-                        }
-                        counts[bin] += 1;
-                    }
-                    let mc = counts.iter().max().unwrap_or(&0);
-                    let dc = if *density {
-                        *mc as f64 / (total * bw)
+                // 竖直: pos->x, val->y；水平: pos->y, val->x
+                for &(pos, val) in &pos_vals {
+                    let (dx, dy) = if is_horizontal {
+                        (val, pos)
                     } else {
-                        *mc as f64
+                        (pos, val)
                     };
-                    if dc > max_count {
-                        max_count = dc;
+                    let tvx = tx(dx);
+                    let tvy = ty(dy);
+                    if tvx > f64::NEG_INFINITY && tvx < x_min {
+                        x_min = tvx;
+                    }
+                    if tvx > x_max {
+                        x_max = tvx;
+                    }
+                    if tvy > f64::NEG_INFINITY && tvy < y_min {
+                        y_min = tvy;
+                    }
+                    if tvy > y_max {
+                        y_max = tvy;
                     }
                 }
-                if !ylog && y_min > 0.0 {
+                // 计数轴基线粘附 0（数值全为正时，计数轴从 0 起始、下方不留白）：
+                // 竖直方向作用于 y 轴，水平方向作用于 x 轴。
+                if is_horizontal {
+                    if !xlog && x_min >= 0.0 {
+                        x_min = 0.0;
+                        x_sticky_min = true;
+                    }
+                } else if !ylog && y_min >= 0.0 {
                     y_min = 0.0;
                     y_sticky_min = true;
-                }
-                let tmax = ty(max_count);
-                if tmax > y_max {
-                    y_max = tmax;
                 }
             }
             PlotElement::Image { data, .. } => {

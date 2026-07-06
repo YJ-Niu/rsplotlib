@@ -388,7 +388,8 @@ def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
     kwargs['vmin'] = vmin
     kwargs['vmax'] = vmax
     a = 1.0 if alpha is None else alpha
-    use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label=None, alpha=a, kwargs=kwargs)
+    label = kwargs.pop('label', None)
+    use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label=label, alpha=a, kwargs=kwargs)
     if use_multi:
         result = _route_to_ax('scatter_multi', _rsplotlib.scatter_multi, *args)
     else:
@@ -450,49 +451,101 @@ def barh(y, width, height=0.8, color=None, label=None):
     return result
 
 
-def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None, **kwargs):
+def hist(x, bins=None, range=None, density=False, weights=None,
+         cumulative=False, bottom=None, histtype='bar', align='mid',
+         orientation='vertical', rwidth=None, log=False, color=None,
+         label=None, stacked=False, **kwargs):
     """绘制直方图。
 
     用法:
         plt.hist(data, bins=20)
-        plt.hist([data1, data2], bins=10, color=['red', 'blue'])
+        plt.hist([data1, data2], bins=10, color=['red', 'blue'], stacked=True)
+        plt.hist(data, histtype='step', cumulative=True, density=True)
+        plt.hist(data, orientation='horizontal', log=True)
 
     Args:
         x: 数据 (一维数组, 或多组数据组成的列表)
-        bins: 分箱数量 (默认 10)
-        density: 是否归一化到概率密度 (默认 False)
-        label: 图例标签
-        alpha: 透明度 (默认 0.7)
+        bins: 分箱数量 (默认 10) 或箱边界列表
+        range: 值域范围 (lo, hi)，None 表示使用数据的最小/最大值
+        density: 是否归一化为概率密度 (默认 False)
+        weights: 每个数据点的权重
+        cumulative: 是否绘制累积分布 (True/False/-1)
+        bottom: 每个柱子的起始基线 (默认 0)
+        histtype: 'bar' | 'barstacked' | 'step' | 'stepfilled'
+        align: 'left' | 'mid' | 'right'
+        orientation: 'vertical' | 'horizontal'
+        rwidth: 每个柱子相对于分箱宽度的比例 (0~1)
+        log: 计数轴是否使用对数刻度
         color: 颜色或颜色列表
-        **kwargs: 额外关键字参数 (facecolor, align, histtype)
+        label: 图例标签
+        stacked: 是否堆叠多组直方图
+        **kwargs: 额外关键字参数 (facecolor, alpha)
     """
     facecolor = kwargs.pop('facecolor', None)
-    align = kwargs.pop('align', None)
-    histtype = kwargs.pop('histtype', None)
-    _color = facecolor if facecolor is not None else color
+    alpha = kwargs.pop('alpha', 1.0)
 
+    if bins is None:
+        bins = 10
+
+    # 数据规整为“组的列表”
     x = _to_list_recursive(x)
     if x and isinstance(x[0], (list, tuple)):
         x_list = [list(v) for v in x]
     else:
         x_list = [list(x)]
+    n_datasets = len(x_list)
 
-    if _color is not None:
-        if isinstance(_color, str):
-            color_list = [_color] * len(x_list)
-        elif isinstance(_color, (list, tuple)):
-            color_list = list(_color)
+    # weights 规整为与 x 平行的结构
+    if weights is not None:
+        w = _to_list_recursive(weights)
+        if w and isinstance(w[0], (list, tuple)):
+            weights_arg = [list(v) for v in w]
         else:
-            color_list = None
+            weights_arg = [list(w)]
     else:
-        color_list = None
+        weights_arg = None
 
-    def _call_hist(*a, **k):
-        return _rsplotlib.hist(*a, **k)
+    # bins: 整数箱数 或 箱边界列表
+    if isinstance(bins, (list, tuple)):
+        bins_arg = [float(b) for b in bins]
+    elif hasattr(bins, 'tolist'):
+        bins_arg = [float(b) for b in bins.tolist()]
+    else:
+        bins_arg = int(bins)
 
-    return _route_to_ax('hist', _call_hist, x_list, bins=bins, density=density,
-                        label=label, alpha=alpha, color=color_list,
-                        facecolor=None, align=align, histtype=histtype)
+    def _norm_color(c):
+        if c is None:
+            return None
+        if isinstance(c, str):
+            return [c] * n_datasets
+        if isinstance(c, (list, tuple)):
+            return list(c)
+        return None
+
+    color_arg = _norm_color(color)
+    facecolor_arg = _norm_color(facecolor)
+
+    # cumulative -> int (True=1, False=0, -1=反向累积)
+    if cumulative is True:
+        cum = 1
+    elif cumulative is False or cumulative is None:
+        cum = 0
+    else:
+        cum = int(cumulative)
+
+    range_arg = tuple(range) if range is not None else None
+
+    hist_kwargs = dict(
+        bins=bins_arg, range=range_arg, density=density, weights=weights_arg,
+        cumulative=cum, bottom=bottom, histtype=histtype, align=align,
+        orientation=orientation, rwidth=rwidth, log=log, color=color_arg,
+        facecolor=facecolor_arg, label=label, stacked=stacked, alpha=alpha,
+    )
+
+    ax = _get_axes()
+    if ax is not None and hasattr(ax, 'hist'):
+        return ax.hist(x_list, **hist_kwargs)
+    return _rsplotlib.hist(x_list, **hist_kwargs)
 
 
 def pie(x, labels=None, colors=None, autopct=False, startangle=0.0, explode=None, **kwargs):

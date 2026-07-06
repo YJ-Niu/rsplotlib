@@ -312,24 +312,50 @@ pub fn bar<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, bins=None, density=false, label=None, alpha=0.7, color=None, facecolor=None, align=None, histtype=None))]
+#[pyo3(signature = (x, bins=None, range=None, density=false, weights=None, cumulative=0, bottom=None, histtype=None, align=None, orientation=None, rwidth=None, log=false, color=None, facecolor=None, label=None, stacked=false, alpha=1.0))]
+#[allow(clippy::too_many_arguments)]
 pub fn hist<'py>(
     py: Python<'py>,
     x: Bound<'py, PyAny>,
     bins: Option<Bound<'py, PyAny>>,
+    range: Option<(f64, f64)>,
     density: bool,
-    label: Option<String>,
-    alpha: f64,
+    weights: Option<Bound<'py, PyAny>>,
+    cumulative: i64,
+    bottom: Option<f64>,
+    histtype: Option<String>,
+    align: Option<String>,
+    orientation: Option<String>,
+    rwidth: Option<f64>,
+    log: bool,
     color: Option<Bound<'py, PyAny>>,
     facecolor: Option<Bound<'py, PyAny>>,
-    align: Option<String>,
-    histtype: Option<String>,
-) -> PyResult<Bound<'py, PyTuple>> {
-    make_fig_ax!(py, |ax| {
-        ax.hist(
-            py, x, bins, density, label, alpha, color, facecolor, align, histtype,
-        )?;
-    })
+    label: Option<Bound<'py, PyAny>>,
+    stacked: bool,
+    alpha: f64,
+) -> PyResult<(Py<PyAny>, Vec<f64>, Option<Vec<Vec<f64>>>)> {
+    let (_fig_py, ax_py) = _make_fig_ax(py, Axes::new())?;
+    let mut ax_ref = ax_py.borrow_mut(py);
+    ax_ref.hist(
+        py,
+        x,
+        bins,
+        range,
+        density,
+        weights,
+        cumulative,
+        bottom,
+        histtype,
+        align,
+        orientation,
+        rwidth,
+        log,
+        color,
+        facecolor,
+        label,
+        stacked,
+        alpha,
+    )
 }
 
 #[pyfunction]
@@ -751,12 +777,13 @@ pub fn subplots(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
+#[pyo3(signature = (x, y, fmt=None, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn plot<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
     y: Bound<'a, PyAny>,
+    fmt: Option<String>,
     label: Option<String>,
     color: Option<String>,
     linestyle: Option<String>,
@@ -776,6 +803,7 @@ pub fn plot<'a>(
             py,
             x,
             y,
+            fmt,
             label,
             color,
             &linestyle.unwrap_or_else(|| "-".to_string()),
@@ -876,7 +904,8 @@ pub fn semilogx<'a>(
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
         ax.plot(
-            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+            py, x, y, None, label, color, ls, marker, lw, None, None, None, None, None, None, None,
+            None,
         )?;
     })
 }
@@ -899,7 +928,8 @@ pub fn semilogy<'a>(
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
         ax.plot(
-            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+            py, x, y, None, label, color, ls, marker, lw, None, None, None, None, None, None, None,
+            None,
         )?;
     })
 }
@@ -923,7 +953,8 @@ pub fn loglog<'a>(
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
         ax.plot(
-            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+            py, x, y, None, label, color, ls, marker, lw, None, None, None, None, None, None, None,
+            None,
         )?;
     })
 }
