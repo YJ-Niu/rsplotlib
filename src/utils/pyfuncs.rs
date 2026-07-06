@@ -638,20 +638,32 @@ pub fn set_dpi(py: Python, dpi: f64) -> PyResult<()> {
     Ok(())
 }
 
+/// 子图水平方向的基础间距（wspace）：相邻列间隔占单个子图宽度的比例。
+/// 当任一子图设置了 Y 轴标签时，渲染阶段会将其翻倍以容纳 y 刻度数字 + y 轴标签。
+pub const BASE_WSPACE: f64 = 0.24;
+/// 子图垂直方向的基础间距（hspace）：相邻行间隔占单个子图高度的比例。
+/// 当任一子图设置了 X 轴标签时，渲染阶段会将其翻倍以容纳 x 刻度数字 + x 轴标签 + 下方 title。
+pub const BASE_HSPACE: f64 = 0.42;
+
 /// 计算第 `row` 行、第 `col` 列子图在 [0,1] 网格坐标系中的位置 (left, right, bottom, top)。
 ///
-/// 采用与 matplotlib 一致的 wspace/hspace 语义（默认 0.2，即相邻子图间隔为
-/// 单个子图宽/高的 20%），为内侧子图的刻度/坐标标签留出间隙，避免相互重叠。
+/// 采用与 matplotlib 一致的 wspace/hspace 语义，为内侧子图的刻度/坐标标签留出间隙，
+/// 避免相互重叠。`wspace`/`hspace` 分别为相邻列/行间隔占单个子图宽/高的比例。
 /// 行号 0 在最上方（top=1.0 一侧）。
-fn grid_position(row: usize, col: usize, nrows: usize, ncols: usize) -> (f64, f64, f64, f64) {
-    const WSPACE: f64 = 0.2;
-    const HSPACE: f64 = 0.2;
+pub fn grid_position(
+    row: usize,
+    col: usize,
+    nrows: usize,
+    ncols: usize,
+    wspace: f64,
+    hspace: f64,
+) -> (f64, f64, f64, f64) {
     let ncols_f = ncols as f64;
     let nrows_f = nrows as f64;
-    let cell_w = 1.0 / (ncols_f + (ncols_f - 1.0) * WSPACE);
-    let cell_h = 1.0 / (nrows_f + (nrows_f - 1.0) * HSPACE);
-    let gap_w = cell_w * WSPACE;
-    let gap_h = cell_h * HSPACE;
+    let cell_w = 1.0 / (ncols_f + (ncols_f - 1.0) * wspace);
+    let cell_h = 1.0 / (nrows_f + (nrows_f - 1.0) * hspace);
+    let gap_w = cell_w * wspace;
+    let gap_h = cell_h * hspace;
     let left = col as f64 * (cell_w + gap_w);
     let right = left + cell_w;
     let top = 1.0 - row as f64 * (cell_h + gap_h);
@@ -696,7 +708,8 @@ pub fn subplot(
             for k in 0..total {
                 let ax_py = Py::new(py, Axes::new())?;
                 init_axes_self_py(&ax_py, py);
-                let pos = grid_position(k / ncols, k % ncols, nrows, ncols);
+                let pos =
+                    grid_position(k / ncols, k % ncols, nrows, ncols, BASE_WSPACE, BASE_HSPACE);
                 fig_ref.axes_list.push(ax_py.clone_ref(py));
                 fig_ref.axes_positions.push(pos);
             }
@@ -759,7 +772,8 @@ pub fn subplots(
             for k in 0..total {
                 let ax_py = Py::new(py, Axes::new())?;
                 init_axes_self_py(&ax_py, py);
-                let pos = grid_position(k / ncols, k % ncols, nrows, ncols);
+                let pos =
+                    grid_position(k / ncols, k % ncols, nrows, ncols, BASE_WSPACE, BASE_HSPACE);
                 fig_ref.axes_list.push(ax_py.clone_ref(py));
                 fig_ref.axes_positions.push(pos);
                 py_axes.push(ax_py.bind(py).as_any().clone());

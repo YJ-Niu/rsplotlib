@@ -45,6 +45,8 @@ pub fn compute_bounds(
     // 0，且该侧不再追加 5% 留白，使柱子从坐标轴上"长出来"而非悬空。
     let mut y_sticky_min = false;
     let mut x_sticky_min = false;
+    // imshow：图像应紧贴坐标轴，四周不留 5% 空白（与 matplotlib 一致）。
+    let mut tight_image = false;
 
     let tx = |v: f64| if xlog { log_transform(v) } else { v };
     let ty = |v: f64| if ylog { log_transform(v) } else { v };
@@ -218,6 +220,7 @@ pub fn compute_bounds(
                 x_max = pixels[0].len() as f64;
                 y_min = 0.0;
                 y_max = pixels.len() as f64;
+                tight_image = true;
             }
             PlotElement::Text { x, y, .. } => {
                 let tvx = tx(*x);
@@ -580,7 +583,7 @@ pub fn compute_bounds(
     if let Some((l, r)) = xlim {
         x_min = l;
         x_max = r;
-    } else {
+    } else if !tight_image {
         if !x_sticky_min {
             x_min -= x_pad;
         }
@@ -589,7 +592,7 @@ pub fn compute_bounds(
     if let Some((b, t)) = ylim {
         y_min = b;
         y_max = t;
-    } else {
+    } else if !tight_image {
         if !y_sticky_min {
             y_min -= y_pad;
         }

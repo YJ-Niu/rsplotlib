@@ -392,7 +392,7 @@ impl Axes {
             ylabel_family: None,
             ylabel_loc: "center".to_string(),
             title: String::new(),
-            title_fontsize: 12.0,
+            title_fontsize: 9.6,
             title_color: RgbColor(0, 0, 0),
             title_family: None,
             title_loc: "center".to_string(),
@@ -2064,7 +2064,12 @@ impl Axes {
             // 水平对齐。twin 轴的 x 标签在顶部，位置不同，故不处理。
             let x_axis_on = self.spine_bottom || self.spine_top;
             let x_labels_on = self.tick_bottom || self.tick_top;
-            let do_manual_x = !self.is_twin_x && !self.is_twin_y && x_axis_on && x_labels_on;
+            // 用户显式设置空刻度（plt.xticks([]) / plt.yticks([])）：此时最终刻度为空，
+            // 应完全不画刻度线与刻度值（包括 0），而不是回退到默认最少 2 个标签。
+            let x_ticks_empty = ticks_info.xticks.is_empty();
+            let y_ticks_empty = ticks_info.yticks.is_empty();
+            let do_manual_x =
+                !self.is_twin_x && !self.is_twin_y && x_axis_on && x_labels_on && !x_ticks_empty;
             // 取 plotters 实际用于底部 x 标签的 key points（与刻度线位置一致）。
             let x_key_points: Vec<f64> = if do_manual_x {
                 let n_x = ticks_info.xticks.len().max(2);
@@ -2079,8 +2084,16 @@ impl Axes {
 
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
-                .x_labels(ticks_info.xticks.len().max(2))
-                .y_labels(ticks_info.yticks.len().max(2))
+                .x_labels(if x_ticks_empty {
+                    0
+                } else {
+                    ticks_info.xticks.len().max(2)
+                })
+                .y_labels(if y_ticks_empty {
+                    0
+                } else {
+                    ticks_info.yticks.len().max(2)
+                })
                 .x_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .y_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .bold_line_style(frame_style);
