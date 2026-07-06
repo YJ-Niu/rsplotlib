@@ -29,7 +29,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 keywords = ["plotting", "matplotlib", "visualization", "rust", "scientific"]
-dependencies = []
 
 [tool.maturin]
 python-source = "python"

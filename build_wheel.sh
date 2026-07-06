@@ -31,6 +31,23 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+# ========== 依据 rust-toolchain.toml 准备工具链与 clippy 组件 ==========
+# 项目用 rust-toolchain.toml 固定了 Rust channel；rustup 会自动据此选择工具链，
+# 但构建前的 clippy 检查依赖 clippy 组件，全新环境未必已安装，这里显式补齐。
+if [[ -f rust-toolchain.toml ]]; then
+  RUST_CHANNEL=$(grep -m1 '^channel *= *' rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\1/')
+  if [[ -n "${RUST_CHANNEL:-}" ]]; then
+    echo "Pinned Rust toolchain (rust-toolchain.toml): $RUST_CHANNEL"
+    if command -v rustup >/dev/null 2>&1; then
+      # 幂等：已安装则为空操作；离线且缺失时失败被忽略，交由后续 clippy 步骤明确报错。
+      rustup toolchain install "$RUST_CHANNEL" >/dev/null 2>&1 || true
+      rustup component add clippy --toolchain "$RUST_CHANNEL" >/dev/null 2>&1 || true
+    else
+      echo "  -> rustup not found; using the cargo/clippy already on PATH." >&2
+    fi
+  fi
+fi
+
 RELEASE=true
 OUT_DIR="wheelhouse"
 
@@ -85,6 +102,22 @@ else
   echo "Error: maturin not found. Install it in your chosen Python (e.g. '$PYTHON_EXEC -m pip install maturin')." >&2
   exit 1
 fi
+
+# ========== 构建前的 Fmt 静态检查（-check：任何错误都当作错误） ==========
+echo "Running fmt checks (cargo fmt --all -- --check) ..."
+if ! cargo fmt --all -- --check; then
+  echo "Error: fmt checks failed. Fix the warnings above before building." >&2
+  exit 1
+fi
+echo "  -> fmt checks passed."
+
+# ========== 构建前的 Clippy 静态检查（-D warnings：任何告警都当作错误） ==========
+echo "Running clippy checks (cargo clippy --all-targets -- -D warnings) ..."
+if ! cargo clippy --all-targets -- -D warnings; then
+  echo "Error: clippy checks failed. Fix the warnings above before building." >&2
+  exit 1
+fi
+echo "  -> clippy checks passed."
 
 BUILD_ARGS=()
 if $RELEASE; then BUILD_ARGS+=(--release); else BUILD_ARGS+=(--debug); fi

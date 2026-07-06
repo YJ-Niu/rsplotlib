@@ -40,7 +40,7 @@ pub enum PlotElement {
         x: Vec<f64>,
         height: Vec<f64>,
         width: f64,
-        color: String,
+        colors: Vec<String>,
         label: Option<String>,
         color_idx: usize,
     },
@@ -48,24 +48,31 @@ pub enum PlotElement {
         y: Vec<f64>,
         width: Vec<f64>,
         height: f64,
-        color: String,
+        colors: Vec<String>,
         label: Option<String>,
         color_idx: usize,
     },
     Hist {
-        data_all: Vec<Vec<f64>>,
-        bins: usize,
-        density: bool,
+        /// 每个 dataset 的柱子几何: (pos_left, pos_right, val_base, val_top)
+        /// pos = 分箱位置轴, val = 计数轴; 方向(横/竖)在渲染时交换坐标。
+        bars: Vec<Vec<(f64, f64, f64, f64)>>,
+        /// step/stepfilled 的轮廓折线, 每个 dataset 一条: (pos, val)
+        outlines: Vec<Vec<(f64, f64)>>,
         histtype: String,
+        orientation: String,
         label: Option<String>,
         alpha: f64,
         colors: Vec<String>,
         color_idx: usize,
-        bin_edges: Option<Vec<f64>>,
     },
     Image {
-        data: Vec<Vec<f64>>,
-        cmap: String,
+        /// 逐像素已解析的 RGB（row-major）。origin 已在构建时应用：
+        /// 绘制时第 0 行画在数据区底部，最后一行画在顶部。
+        pixels: Vec<Vec<(u8, u8, u8)>>,
+        /// 整体透明度（0.0-1.0）
+        alpha: f64,
+        /// 插值方法：`nearest`（块状、有分界线）或 `bilinear`/`bicubic`（平滑渐变）。
+        interpolation: String,
     },
     Text {
         x: f64,
@@ -95,6 +102,7 @@ pub enum PlotElement {
         colors: Option<Vec<String>>,
         autopct: Option<String>,
         startangle: f64,
+        explode: Option<Vec<f64>>,
     },
     FillBetween {
         x: Vec<f64>,

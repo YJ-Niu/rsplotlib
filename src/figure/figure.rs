@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use crate::figure::axes::Axes;
 use crate::utils::font_stack;
+use crate::utils::pyfuncs::{BASE_HSPACE, BASE_WSPACE, grid_position};
 // colors not needed directly in this module
 
 /// 默认图形尺寸（英寸），与 matplotlib 默认一致 (12.0, 9.0)
@@ -50,6 +51,8 @@ pub struct Figure {
     pub height: u32,
     pub dpi: f64,
     pub axes_positions: Vec<(f64, f64, f64, f64)>,
+    /// 当前选中的子图下标（plt.subplot 选中后，plt.* 路由到此 axes）
+    pub current_axes_index: usize,
     pub facecolor: String,
     pub subplot_left: f64,
     pub subplot_right: f64,
@@ -80,6 +83,7 @@ impl Figure {
             height: h,
             dpi: DEFAULT_DPI,
             axes_positions: Vec::new(),
+            current_axes_index: 0,
             facecolor: "white".to_string(),
             subplot_left: 0.125,
             subplot_right: 0.9,
@@ -140,12 +144,14 @@ impl Figure {
     fn clear(&mut self) {
         self.axes_list.clear();
         self.axes_positions.clear();
+        self.current_axes_index = 0;
     }
 
     #[doc = "清除所有子图"]
     fn clf(&mut self) {
         self.axes_list.clear();
         self.axes_positions.clear();
+        self.current_axes_index = 0;
     }
 
     #[doc = "添加子图"]
@@ -198,6 +204,7 @@ impl Figure {
         crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
         self.axes_positions.push((left, right, bottom, top));
+        self.current_axes_index = self.axes_list.len() - 1;
         Ok(ax_py)
     }
 
@@ -207,10 +214,16 @@ impl Figure {
         let used_dpi = dpi.unwrap_or(self.dpi);
         let font_scale = used_dpi / 72.0;
         if filename.ends_with(".png") {
-            // SSAA 超采样：先按 SUPERSAMPLE 倍边长渲染，再盒式滤波缩回目标尺寸，随后写索引 PNG。
-            // 降采样后量化到 256 色调色板：文件体积约为真彩的 1/3~1/4，画质近乎无损。
+            // SSAA 超采样：先按 SUPERSAMPLE 倍边长渲染，再盒式滤波缩回目标尺寸。
+            // 含平滑渐变（colorbar / imshow）时颜色数远超 256，量化会产生明显色带，改写
+            // 真彩 RGB PNG 保留平滑渐变；其余（折线/散点等）量化到 256 色近乎无损且体积仅
+            // 真彩 1/3~1/4。
             let rgb = self.render_downsampled_rgb(py, font_scale)?;
-            self.write_rgb_png_indexed(filename, &rgb, used_dpi)
+            if self.has_gradient_content(py) {
+                self.write_rgb_png_truecolor(filename, &rgb, used_dpi)
+            } else {
+                self.write_rgb_png_indexed(filename, &rgb, used_dpi)
+            }
         } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
             let rgb = self.render_downsampled_rgb(py, font_scale)?;
             self.write_rgb_jpg(filename, &rgb)
@@ -353,6 +366,27 @@ impl Figure {
         Ok(downsample_box(&hi, sw, sh, ss))
     }
 
+    /// 图中是否含平滑渐变内容（colorbar 或 imshow 图像）——决定 PNG 是否用真彩输出。
+    ///
+    /// 折线/散点等即便因抗锯齿产生上万种混合色，量化到 256 色仍近乎无损；只有 colorbar
+    /// 渐变色带与 imshow 栅格图才需要真彩以避免可见色带。
+    fn has_gradient_content(&self, py: Python) -> bool {
+        for ax_py in &self.axes_list {
+            let ax = ax_py.borrow(py);
+            if ax.colorbar.is_some() {
+                return true;
+            }
+            if ax
+                .elements
+                .iter()
+                .any(|e| matches!(e, crate::core::elements::PlotElement::Image { .. }))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// 将 RGB 像素缓冲量化为至多 256 色调色板后写入索引（8-bit indexed）PNG 文件, 内嵌 DPI 元数据。
     ///
     /// 超采样降采样后的图含上万种颜色（多为抗锯齿混合色），真彩 PNG 每像素 3 字节、
@@ -383,6 +417,33 @@ impl Figure {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
         writer
             .write_image_data(&indices)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+        Ok(())
+    }
+
+    /// 将 RGB 像素缓冲写入真彩（24-bit RGB）PNG 文件, 内嵌 DPI 元数据。
+    ///
+    /// 用于含平滑渐变（colorbar / imshow）的图：颜色数远超 256, 索引量化会产生色带,
+    /// 真彩输出可无损保留渐变。
+    fn write_rgb_png_truecolor(&self, filename: &str, rgb: &[u8], dpi: f64) -> PyResult<()> {
+        let ppm = (dpi / 0.0254).round() as u32;
+        let dims = png::PixelDimensions {
+            xppu: ppm,
+            yppu: ppm,
+            unit: png::Unit::Meter,
+        };
+        let file = File::create(filename)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
+        let mut encoder = png::Encoder::new(file, self.width, self.height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_pixel_dims(Some(dims));
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e)))?;
+        writer
+            .write_image_data(rgb)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
         Ok(())
     }
@@ -448,18 +509,64 @@ impl Figure {
         if !self.suptitle.is_empty() {
             let sup_family = font_stack::select_family(&self.suptitle);
             let sup_size = 21.0 * 1.30 * font_scale;
-            let _ = root.titled(&self.suptitle, (sup_family.as_str(), sup_size));
+            // plotters 的 titled() 会把标题带贴着画布顶边（起始 y=0），显得太靠上。
+            // 先给顶部留一段内边距（约半个字号），使总标题下移，接近 matplotlib
+            // suptitle 默认 y≈0.98 的观感。返回的子区域丢弃，子图仍绘制在原 root 上，
+            // 布局不受影响。
+            let sup_top_pad = (sup_size * 0.5).round() as i32;
+            let _ = root
+                .margin(sup_top_pad, 0, 0, 0)
+                .titled(&self.suptitle, (sup_family.as_str(), sup_size));
         }
 
         let total_w = actual_w as f64;
         let total_h = actual_h as f64;
+
+        // 规则网格（由 subplot/subplots 创建，格子数 == nrows×ncols 且多于 1 个）在渲染阶段
+        // 依据坐标轴标签动态调整间距：只要有子图设置了 Y 轴标签，水平间距翻倍；只要有子图
+        // 设置了 X 轴标签，垂直间距翻倍——为标签腾出空间，避免与相邻子图重叠。
+        // 通过 add_subplot/gridspec 等自定义布局（nrows×ncols 与格子数不符）保持原位置不变。
+        let is_regular_grid =
+            self.axes_list.len() == self.nrows * self.ncols && self.axes_list.len() > 1;
+        let (grid_wspace, grid_hspace) = if is_regular_grid {
+            let any_ylabel = self
+                .axes_list
+                .iter()
+                .any(|a| !a.borrow(py).ylabel.is_empty());
+            let any_xlabel = self
+                .axes_list
+                .iter()
+                .any(|a| !a.borrow(py).xlabel.is_empty());
+            let w = if any_ylabel {
+                BASE_WSPACE * 2.0
+            } else {
+                BASE_WSPACE
+            };
+            let h = if any_xlabel {
+                BASE_HSPACE * 2.0
+            } else {
+                BASE_HSPACE
+            };
+            (w, h)
+        } else {
+            (BASE_WSPACE, BASE_HSPACE)
+        };
 
         for (i, ax_py) in self.axes_list.iter().enumerate() {
             let ax = ax_py.borrow(py);
 
             let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
 
-            let (left, right, bottom, top) = if i < self.axes_positions.len() {
+            let (left, right, bottom, top) = if is_regular_grid {
+                grid_position(
+                    i / self.ncols,
+                    i % self.ncols,
+                    self.nrows,
+                    self.ncols,
+                    grid_wspace,
+                    grid_hspace,
+                )
+            } else if i < self.axes_positions.len() {
                 self.axes_positions[i]
             } else {
                 (0.0, 1.0, 0.0, 1.0)
@@ -476,55 +583,89 @@ impl Figure {
             let plot_bottom_frac = bottom * usable_h + margin_b;
             let plot_top_frac = top * usable_h + margin_b;
 
-            let x0 = plot_left * total_w;
-            let y0 = (1.0 - plot_top_frac) * total_h;
-            let sub_w = (plot_right - plot_left) * total_w;
-            let sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
+            let mut x0 = plot_left * total_w;
+            let mut y0 = (1.0 - plot_top_frac) * total_h;
+            let mut sub_w = (plot_right - plot_left) * total_w;
+            let mut sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
 
             if sub_w <= 0.0 || sub_h <= 0.0 {
                 drop(ax);
                 continue;
             }
 
-            // 计算 tick/label 区域大小
-            let tick_label_size =
-                crate::figure::axes::scale_font(ax.tick_labelsize, font_scale).ceil() as u32;
+            // 纵横比约束（imshow 默认 aspect='equal'）：使 X/Y 轴单位长度按给定比例一致。
+            // aspect = 一个 y 单位显示长度 / 一个 x 单位显示长度；取能放进子图框的最大统一
+            // 缩放，随后把缩小后的数据区在原框内居中（与 matplotlib anchor='C' 一致）。
+            if let Some(aspect_ratio) = ax.aspect {
+                let dx = x_max - x_min;
+                let dy = y_max - y_min;
+                if dx > 0.0 && dy > 0.0 && aspect_ratio > 0.0 {
+                    let s = (sub_w / dx).min(sub_h / (dy * aspect_ratio));
+                    if s.is_finite() && s > 0.0 {
+                        let new_w = s * dx;
+                        let new_h = s * dy * aspect_ratio;
+                        x0 += (sub_w - new_w) / 2.0;
+                        y0 += (sub_h - new_h) / 2.0;
+                        sub_w = new_w;
+                        sub_h = new_h;
+                    }
+                }
+            }
 
-            // 估算 y/x tick label 区域大小（容纳最长的 tick 数字 + 少量 padding）
-            let y_tick_area = tick_label_size + pad6;
-            let x_tick_area = tick_label_size + pad6;
+            // —— 刻度值 / 坐标轴标签区域尺寸（随刻度值位数、字号自动调整）——
+            // tick 标签渲染字体：与 axes.rs 的 label_size 完全一致，用于精确测量刻度值像素宽度。
+            let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
+            // 字体高度：x 刻度值竖向占位、坐标轴标签旋转后横向占位的近似值。
+            let tick_label_size = tick_font_size.ceil() as u32;
+            // plotters 刻度线长度 tick_px；刻度值离轴距离 label_dist = 2*tick_px（见 draw_impl）。
+            let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
+            let label_dist = tick_px * 2;
 
-            // 检测 y 轴是否有可见的 tick 标签或 ylabel
-            // 条件：ylabel 非空 或 (yticks_val 未被设为空 且 tick_left 或 tick_right 为真)
-            let y_has_labels =
-                !ax.ylabel.is_empty() || !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
-            let y_has_ticks = ax.tick_left || ax.tick_right;
+            // 是否真正显示刻度值：刻度开启 + spine 存在 + 未被 plt.{x,y}ticks([]) 显式清空。
+            let y_ticklabels_shown = (ax.tick_left || ax.tick_right)
+                && (ax.spine_left || ax.spine_right)
+                && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+            let x_ticklabels_shown = (ax.tick_bottom || ax.tick_top)
+                && (ax.spine_bottom || ax.spine_top)
+                && !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
 
-            // 检测 x 轴是否有可见的 tick 标签或 xlabel
-            let x_has_labels =
-                !ax.xlabel.is_empty() || !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
-            let x_has_ticks = ax.tick_bottom || ax.tick_top;
-
-            // axis label (y_desc/x_desc) 在 tick label 之外，需要额外空间
-            // plotters 会把 y_desc 放在 y_label_area 中心，tick label 放在 y_label_area 右边缘
-            // 如果没有 label 和 tick，最小保留 2px 以确保 plotters 正确绘制边界 spine
-            let y_label_area = if !y_has_labels {
-                pad2
-            } else if ax.ylabel.is_empty() {
-                y_tick_area
+            // y 刻度值从轴线向外占用的空间：最长刻度值的实际渲染宽度（位数越多 / 字号越大越宽）
+            // + 离轴距离；无刻度值时为 0，使坐标轴标签紧贴坐标轴。
+            let y_tick_area = if y_ticklabels_shown {
+                let labels = y_tick_label_strings(py, &ax, y_min, y_max);
+                measure_max_text_width(&labels, tick_font_size) + label_dist
             } else {
-                y_tick_area + tick_label_size + pad6
+                0
             };
-            let x_label_area = if !x_has_labels {
-                pad2
-            } else if ax.xlabel.is_empty() {
-                x_tick_area
+            // x 刻度值为水平文本，竖向占用 = 字体高度 + 离轴距离；无刻度值时为 0。
+            let x_tick_area = if x_ticklabels_shown {
+                tick_label_size + label_dist
             } else {
-                x_tick_area + tick_label_size + pad6
+                0
             };
-            // 抑制未使用变量警告
-            let _ = y_has_ticks;
-            let _ = x_has_ticks;
+
+            // 坐标轴标签（ylabel/xlabel）在刻度值之外：额外留 pad6 间隙 + 标签自身占位（字体高度）。
+            // plotters 把 y_desc 贴 y_label_area 左边缘、刻度值贴右边缘（近轴），故加宽 y_tick_area
+            // 会自动把 ylabel 左移、远离刻度值；刻度值为空时 y_tick_area=0，ylabel 紧贴坐标轴。
+            // 无标签也无刻度值时最小保留 pad2，确保 plotters 正确绘制边界 spine。
+            let y_label_area = if ax.ylabel.is_empty() {
+                if y_ticklabels_shown {
+                    y_tick_area + pad2
+                } else {
+                    pad2
+                }
+            } else {
+                y_tick_area + pad6 + tick_label_size
+            };
+            let x_label_area = if ax.xlabel.is_empty() {
+                if x_ticklabels_shown {
+                    x_tick_area + pad2
+                } else {
+                    pad2
+                }
+            } else {
+                x_tick_area + pad6 + tick_label_size
+            };
 
             // 顶部边距：ax.title 是通过 chart.draw_series(Text) 渲染的，
             // 文字在数据区顶部 y_max 处向上延伸 (VPos::Bottom)，所以不需要 plotters margin_top
@@ -593,6 +734,7 @@ impl Figure {
                 marker_scale,
                 true,
                 fill_bg,
+                ss,
                 Some(&fig_subplot_info),
             )?;
 
@@ -646,6 +788,27 @@ impl Figure {
                 )?;
             }
 
+            // 颜色条：在数据区右侧空白 margin 内绘制渐变色带 + 刻度标签。
+            // 需在 drop(ax) 之前读取 ax.colorbar。数据区四边像素坐标与 plotters
+            // 布局一致（见上文 xlabel/ylabel 手动绘制处的推导）。
+            if let Some((cb_cmap, cb_vmin, cb_vmax)) = &ax.colorbar {
+                let data_right = chart_x0 + chart_w;
+                let data_top = chart_y0 + margin_top as f64;
+                let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
+                crate::figure::axes_colorbar::draw_colorbar(
+                    &root,
+                    cb_cmap,
+                    *cb_vmin,
+                    *cb_vmax,
+                    data_right,
+                    data_top,
+                    data_bottom,
+                    total_w,
+                    font_scale,
+                    ss,
+                )?;
+            }
+
             let twin_axes = ax.twin_axes.clone();
             drop(ax);
             for twin in &twin_axes {
@@ -686,6 +849,7 @@ impl Figure {
                     marker_scale,
                     false,
                     fill_bg,
+                    ss,
                     None,
                 )?;
             }
@@ -708,6 +872,60 @@ pub fn get_default_figsize() -> (f64, f64) {
 #[pyfunction]
 pub fn get_default_dpi() -> f64 {
     DEFAULT_DPI
+}
+
+/// 用与 axes.rs 渲染刻度值一致的字体（"sans-serif" + 指定字号）测量一组标签的最大
+/// 渲染像素宽度。据此按刻度值实际宽度（随位数、字号变化）预留 y 轴刻度值区域，使
+/// 坐标轴标签与刻度值不重叠。空标签集或非法字号返回 0。
+fn measure_max_text_width(labels: &[String], font_size: f64) -> u32 {
+    if font_size <= 0.0 {
+        return 0;
+    }
+    let font = ("sans-serif", font_size).into_font();
+    labels
+        .iter()
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| font.box_size(s).ok().map(|(w, _)| w))
+        .max()
+        .unwrap_or(0)
+}
+
+/// 计算 y 轴刻度值的显示字符串，与 axes.rs 的渲染逻辑保持一致：
+/// - 类别型（同时设置 yticks + ytick_labels）直接用字符串标签；
+/// - 否则按 locator > yticks_val > nice_ticks 得到主刻度值，log 轴用科学计数、
+///   线性轴用 format_linear_tick 格式化。
+///
+/// 仅用于测量刻度值宽度，plotters 实际渲染的 key points 与此同量级（位数一致），
+/// 足以准确预留区域。
+fn y_tick_label_strings(py: Python<'_>, ax: &Axes, y_min: f64, y_max: f64) -> Vec<String> {
+    if let (Some(ticks), Some(labels)) = (&ax.yticks_val, &ax.ytick_labels)
+        && !ticks.is_empty()
+        && !labels.is_empty()
+    {
+        return labels.clone();
+    }
+    let yticks: Vec<f64> = ax
+        .yaxis_major_locator
+        .as_ref()
+        .and_then(|loc| {
+            loc.bind(py)
+                .call_method1("tick_values", (y_min, y_max))
+                .ok()
+                .and_then(|r| r.extract::<Vec<f64>>().ok())
+        })
+        .or_else(|| ax.yticks_val.clone())
+        .unwrap_or_else(|| crate::figure::axes_mesh::nice_ticks(y_min, y_max));
+    let ylog = ax.yscale == "log";
+    yticks
+        .iter()
+        .map(|v| {
+            if ylog {
+                format!("{:.1e}", 10.0f64.powf(*v))
+            } else {
+                crate::figure::axes_mesh::format_linear_tick(*v)
+            }
+        })
+        .collect()
 }
 
 /// 盒式滤波下采样：把 (sw, sh) 的 RGB 缓冲按 factor×factor 块求平均，

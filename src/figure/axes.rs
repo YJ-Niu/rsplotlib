@@ -1,6 +1,8 @@
+use plotters::coord::ranged1d::{BoldPoints, Ranged};
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
+use plotters::style::text_anchor::{HPos, Pos, VPos};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyList, PyTuple};
@@ -88,7 +90,116 @@ fn py_to_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
     }
     Err(PyValueError::new_err("Cannot convert to Vec<Vec<f64>>"))
 }
+
+/// 将 Python 对象转换为 Vec<Vec<Vec<f64>>>（用于 imshow 的 RGB(A) 三维图像）。
+/// 失败（例如输入是二维标量图）时返回 Err，调用方据此回退到二维处理路径。
+fn py_to_vec_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    if let Ok(v) = obj.extract::<Vec<Vec<Vec<f64>>>>() {
+        return Ok(v);
+    }
+    if obj.hasattr("tolist")? {
+        let list = obj.call_method0("tolist")?;
+        return list.extract::<Vec<Vec<Vec<f64>>>>();
+    }
+    obj.extract::<Vec<Vec<Vec<f64>>>>()
+}
+
+/// 将三维 RGB(A) 图像数据转换为逐像素 (u8, u8, u8)。
+///
+/// 遵循 matplotlib 约定：浮点 RGB 在 [0,1]，整数 RGB 在 [0,255]。以全局最大值判断：
+/// 最大值 <= 1.0 视为 [0,1] 浮点（乘 255），否则视为已是 0..255。多于 3 个通道
+/// （如 RGBA）时仅取前三个通道。
+fn rgb_pixels_from_3d(data: &[Vec<Vec<f64>>]) -> Vec<Vec<(u8, u8, u8)>> {
+    let mut max_v = 0.0f64;
+    for row in data {
+        for px in row {
+            for &c in px {
+                if c.is_finite() && c > max_v {
+                    max_v = c;
+                }
+            }
+        }
+    }
+    let scale = if max_v <= 1.0 { 255.0 } else { 1.0 };
+    let to_u8 = |v: f64| -> u8 { (v * scale).round().clamp(0.0, 255.0) as u8 };
+    data.iter()
+        .map(|row| {
+            row.iter()
+                .map(|px| {
+                    let r = px.first().copied().unwrap_or(0.0);
+                    let g = px.get(1).copied().unwrap_or(0.0);
+                    let b = px.get(2).copied().unwrap_or(0.0);
+                    (to_u8(r), to_u8(g), to_u8(b))
+                })
+                .collect()
+        })
+        .collect()
+}
 use crate::figure::axis::{Axis, Patch, SpineDict};
+
+/// 将 imshow / imsave 的图像数组转换为逐像素 RGB，按数组自然行序（第 0 行在最前）。
+///
+/// - 三维 MxNx3/4：取 RGB(A) 前三通道作为像素颜色（浮点 [0,1] 或整数 [0,255]）；
+/// - 二维 MxN 标量：按 vmin/vmax（缺省取有限值 min/max）归一化后经 `cmap` 上色。
+///
+/// 不做 origin 翻转——调用方按 'upper'/'lower' 自行处理行序。
+pub(crate) fn image_array_to_rgb_rows(
+    x: &Bound<'_, PyAny>,
+    cmap: &str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+) -> PyResult<Vec<Vec<(u8, u8, u8)>>> {
+    if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
+        return Ok(rgb_pixels_from_3d(&rgb3));
+    }
+    let data = py_to_vec_vec_f64(x)?;
+    let (mut auto_lo, mut auto_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for row in &data {
+        for &v in row {
+            if v.is_finite() {
+                auto_lo = auto_lo.min(v);
+                auto_hi = auto_hi.max(v);
+            }
+        }
+    }
+    let lo = vmin.unwrap_or(auto_lo);
+    let hi = vmax.unwrap_or(auto_hi);
+    let range = if (hi - lo).abs() < 1e-12 {
+        1.0
+    } else {
+        hi - lo
+    };
+    Ok(data
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|&v| {
+                    let t = ((v - lo) / range).clamp(0.0, 1.0);
+                    let c = crate::core::colormap::colormap_color(cmap, t);
+                    (c.0, c.1, c.2)
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// 解析 matplotlib 风格的 aspect 值。
+///
+/// - `auto` / `none` / 空 → None（数据区填满子图框，不约束单位长度）；
+/// - `equal` → Some(1.0)（X/Y 轴单位长度相同）；
+/// - 数值字符串 → Some(该值)，为「y 单位显示长度 / x 单位显示长度」，须 > 0；
+/// - 其余无法识别的值 → None。
+fn parse_aspect(s: &str) -> Option<f64> {
+    let key = s.trim().to_ascii_lowercase();
+    match key.as_str() {
+        "" | "auto" | "none" => None,
+        "equal" => Some(1.0),
+        _ => key
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.0),
+    }
+}
 
 /// 字体大小缩放并四舍五入到1位小数
 /// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
@@ -183,6 +294,14 @@ pub struct Axes {
     pub yaxis_minor_locator: Option<Py<PyAny>>,
     pub x_axis_inverted: bool,
     pub y_axis_inverted: bool,
+    /// 最近一次可映射绘制 (scatter 数值 c / imshow) 的 (cmap, vmin, vmax)，供 colorbar 使用
+    pub mappable: Option<(String, f64, f64)>,
+    /// 若为 Some，则渲染时在数据区右侧绘制颜色条 (cmap, vmin, vmax)
+    pub colorbar: Option<(String, f64, f64)>,
+    /// 纵横比：None = 'auto'（数据区填满子图框）；Some(a) = 固定比例，a 为
+    /// 「一个 y 数据单位的显示长度 / 一个 x 数据单位的显示长度」，'equal' 即 Some(1.0)，
+    /// 使 X/Y 轴单位长度相同（imshow 默认）。
+    pub aspect: Option<f64>,
 }
 
 impl Clone for Axes {
@@ -249,84 +368,74 @@ impl Clone for Axes {
             yaxis_minor_locator: None,
             x_axis_inverted: self.x_axis_inverted,
             y_axis_inverted: self.y_axis_inverted,
+            mappable: self.mappable.clone(),
+            colorbar: self.colorbar.clone(),
+            aspect: self.aspect,
         }
     }
 }
 
 /// 解析 matplotlib 格式字符串
-/// 返回 (marker, linestyle, color) 三元组，如果字符串不是 fmt 格式则返回 None
+/// 返回 (marker, linestyle, color) 三元组，如果字符串不是 fmt 格式则返回 None。
+/// 三个组成部分（marker / linestyle / color）可按任意顺序出现，例如 'r--'、'--r'、'ro'、'-o' 均可。
 fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
     // 已知 marker 字符
-    const MARKERS: &[&str] = &[
-        "o", "s", "^", "v", "D", "d", "*", "+", "x", ".", ",", "|", "_", "h", "H", "p", "P", "<",
-        ">", "1", "2", "3", "4",
+    const MARKERS: &[char] = &[
+        'o', 's', '^', 'v', 'D', 'd', '*', '+', 'x', '.', ',', '|', '_', 'h', 'H', 'p', 'P', '<',
+        '>', '1', '2', '3', '4',
     ];
-    // 已知 color
-    const COLORS: &[&str] = &["b", "g", "r", "c", "m", "y", "k", "w"];
+    // 已知 color 单字符代码
+    const COLORS: &[char] = &['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w'];
 
     let mut found_marker: Option<String> = None;
     let mut found_ls: Option<String> = None;
     let mut found_color: Option<String> = None;
+
+    let chars: Vec<char> = fmt.chars().collect();
+    let n = chars.len();
     let mut i: usize = 0;
-
-    // 尝试解析 linestyle（在前缀位置时优先）
-    if fmt.starts_with("--") {
-        found_ls = Some("--".to_string());
-        i = 2;
-    } else if fmt.starts_with("-.") {
-        found_ls = Some("-.".to_string());
-        i = 2;
-    } else if fmt.starts_with('-') {
-        found_ls = Some("-".to_string());
-        i = 1;
-    } else if fmt.starts_with(':') {
-        found_ls = Some(":".to_string());
-        i = 1;
-    }
-
-    // 解析 color（单字符）
-    if i < fmt.len() {
-        let c = &fmt[i..i + 1];
-        if COLORS.contains(&c) {
-            found_color = Some(c.to_string());
-            i += 1;
-        }
-    }
-
-    // 解析 marker
-    if i < fmt.len() {
-        let m1 = &fmt[i..i + 1];
-        if MARKERS.contains(&m1) {
-            found_marker = Some(m1.to_string());
-            i += 1;
-        }
-        // 检查是否还有更多 marker 字符
-        while i < fmt.len() {
-            let m = &fmt[i..i + 1];
-            if MARKERS.contains(&m) {
-                found_marker = Some(m.to_string());
-                i += 1;
-            } else {
-                break;
+    while i < n {
+        // 先尝试两字符线型（'--' / '-.'），避免被拆成 '-' + '.'
+        if i + 1 < n {
+            let two: String = chars[i..i + 2].iter().collect();
+            if two == "--" || two == "-." {
+                if found_ls.is_some() {
+                    return None;
+                }
+                found_ls = Some(two);
+                i += 2;
+                continue;
             }
         }
+        let ch = chars[i];
+        if ch == '-' || ch == ':' {
+            if found_ls.is_some() {
+                return None;
+            }
+            found_ls = Some(ch.to_string());
+        } else if COLORS.contains(&ch) {
+            if found_color.is_some() {
+                return None;
+            }
+            found_color = Some(ch.to_string());
+        } else if MARKERS.contains(&ch) {
+            if found_marker.is_some() {
+                return None;
+            }
+            found_marker = Some(ch.to_string());
+        } else {
+            // 出现无法识别的字符，说明不是 fmt 字符串
+            return None;
+        }
+        i += 1;
     }
 
-    // 如果还有剩余字符，说明不是 fmt 字符串
-    if i < fmt.len() {
-        return None;
-    }
-
-    // 必须至少解析出 marker 或 linestyle 才算 fmt 字符串
+    // 必须至少解析出一个组成部分才算 fmt 字符串
     if found_marker.is_none() && found_ls.is_none() && found_color.is_none() {
         return None;
     }
 
     Some((found_marker, found_ls, found_color))
-}
-
-fn is_format_string(s: &str) -> bool {
-    parse_fmt_string(s).is_some()
 }
 
 impl Default for Axes {
@@ -352,7 +461,7 @@ impl Axes {
             ylabel_family: None,
             ylabel_loc: "center".to_string(),
             title: String::new(),
-            title_fontsize: 12.0,
+            title_fontsize: 9.6,
             title_color: RgbColor(0, 0, 0),
             title_family: None,
             title_loc: "center".to_string(),
@@ -401,16 +510,20 @@ impl Axes {
             yaxis_minor_locator: None,
             x_axis_inverted: false,
             y_axis_inverted: false,
+            mappable: None,
+            colorbar: None,
+            aspect: None,
         }
     }
 
-    #[pyo3(signature = (x, y, label=None, color=None, linestyle="-", marker=None, linewidth=1.5, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
+    #[pyo3(signature = (x, y, fmt=None, label=None, color=None, linestyle="-", marker=None, linewidth=1.5, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn plot(
         &mut self,
         _py: Python<'_>,
         x: Bound<'_, PyAny>,
         y: Bound<'_, PyAny>,
+        fmt: Option<String>,
         label: Option<String>,
         color: Option<String>,
         linestyle: &str,
@@ -425,15 +538,14 @@ impl Axes {
         markeredgecolor: Option<String>,
         solid_capstyle: Option<String>,
     ) -> PyResult<()> {
-        // matplotlib 兼容：解析格式字符串
-        // 如果 label 是格式字符串（如 'o', '-', 'r--', 'b-o'），从其中提取 marker/linestyle/color
-        let mut actual_label = label;
+        // matplotlib 兼容：fmt 是独立的位置参数（第 3 位），从中提取 marker/linestyle/color。
+        // label 始终作为图例标签，绝不会被当作格式字符串解析，因此 label="cos" 之类不再丢失。
+        let actual_label = label;
         let mut actual_marker = marker;
         let mut actual_linestyle = linestyle.to_string();
         let mut actual_color = color;
-        if let Some(ref lbl) = actual_label
-            && is_format_string(lbl)
-            && let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(lbl)
+        if let Some(ref f) = fmt
+            && let Some((fmt_marker, fmt_ls, fmt_color)) = parse_fmt_string(f)
         {
             let has_marker = fmt_marker.is_some();
             if actual_marker.is_none() {
@@ -450,7 +562,6 @@ impl Axes {
             if actual_color.is_none() {
                 actual_color = fmt_color;
             }
-            actual_label = None;
         }
 
         let x_vec = py_to_vec_option_f64(&x)?;
@@ -496,7 +607,7 @@ impl Axes {
         Ok(())
     }
 
-    #[pyo3(signature = (x, y, s=20.0, c=None, marker="o", label=None, alpha=1.0))]
+    #[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0))]
     #[allow(clippy::too_many_arguments)]
     pub fn scatter(
         &mut self,
@@ -541,25 +652,31 @@ impl Axes {
         x: Bound<'_, PyAny>,
         height: Bound<'_, PyAny>,
         width: f64,
-        color: Option<String>,
+        color: Option<Bound<'_, PyAny>>,
         label: Option<String>,
     ) -> PyResult<()> {
         let x_vec = py_to_vec_f64(&x)?;
         let height_vec = py_to_vec_f64(&height)?;
         let idx = self.element_count;
         self.element_count += 1;
-        let color_val = color.clone().unwrap_or_default();
+        // color 可为单色字符串或每柱一色的列表；None 时留空，渲染回退到默认色。
+        let colors_vec = match &color {
+            Some(c) => Self::parse_color_list(c, x_vec.len())?,
+            None => Vec::new(),
+        };
         self.elements.push(PlotElement::Bar {
             x: x_vec,
             height: height_vec,
             width,
-            color: color_val.clone(),
+            colors: colors_vec.clone(),
             label: label.clone(),
             color_idx: idx,
         });
         if let Some(lbl) = label {
-            let col =
-                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            let col = colors_vec
+                .first()
+                .map(|c| parse_color(c, idx).unwrap_or_else(|_| default_color(idx)))
+                .unwrap_or_else(|| default_color(idx));
             self.legend_labels
                 .push((lbl, col, "-".to_string(), None, 1.5));
         }
@@ -573,51 +690,78 @@ impl Axes {
         y: Bound<'_, PyAny>,
         width: Bound<'_, PyAny>,
         height: f64,
-        color: Option<String>,
+        color: Option<Bound<'_, PyAny>>,
         label: Option<String>,
     ) -> PyResult<()> {
         let y_vec = py_to_vec_f64(&y)?;
         let width_vec = py_to_vec_f64(&width)?;
         let idx = self.element_count;
         self.element_count += 1;
-        let color_val = color.clone().unwrap_or_default();
+        // color 可为单色字符串或每柱一色的列表；None 时留空，渲染回退到默认色。
+        let colors_vec = match &color {
+            Some(c) => Self::parse_color_list(c, y_vec.len())?,
+            None => Vec::new(),
+        };
         self.elements.push(PlotElement::BarH {
             y: y_vec,
             width: width_vec,
             height,
-            color: color_val.clone(),
+            colors: colors_vec.clone(),
             label: label.clone(),
             color_idx: idx,
         });
         if let Some(lbl) = label {
-            let col =
-                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            let col = colors_vec
+                .first()
+                .map(|c| parse_color(c, idx).unwrap_or_else(|_| default_color(idx)))
+                .unwrap_or_else(|| default_color(idx));
             self.legend_labels
                 .push((lbl, col, "-".to_string(), None, 1.5));
         }
         Ok(())
     }
 
-    #[pyo3(signature = (x, bins=None, density=false, label=None, alpha=0.7, color=None, facecolor=None, align=None, histtype=None))]
+    #[pyo3(signature = (x, bins=None, range=None, density=false, weights=None, cumulative=0, bottom=None, histtype=None, align=None, orientation=None, rwidth=None, log=false, color=None, facecolor=None, label=None, stacked=false, alpha=1.0))]
     #[allow(clippy::too_many_arguments)]
     pub fn hist(
         &mut self,
         py: Python<'_>,
         x: Bound<'_, PyAny>,
         bins: Option<Bound<'_, PyAny>>,
+        range: Option<(f64, f64)>,
         density: bool,
-        label: Option<String>,
-        alpha: f64,
+        weights: Option<Bound<'_, PyAny>>,
+        cumulative: i64,
+        bottom: Option<f64>,
+        histtype: Option<String>,
+        align: Option<String>,
+        orientation: Option<String>,
+        rwidth: Option<f64>,
+        log: bool,
         color: Option<Bound<'_, PyAny>>,
         facecolor: Option<Bound<'_, PyAny>>,
-        #[allow(unused_variables)] align: Option<String>,
-        #[allow(unused_variables)] histtype: Option<String>,
+        label: Option<Bound<'_, PyAny>>,
+        stacked: bool,
+        alpha: f64,
     ) -> PyResult<(Py<PyAny>, Vec<f64>, Option<Vec<Vec<f64>>>)> {
         let x_parsed: Vec<Vec<f64>> = Self::parse_hist_data(&x)?;
+        let n_datasets = x_parsed.len();
+        if n_datasets == 0 {
+            let empty: Vec<f64> = Vec::new();
+            let n_obj = PyList::new(py, empty.as_slice())?.into_any().unbind();
+            return Ok((n_obj, Vec::new(), None));
+        }
+        // weights 解析为与 x 平行的结构
+        let weights_parsed: Option<Vec<Vec<f64>>> = match weights {
+            Some(w) => Some(Self::parse_hist_data(&w)?),
+            None => None,
+        };
+
+        // 解析 bins -> 箱数 或 自定义边界
         let bins = bins.unwrap_or_else(|| pyo3::types::PyInt::new(py, 10).as_any().clone());
         let (num_bins, custom_edges): (usize, Option<Vec<f64>>) =
             if let Ok(n) = bins.extract::<usize>() {
-                (n, None)
+                (n.max(1), None)
             } else if let Ok(n) = bins.extract::<i64>() {
                 if n <= 0 {
                     return Err(PyValueError::new_err("bins must be positive"));
@@ -630,177 +774,326 @@ impl Axes {
                     ));
                 }
                 (edges.len() - 1, Some(edges))
-            } else if let Ok(edges) = bins.extract::<Vec<i64>>() {
-                if edges.len() < 2 {
-                    return Err(PyValueError::new_err(
-                        "bin_edges must have at least 2 elements",
-                    ));
-                }
-                (
-                    edges.len() - 1,
-                    Some(edges.iter().map(|&x| x as f64).collect()),
-                )
-            } else if let Ok(edges) = bins.extract::<Vec<usize>>() {
-                if edges.len() < 2 {
-                    return Err(PyValueError::new_err(
-                        "bin_edges must have at least 2 elements",
-                    ));
-                }
-                (
-                    edges.len() - 1,
-                    Some(edges.iter().map(|&x| x as f64).collect()),
-                )
             } else {
                 return Err(PyValueError::new_err(
                     "bins must be an integer or a list of bin edges",
                 ));
             };
-        let colors: Vec<String> = if let Some(fc) = facecolor {
-            Self::parse_color_list(&fc, x_parsed.len())?
-        } else if let Some(c) = color {
-            Self::parse_color_list(&c, x_parsed.len())?
-        } else {
-            (0..x_parsed.len()).map(default_color_str).collect()
-        };
-        let histtype_val = histtype.unwrap_or_else(|| "bar".to_string());
-        let idx = self.element_count;
-        self.element_count += 1;
 
-        // 先计算统计量（使用 &x_parsed），再 move 进 PlotElement
-        let (global_min, global_max) = x_parsed
+        // 值域范围
+        let (auto_min, auto_max) = x_parsed
             .iter()
             .flatten()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
                 (mn.min(v), mx.max(v))
             });
-        let global_min = if global_min.is_finite() {
-            global_min
-        } else {
-            0.0
+        let auto_min = if auto_min.is_finite() { auto_min } else { 0.0 };
+        let auto_max = if auto_max.is_finite() { auto_max } else { 1.0 };
+        let (range_min, range_max) = match (custom_edges.as_ref(), range) {
+            (Some(edges), _) => (edges[0], edges[edges.len() - 1]),
+            (None, Some((lo, hi))) => (lo, hi),
+            (None, None) => (auto_min, auto_max),
         };
-        let global_max = if global_max.is_finite() {
-            global_max
-        } else {
-            1.0
-        };
-        let global_range = global_max - global_min;
-        let bin_width = if global_range < 1e-10 {
-            1.0
-        } else {
-            global_range / num_bins as f64
-        };
-        let n: Vec<Vec<f64>> = x_parsed
-            .iter()
-            .map(|dataset| {
-                if dataset.is_empty() {
-                    return vec![0.0; num_bins];
-                }
-                let mut counts = vec![0usize; num_bins];
-                if let Some(ref edges) = custom_edges {
-                    let edge_min = edges[0];
-                    let edge_max = edges[edges.len() - 1];
-                    for &val in dataset {
-                        if val < edge_min || val > edge_max {
-                            continue;
-                        }
-                        let bin = edges.partition_point(|&e| e <= val).saturating_sub(1);
-                        if bin < num_bins {
-                            counts[bin] += 1;
-                        }
-                    }
-                    let total = dataset.len() as f64;
-                    if density {
-                        counts
-                            .iter()
-                            .enumerate()
-                            .map(|(i, &c)| {
-                                let bw = edges[i + 1] - edges[i];
-                                if bw > 0.0 {
-                                    c as f64 / (total * bw)
-                                } else {
-                                    0.0
-                                }
-                            })
-                            .collect()
-                    } else {
-                        counts.iter().map(|&c| c as f64).collect()
-                    }
-                } else {
-                    for &val in dataset {
-                        let mut bin = ((val - global_min) / bin_width).floor() as usize;
-                        if bin >= num_bins {
-                            bin = num_bins - 1;
-                        }
-                        counts[bin] += 1;
-                    }
-                    let total = dataset.len() as f64;
-                    counts
-                        .iter()
-                        .map(|&c| {
-                            if density {
-                                c as f64 / (total * bin_width)
-                            } else {
-                                c as f64
-                            }
-                        })
-                        .collect()
-                }
-            })
-            .collect();
+
+        // bin 边界
         let bin_edges: Vec<f64> = if let Some(ref edges) = custom_edges {
             edges.clone()
         } else {
-            (0..=num_bins)
-                .map(|i| global_min + i as f64 * bin_width)
+            let span = range_max - range_min;
+            let bw = if span < 1e-12 {
+                1.0
+            } else {
+                span / num_bins as f64
+            };
+            (0..=num_bins).map(|i| range_min + i as f64 * bw).collect()
+        };
+        let effective_bins = bin_edges.len() - 1;
+
+        // 逐 dataset 统计计数(支持 weights)
+        let mut counts_all: Vec<Vec<f64>> = Vec::with_capacity(n_datasets);
+        for (di, dataset) in x_parsed.iter().enumerate() {
+            let mut c = vec![0.0f64; effective_bins];
+            for (j, &val) in dataset.iter().enumerate() {
+                if val < bin_edges[0] || val > bin_edges[effective_bins] {
+                    continue;
+                }
+                let mut bin = bin_edges.partition_point(|&e| e <= val).saturating_sub(1);
+                if bin >= effective_bins {
+                    bin = effective_bins - 1;
+                }
+                let w = weights_parsed
+                    .as_ref()
+                    .and_then(|ws| ws.get(di))
+                    .and_then(|wd| wd.get(j))
+                    .copied()
+                    .unwrap_or(1.0);
+                c[bin] += w;
+            }
+            counts_all.push(c);
+        }
+
+        // density / cumulative 变换
+        for c in counts_all.iter_mut() {
+            let total: f64 = c.iter().sum();
+            if cumulative != 0 {
+                // 累积分布
+                if cumulative > 0 {
+                    let mut acc = 0.0;
+                    for v in c.iter_mut() {
+                        acc += *v;
+                        *v = acc;
+                    }
+                } else {
+                    let mut acc = 0.0;
+                    for v in c.iter_mut().rev() {
+                        acc += *v;
+                        *v = acc;
+                    }
+                }
+                if density && total > 0.0 {
+                    for v in c.iter_mut() {
+                        *v /= total;
+                    }
+                }
+            } else if density && total > 0.0 {
+                for i in 0..effective_bins {
+                    let bw = bin_edges[i + 1] - bin_edges[i];
+                    c[i] = if bw > 0.0 { c[i] / (total * bw) } else { 0.0 };
+                }
+            }
+        }
+
+        let idx = self.element_count;
+        self.element_count += 1;
+
+        // 颜色：未显式指定时，默认颜色跟随 axes 颜色循环（以 idx 为起点），
+        // 使多次独立的 plt.hist 调用（各含单组数据）自动获得不同颜色。
+        let colors: Vec<String> = if let Some(fc) = facecolor {
+            Self::parse_color_list(&fc, n_datasets)?
+        } else if let Some(c) = color {
+            Self::parse_color_list(&c, n_datasets)?
+        } else {
+            (0..n_datasets)
+                .map(|di| default_color_str(idx + di))
                 .collect()
         };
 
-        let x_parsed_len = x_parsed.len();
-        // 移动 x_parsed 和 custom_edges，避免克隆
+        let histtype_val = histtype.unwrap_or_else(|| "bar".to_string());
+        let orientation_val = orientation.unwrap_or_else(|| "vertical".to_string());
+        let align_val = align.unwrap_or_else(|| "mid".to_string());
+        let is_step = histtype_val == "step" || histtype_val == "stepfilled";
+        let stacked = stacked || histtype_val == "barstacked";
+        let base0 = bottom.unwrap_or(0.0);
+        let rw = rwidth.unwrap_or(1.0).clamp(0.0, 1.0);
+
+        // 构建柱子/轮廓几何
+        let mut bars: Vec<Vec<(f64, f64, f64, f64)>> = vec![Vec::new(); n_datasets];
+        let mut outlines: Vec<Vec<(f64, f64)>> = vec![Vec::new(); n_datasets];
+        let mut running_base = vec![base0; effective_bins];
+        for (di, c) in counts_all.iter().enumerate() {
+            let mut base_arr = vec![0.0f64; effective_bins];
+            let mut top_arr = vec![0.0f64; effective_bins];
+            for i in 0..effective_bins {
+                let base = if stacked { running_base[i] } else { base0 };
+                let top = base + c[i];
+                base_arr[i] = base;
+                top_arr[i] = top;
+                if stacked {
+                    running_base[i] = top;
+                }
+            }
+            if is_step {
+                if histtype_val == "stepfilled" {
+                    for i in 0..effective_bins {
+                        bars[di].push((bin_edges[i], bin_edges[i + 1], base_arr[i], top_arr[i]));
+                    }
+                }
+                // 轮廓折线(阶梯)
+                let mut pts: Vec<(f64, f64)> = Vec::with_capacity(effective_bins * 2 + 2);
+                pts.push((bin_edges[0], base_arr[0]));
+                for i in 0..effective_bins {
+                    pts.push((bin_edges[i], top_arr[i]));
+                    pts.push((bin_edges[i + 1], top_arr[i]));
+                }
+                pts.push((bin_edges[effective_bins], base_arr[effective_bins - 1]));
+                outlines[di] = pts;
+            } else {
+                // bar / barstacked
+                for i in 0..effective_bins {
+                    let l = bin_edges[i];
+                    let r = bin_edges[i + 1];
+                    let binw = r - l;
+                    let ref_x = match align_val.as_str() {
+                        "left" => l,
+                        "right" => r,
+                        _ => (l + r) / 2.0,
+                    };
+                    let totw = binw * rw;
+                    let group_left = ref_x - totw / 2.0;
+                    if stacked {
+                        bars[di].push((group_left, group_left + totw, base_arr[i], top_arr[i]));
+                    } else if n_datasets > 1 {
+                        let sub = totw / n_datasets as f64;
+                        let bl = group_left + di as f64 * sub;
+                        bars[di].push((bl, bl + sub, base0, base0 + c[i]));
+                    } else {
+                        bars[di].push((group_left, group_left + totw, base0, base0 + c[i]));
+                    }
+                }
+            }
+        }
+
+        // log 刻度作用于计数轴
+        if log {
+            if orientation_val == "horizontal" {
+                self.xscale = "log".to_string();
+            } else {
+                self.yscale = "log".to_string();
+            }
+        }
+
+        // label 可为单个字符串或每组一个的列表
+        let labels_vec: Vec<String> = match &label {
+            Some(l) => {
+                if let Ok(s) = l.extract::<String>() {
+                    vec![s]
+                } else {
+                    l.extract::<Vec<String>>().unwrap_or_default()
+                }
+            }
+            None => Vec::new(),
+        };
+
         self.elements.push(PlotElement::Hist {
-            data_all: x_parsed,
-            bins: num_bins,
-            density,
+            bars,
+            outlines,
             histtype: histtype_val,
-            label: label.clone(),
+            orientation: orientation_val,
+            label: labels_vec.first().cloned(),
             alpha,
             colors: colors.clone(),
             color_idx: idx,
-            bin_edges: custom_edges,
         });
-        if let Some(lbl) = label {
-            let col = parse_color(colors.first().unwrap_or(&String::new()), idx)
-                .unwrap_or_else(|_| default_color(idx));
+        for (di, lbl) in labels_vec.iter().enumerate() {
+            if lbl.is_empty() {
+                continue;
+            }
+            let col_str = colors.get(di).cloned().unwrap_or_default();
+            let col = parse_color(&col_str, idx + di).unwrap_or_else(|_| default_color(idx + di));
             self.legend_labels
-                .push((lbl, col, "-".to_string(), None, 1.5));
+                .push((lbl.clone(), col, "-".to_string(), None, 1.5));
         }
-        let n_obj: Py<PyAny> = if x_parsed_len <= 1 {
+
+        // 返回值 n(计数) 与 bin_edges
+        let n_obj: Py<PyAny> = if n_datasets <= 1 {
             let empty: Vec<f64> = Vec::new();
-            let data = n.first().unwrap_or(&empty);
-            PyList::new(py, data.as_slice())
-                .unwrap()
-                .into_any()
-                .unbind()
+            let data = counts_all.first().unwrap_or(&empty);
+            PyList::new(py, data.as_slice())?.into_any().unbind()
         } else {
-            let lists: Vec<Bound<'_, PyList>> = n
+            let lists: Vec<Bound<'_, PyList>> = counts_all
                 .iter()
                 .map(|inner| PyList::new(py, inner.as_slice()).unwrap())
                 .collect();
-            PyList::new(py, lists.as_slice())
-                .unwrap()
-                .into_any()
-                .unbind()
+            PyList::new(py, lists.as_slice())?.into_any().unbind()
         };
         Ok((n_obj, bin_edges, None))
     }
 
-    #[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
-    #[allow(unused_variables)]
-    pub fn imshow(&mut self, x: Vec<Vec<f64>>, cmap: &str, aspect: &str) {
+    #[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None))]
+    pub fn imshow(
+        &mut self,
+        x: &Bound<'_, PyAny>,
+        cmap: &str,
+        aspect: &str,
+        vmin: Option<f64>,
+        vmax: Option<f64>,
+        alpha: Option<f64>,
+        origin: Option<&str>,
+        interpolation: Option<&str>,
+    ) -> PyResult<()> {
+        // imshow 默认 aspect='equal'：X/Y 轴单位长度相同（图像单元为正方形），与 matplotlib 一致。
+        self.aspect = parse_aspect(aspect);
+        let a = alpha.unwrap_or(1.0).clamp(0.0, 1.0);
+        // 插值方法：None / "none" / "nearest" / "antialiased" 视为最近邻（块状、有分界线）；
+        // 其余（bilinear/bicubic/lanczos 等平滑滤波）统一走平滑上采样。
+        let interp = interpolation
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty() && s != "none")
+            .unwrap_or_else(|| "nearest".to_string());
+        // origin 默认 "upper"：数组首行显示在图像顶部。渲染时第 0 行画在底部，
+        // 因此 "upper" 需把行序反转，使原始首行落到顶部。
+        let flip_rows = !matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower"));
+
+        // 三维 RGB(A) 图像：直接使用逐像素颜色，不经 colormap。
+        if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
+            let mut pixels = rgb_pixels_from_3d(&rgb3);
+            if flip_rows {
+                pixels.reverse();
+            }
+            self.elements.push(PlotElement::Image {
+                pixels,
+                alpha: a,
+                interpolation: interp,
+            });
+            return Ok(());
+        }
+
+        // 二维标量图像：按 vmin/vmax（缺省取数据范围）归一化后经 colormap 上色。
+        let data = py_to_vec_vec_f64(x)?;
+        let (mut auto_lo, mut auto_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for row in &data {
+            for &v in row {
+                if v.is_finite() {
+                    auto_lo = auto_lo.min(v);
+                    auto_hi = auto_hi.max(v);
+                }
+            }
+        }
+        let lo = vmin.unwrap_or(auto_lo);
+        let hi = vmax.unwrap_or(auto_hi);
+        if lo.is_finite() && hi.is_finite() {
+            self.mappable = Some((cmap.to_string(), lo, hi));
+        }
+        let range = if (hi - lo).abs() < 1e-12 {
+            1.0
+        } else {
+            hi - lo
+        };
+        let mut pixels: Vec<Vec<(u8, u8, u8)>> = data
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&v| {
+                        let t = ((v - lo) / range).clamp(0.0, 1.0);
+                        let c = crate::core::colormap::colormap_color(cmap, t);
+                        (c.0, c.1, c.2)
+                    })
+                    .collect()
+            })
+            .collect();
+        if flip_rows {
+            pixels.reverse();
+        }
         self.elements.push(PlotElement::Image {
-            data: x,
-            cmap: cmap.to_string(),
+            pixels,
+            alpha: a,
+            interpolation: interp,
         });
+        Ok(())
+    }
+
+    /// 记录最近一次可映射绘制的 (cmap, vmin, vmax)，供随后的 colorbar() 使用。
+    pub fn set_mappable(&mut self, cmap: String, vmin: f64, vmax: f64) {
+        self.mappable = Some((cmap, vmin, vmax));
+    }
+
+    /// 基于当前记录的 mappable 启用颜色条；无 mappable 时按 viridis / [0,1] 兜底。
+    pub fn enable_colorbar(&mut self) {
+        self.colorbar = Some(
+            self.mappable
+                .clone()
+                .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0)),
+        );
     }
 
     #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
@@ -1125,7 +1418,7 @@ impl Axes {
         Ok(())
     }
 
-    #[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0))]
+    #[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0, explode=None))]
     pub fn pie(
         &mut self,
         x: Vec<f64>,
@@ -1133,6 +1426,7 @@ impl Axes {
         colors: Option<Vec<String>>,
         autopct: Option<String>,
         startangle: f64,
+        explode: Option<Vec<f64>>,
     ) {
         self.elements.push(PlotElement::Pie {
             x,
@@ -1140,6 +1434,7 @@ impl Axes {
             colors,
             autopct,
             startangle,
+            explode,
         });
     }
 
@@ -1614,7 +1909,10 @@ impl Axes {
         self.minor_grid_y_visible = false;
     }
 
-    pub fn set_aspect(&mut self, _aspect: &str) {}
+    /// 设置纵横比：'auto'（默认，填满子图框）、'equal'（X/Y 轴单位长度相同）或数值比例。
+    pub fn set_aspect(&mut self, aspect: &str) {
+        self.aspect = parse_aspect(aspect);
+    }
 
     pub fn set_xaxis_major_locator(&mut self, locator: Py<PyAny>) {
         self.xaxis_major_locator = Some(locator);
@@ -1709,6 +2007,7 @@ impl Axes {
         marker_scale: f64,
         fill_bg: bool,
         bitmap: bool,
+        ss: f64,
         _subplot_info: Option<&(f64, f64, f64, f64)>,
     ) -> PyResult<()>
     where
@@ -1814,10 +2113,80 @@ impl Axes {
                 label_size
             };
             let axis_desc_rgb = to_plotters_color(desc_color);
+            // 类别型 x 轴：同时提供刻度位置 (xticks_val) 与字符串标签 (xtick_labels) 时，
+            // 把落在这些位置的刻度渲染成对应字符串（如柱状图的类别名），其余刻度回退为
+            // 数值格式。plotters 仅按数量自动布点，故用位置匹配 (容差 1e-6) 做映射。
+            // 在 mesh_builder 之前声明，保证其生命周期长于持有其引用的 builder。
+            let xtick_label_map: Vec<(f64, String)> = match (&self.xticks_val, &self.xtick_labels) {
+                (Some(ticks), Some(labels)) => {
+                    ticks.iter().cloned().zip(labels.iter().cloned()).collect()
+                }
+                _ => Vec::new(),
+            };
+            let has_xcat = !xtick_label_map.is_empty();
+            let x_cat_fmt = move |v: &f64| -> String {
+                for (t, l) in &xtick_label_map {
+                    if (t - *v).abs() < 1e-6 {
+                        return l.clone();
+                    }
+                }
+                crate::figure::axes_mesh::format_linear_tick(*v)
+            };
+            // 类别型 y 轴：与 x 轴对称（如 barh 的类别名），落在 yticks_val 位置的刻度渲染
+            // 为对应字符串标签，其余回退数值格式。
+            let ytick_label_map: Vec<(f64, String)> = match (&self.yticks_val, &self.ytick_labels) {
+                (Some(ticks), Some(labels)) => {
+                    ticks.iter().cloned().zip(labels.iter().cloned()).collect()
+                }
+                _ => Vec::new(),
+            };
+            let has_ycat = !ytick_label_map.is_empty();
+            let y_cat_fmt = move |v: &f64| -> String {
+                for (t, l) in &ytick_label_map {
+                    if (t - *v).abs() < 1e-6 {
+                        return l.clone();
+                    }
+                }
+                crate::figure::axes_mesh::format_linear_tick(*v)
+            };
+            // 主刻度线像素长度（matplotlib 风格，向外）。plotters 中 label_dist = 2*tick_px。
+            let tick_px = (3.5 * font_scale).round().max(1.0) as i32;
+            // 仅主轴（非 twin）的底部 x 轴：抑制 plotters 内置刻度标签文本，改在 mesh
+            // 绘制后手动绘制，使标签相对 plotters 默认位置再下移 2 个最终像素（渲染像素 =
+            // round(2*ss)）。刻度线仍由 plotters 在相同 key points 处绘制，保证标签与刻度线
+            // 水平对齐。twin 轴的 x 标签在顶部，位置不同，故不处理。
+            let x_axis_on = self.spine_bottom || self.spine_top;
+            let x_labels_on = self.tick_bottom || self.tick_top;
+            // 用户显式设置空刻度（plt.xticks([]) / plt.yticks([])）：此时最终刻度为空，
+            // 应完全不画刻度线与刻度值（包括 0），而不是回退到默认最少 2 个标签。
+            let x_ticks_empty = ticks_info.xticks.is_empty();
+            let y_ticks_empty = ticks_info.yticks.is_empty();
+            let do_manual_x =
+                !self.is_twin_x && !self.is_twin_y && x_axis_on && x_labels_on && !x_ticks_empty;
+            // 取 plotters 实际用于底部 x 标签的 key points（与刻度线位置一致）。
+            let x_key_points: Vec<f64> = if do_manual_x {
+                let n_x = ticks_info.xticks.len().max(2);
+                chart
+                    .plotting_area()
+                    .as_coord_spec()
+                    .x_spec()
+                    .key_points(BoldPoints(n_x))
+            } else {
+                Vec::new()
+            };
+
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
-                .x_labels(ticks_info.xticks.len().max(2))
-                .y_labels(ticks_info.yticks.len().max(2))
+                .x_labels(if x_ticks_empty {
+                    0
+                } else {
+                    ticks_info.xticks.len().max(2)
+                })
+                .y_labels(if y_ticks_empty {
+                    0
+                } else {
+                    ticks_info.yticks.len().max(2)
+                })
                 .x_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .y_label_style(("sans-serif", label_size).into_font().color(&BLACK))
                 .bold_line_style(frame_style);
@@ -1855,6 +2224,14 @@ impl Axes {
                 mesh_builder
                     .x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
             }
+            // 类别标签覆盖 x 轴数值格式（plotters 后一次 x_label_formatter 覆盖前一次）。
+            if has_xcat {
+                mesh_builder.x_label_formatter(&x_cat_fmt);
+            }
+            // 类别标签覆盖 y 轴数值格式（barh 等场景）。
+            if has_ycat {
+                mesh_builder.y_label_formatter(&y_cat_fmt);
+            }
 
             if !self.spine_bottom && !self.spine_top {
                 mesh_builder.disable_x_axis();
@@ -1869,12 +2246,61 @@ impl Axes {
                 mesh_builder.y_labels(0);
             }
 
+            // matplotlib 风格刻度线：向外、长度约 3.5pt（正值 = 向外）。
+            // plotters 默认刻度长为绘图区的 5%，在本项目自定义布局下渲染极短（~1px），
+            // 故显式设为固定像素（tick_px，见上文）。draw_impl 中 label_dist = 2*tick_size。
+            mesh_builder
+                .set_tick_mark_size(LabelAreaPosition::Bottom, tick_px)
+                .set_tick_mark_size(LabelAreaPosition::Left, tick_px);
+
+            // 主轴底部 x 标签改为手动绘制：用空串抑制 plotters 内置标签文本（刻度线保留）。
+            if do_manual_x {
+                mesh_builder.x_label_formatter(&|_: &f64| String::new());
+            }
+
             // 手动绘制 mesh：禁用内置网格线（由 axes_grid 模块统一绘制）
             mesh_builder
                 .disable_x_mesh()
                 .disable_y_mesh()
                 .draw()
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
+
+            // 手动绘制底部 x 刻度标签：相对 plotters 默认位置（label_dist = 2*tick_px）
+            // 再向下偏移 2 个最终像素（渲染像素 = round(2*ss)）。锚点 (t, y_min) 映射到
+            // 绘图区底边，Text 的像素偏移 (0, offset_y) 使文字顶端下移，与刻度线对齐。
+            if do_manual_x {
+                drop(mesh_builder);
+                let (x_lo, x_hi) = (x_min.min(x_max), x_min.max(x_max));
+                let offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
+                let text_style: TextStyle = ("sans-serif", label_size)
+                    .into_font()
+                    .color(&BLACK)
+                    .pos(Pos::new(HPos::Center, VPos::Top));
+                for &t in &x_key_points {
+                    if t < x_lo || t > x_hi {
+                        continue;
+                    }
+                    let text = if xlog {
+                        format!("{:.1e}", 10.0f64.powf(t))
+                    } else if has_xcat {
+                        x_cat_fmt(&t)
+                    } else {
+                        crate::figure::axes_mesh::format_linear_tick(t)
+                    };
+                    chart
+                        .draw_series(std::iter::once(
+                            plotters::element::EmptyElement::at((t, y_min))
+                                + plotters::element::Text::new(
+                                    text,
+                                    (0, offset_y),
+                                    text_style.clone(),
+                                ),
+                        ))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw x tick label: {}", e))
+                        })?;
+                }
+            }
         }
 
         // 手动绘制顶部和右侧 spine（plotters mesh 只绘制左侧和底部边框）
@@ -1905,6 +2331,24 @@ impl Axes {
             }
         }
 
+        // matplotlib 默认 axisbelow='line'：先绘制归属网格下方的填充元素
+        // （bar/barh/hist 柱、fill_between、stackplot、scatter、axhspan/axvspan），
+        // 使随后绘制的网格线覆盖其上。
+        crate::figure::axes_render_elements::render_elements(
+            chart,
+            &self.elements,
+            crate::figure::axes_render_elements::GridLayer::BelowGrid,
+            font_scale,
+            marker_scale,
+            xlog,
+            ylog,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            bitmap,
+        )?;
+
         // 绘制主网格线
         if self.grid_visible {
             let major_ls = grid_style.major_ls.as_deref();
@@ -1916,6 +2360,7 @@ impl Axes {
                     grid_style.major_color,
                     grid_style.major_lw,
                     major_ls,
+                    false,
                     font_scale,
                     x_min,
                     x_max,
@@ -1931,6 +2376,7 @@ impl Axes {
                     grid_style.major_color,
                     grid_style.major_lw,
                     major_ls,
+                    false,
                     font_scale,
                     x_min,
                     x_max,
@@ -1960,6 +2406,7 @@ impl Axes {
                     grid_style.minor_color,
                     grid_style.minor_lw,
                     minor_ls,
+                    true,
                     font_scale,
                     x_min,
                     x_max,
@@ -1975,6 +2422,7 @@ impl Axes {
                     grid_style.minor_color,
                     grid_style.minor_lw,
                     minor_ls,
+                    true,
                     font_scale,
                     x_min,
                     x_max,
@@ -1984,10 +2432,11 @@ impl Axes {
             }
         }
 
-        // 渲染所有数据元素（线、散点、柱状图、填充、误差棒、饼图等）
+        // 渲染网格上方的数据元素（折线、hist step 轮廓、误差棒、文本、饼图等）
         crate::figure::axes_render_elements::render_elements(
             chart,
             &self.elements,
+            crate::figure::axes_render_elements::GridLayer::AboveGrid,
             font_scale,
             marker_scale,
             xlog,
@@ -2006,11 +2455,14 @@ impl Axes {
                 chart,
                 Some(loc),
                 &self.legend_labels,
+                &self.elements,
                 font_scale,
                 x_min,
                 x_max,
                 y_min,
                 y_max,
+                xlog,
+                ylog,
             )?;
         }
 

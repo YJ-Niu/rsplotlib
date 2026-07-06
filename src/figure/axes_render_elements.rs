@@ -15,10 +15,6 @@ use pyo3::prelude::*;
 
 use std::cell::RefCell;
 
-use crate::core::colormap::{
-    autumn_color, cool_color, inferno_color, magma_color, plasma_color, spring_color, summer_color,
-    viridis_color, winter_color,
-};
 use crate::core::colors::{RgbColor, default_color, median, parse_color, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
@@ -488,11 +484,195 @@ where
     }
 }
 
-/// 渲染所有 PlotElement
+/// 网格分层。
+///
+/// matplotlib 默认 `axes.axisbelow = 'line'`：网格线（zorder≈1.5）绘制在填充
+/// patch/collection（zorder≈1，如 bar/hist 柱、fill_between、stackplot、scatter、
+/// axhspan/axvspan）之上，但在折线（Line2D，zorder=2，如 plot、hist 的 step 轮廓）之下。
+/// 因此渲染分两趟：先画 `BelowGrid` 元素 → 画网格 → 再画 `AboveGrid` 元素。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GridLayer {
+    BelowGrid,
+    AboveGrid,
+}
+
+/// 判断某元素（Hist 除外）应绘制在网格下方（true）还是上方（false）。
+///
+/// 与 matplotlib 各 artist 默认 zorder 对齐：填充 patch/collection（zorder=1）在网格下，
+/// 其余（Line2D、Text 等，zorder≥2）在网格上。Hist 需跨两趟（柱在下、step 轮廓在上），
+/// 由其分支内部按 layer 分别处理，不经过此函数。
+fn element_below_grid(el: &PlotElement) -> bool {
+    matches!(
+        el,
+        PlotElement::Bar { .. }
+            | PlotElement::BarH { .. }
+            | PlotElement::FillBetween { .. }
+            | PlotElement::Stack { .. }
+            | PlotElement::HSpan { .. }
+            | PlotElement::VSpan { .. }
+            | PlotElement::Scatter { .. }
+            | PlotElement::ScatterMulti { .. }
+    )
+}
+
+/// 三次卷积核（Keys, a = -0.5），bicubic 插值用。对任意小数位置，四个权重之和为 1。
+fn cubic_kernel(t: f64) -> f64 {
+    const A: f64 = -0.5;
+    let t = t.abs();
+    if t <= 1.0 {
+        ((A + 2.0) * t - (A + 3.0)) * t * t + 1.0
+    } else if t < 2.0 {
+        (((t - 5.0) * t + 8.0) * t - 4.0) * A
+    } else {
+        0.0
+    }
+}
+
+/// 在源 RGB 网格上采样连续坐标 (sr 行, sc 列)：`bicubic=false` 双线性，`true` 双三次。
+/// 越界索引 clamp 到网格边缘，避免出现黑边。返回未取整的 f64 RGB。
+fn sample_image(pixels: &[Vec<(u8, u8, u8)>], sr: f64, sc: f64, bicubic: bool) -> (f64, f64, f64) {
+    let nrows = pixels.len() as isize;
+    let ncols = pixels[0].len() as isize;
+    let get = |r: isize, c: isize| -> (f64, f64, f64) {
+        let r = r.clamp(0, nrows - 1) as usize;
+        let c = c.clamp(0, ncols - 1) as usize;
+        let (pr, pg, pb) = pixels[r][c];
+        (pr as f64, pg as f64, pb as f64)
+    };
+    if bicubic {
+        let ir = sr.floor() as isize;
+        let ic = sc.floor() as isize;
+        let (mut ar, mut ag, mut ab) = (0.0, 0.0, 0.0);
+        for m in -1..=2isize {
+            let wy = cubic_kernel(sr - (ir + m) as f64);
+            if wy == 0.0 {
+                continue;
+            }
+            for n in -1..=2isize {
+                let wx = cubic_kernel(sc - (ic + n) as f64);
+                if wx == 0.0 {
+                    continue;
+                }
+                let w = wy * wx;
+                let (pr, pg, pb) = get(ir + m, ic + n);
+                ar += w * pr;
+                ag += w * pg;
+                ab += w * pb;
+            }
+        }
+        (ar, ag, ab)
+    } else {
+        let r0 = sr.floor();
+        let c0 = sc.floor();
+        let dr = sr - r0;
+        let dc = sc - c0;
+        let (r0i, c0i) = (r0 as isize, c0 as isize);
+        let lerp = |a: f64, b: f64, t: f64| a + (b - a) * t;
+        let mix = |pa: (f64, f64, f64), pb: (f64, f64, f64), t: f64| {
+            (
+                lerp(pa.0, pb.0, t),
+                lerp(pa.1, pb.1, t),
+                lerp(pa.2, pb.2, t),
+            )
+        };
+        let top = mix(get(r0i, c0i), get(r0i, c0i + 1), dc);
+        let bot = mix(get(r0i + 1, c0i), get(r0i + 1, c0i + 1), dc);
+        mix(top, bot, dr)
+    }
+}
+
+/// 平滑插值渲染图像（bilinear / bicubic），颜色渐变、无硬分界线。
+///
+/// - 位图后端：逐绘图区像素中心反映射到数据坐标 → 源网格连续坐标 → 采样 → `draw_pixel`，
+///   分辨率等于绘图区像素分辨率，最平滑；
+/// - SVG 后端：无法逐像素绘制（会产生海量 `<rect>`），改为上采样到有上限的目标网格，
+///   每个目标 cell 画一个覆盖对应数据子区间的矩形。
+#[allow(clippy::too_many_arguments)]
+fn render_image_smooth<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    pixels: &[Vec<(u8, u8, u8)>],
+    alpha: f64,
+    bicubic: bool,
+    bitmap: bool,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    let n_rows = pixels.len();
+    let n_cols = pixels[0].len();
+    let (pw, ph) = {
+        let dim = chart.plotting_area().dim_in_pixel();
+        (dim.0 as f64, dim.1 as f64)
+    };
+    if pw < 1.0 || ph < 1.0 {
+        return Ok(());
+    }
+    let to_u8 = |v: f64| v.round().clamp(0.0, 255.0) as u8;
+
+    if bitmap {
+        let x_per_pix = (x_max - x_min) / pw;
+        let y_per_pix = (y_max - y_min) / ph;
+        if x_per_pix == 0.0 || y_per_pix == 0.0 {
+            return Ok(());
+        }
+        let area = chart.plotting_area().strip_coord_spec();
+        let (pw_i, ph_i) = (pw as i32, ph as i32);
+        let (max_r, max_c) = ((n_rows - 1) as f64, (n_cols - 1) as f64);
+        for yy in 0..ph_i {
+            // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
+            let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
+            if data_y < 0.0 || data_y > n_rows as f64 {
+                continue;
+            }
+            let sr = (data_y - 0.5).clamp(0.0, max_r);
+            for xx in 0..pw_i {
+                let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
+                if data_x < 0.0 || data_x > n_cols as f64 {
+                    continue;
+                }
+                let sc = (data_x - 0.5).clamp(0.0, max_c);
+                let (r, g, b) = sample_image(pixels, sr, sc, bicubic);
+                let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
+                area.draw_pixel((xx, yy), &color)
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            }
+        }
+    } else {
+        // SVG：上采样到目标网格（每维不超过 CAP），逐 cell 画矩形。
+        const CAP: usize = 200;
+        let target_cols = (pw as usize).clamp(n_cols, CAP);
+        let target_rows = (ph as usize).clamp(n_rows, CAP);
+        let (max_r, max_c) = ((n_rows - 1) as f64, (n_cols - 1) as f64);
+        for tj in 0..target_rows {
+            let y0 = tj as f64 / target_rows as f64 * n_rows as f64;
+            let y1 = (tj + 1) as f64 / target_rows as f64 * n_rows as f64;
+            let sr = ((y0 + y1) * 0.5 - 0.5).clamp(0.0, max_r);
+            for ti in 0..target_cols {
+                let x0 = ti as f64 / target_cols as f64 * n_cols as f64;
+                let x1 = (ti + 1) as f64 / target_cols as f64 * n_cols as f64;
+                let sc = ((x0 + x1) * 0.5 - 0.5).clamp(0.0, max_c);
+                let (r, g, b) = sample_image(pixels, sr, sc, bicubic);
+                let style =
+                    plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha).filled();
+                chart
+                    .draw_series(std::iter::once(Rectangle::new([(x0, y0), (x1, y1)], style)))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 渲染所有 PlotElement（按网格分层 `layer` 只绘制归属该层的元素）
 ///
 /// # 参数
 /// - `chart`: plotters 的 chart 上下文
 /// - `elements`: 所有 plot 调用收集的元素
+/// - `layer`: 当前绘制的网格分层（BelowGrid/AboveGrid）
 /// - `font_scale`: 字体缩放系数
 /// - `xlog`, `ylog`: 是否对数刻度
 /// - `x_min`, `x_max`, `y_min`, `y_max`: 数据范围
@@ -500,6 +680,7 @@ where
 pub fn render_elements<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     elements: &[PlotElement],
+    layer: GridLayer,
     font_scale: f64,
     marker_scale: f64,
     xlog: bool,
@@ -538,6 +719,13 @@ where
     };
 
     for el in elements {
+        // matplotlib 默认 axisbelow='line'：按元素归属的网格分层跳过不属于本趟的元素。
+        // Hist 例外——柱在网格下、step 轮廓在网格上，其分支内部各自按 layer 判断。
+        if !matches!(el, PlotElement::Hist { .. })
+            && element_below_grid(el) != (layer == GridLayer::BelowGrid)
+        {
+            continue;
+        }
         match el {
             PlotElement::Line {
                 x,
@@ -734,6 +922,7 @@ where
                                     marker_size,
                                     face_rgb,
                                     edge_rgb,
+                                    1.0,
                                 )
                                 .map_err(|e| {
                                     PyRuntimeError::new_err(format!("Failed to draw marker: {}", e))
@@ -749,17 +938,20 @@ where
                 s,
                 c,
                 marker,
+                alpha,
                 color_idx,
                 ..
             } => {
                 let col = parse_color(c, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
-                let size = s.sqrt() * 0.4;
+                // matplotlib: s 是 marker 面积 (points²)，故直径 = sqrt(s) points，
+                // 像素直径 = sqrt(s) * marker_scale；draw_marker 的 size 是半径。
+                let size = (s.sqrt() * marker_scale / 2.0).max(1.0);
                 for (&xv, &yv) in x.iter().zip(y.iter()) {
                     let txv = tx(xv);
                     let tyv = ty(yv);
                     if txv.is_finite() && tyv.is_finite() {
-                        draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb).map_err(
+                        draw_marker(chart, marker, txv, tyv, size, rgb, rgb, *alpha).map_err(
                             |e| PyRuntimeError::new_err(format!("Failed to draw scatter: {}", e)),
                         )?;
                     }
@@ -771,6 +963,7 @@ where
                 s_list,
                 c_list,
                 marker,
+                alpha,
                 color_idx,
                 ..
             } => {
@@ -793,13 +986,15 @@ where
                         parse_color(&c_str, *color_idx + i).unwrap_or(default_color(*color_idx + i))
                     };
                     let rgb = to_plotters_color(col);
-                    let size = s_list
+                    let size = (s_list
                         .as_ref()
                         .and_then(|s| s.get(i).cloned())
-                        .unwrap_or(20.0)
+                        .unwrap_or(100.0)
                         .sqrt()
-                        * 0.4;
-                    draw_marker(chart, marker, txv, tyv, size.max(2.0), rgb, rgb).map_err(|e| {
+                        * marker_scale
+                        / 2.0)
+                        .max(1.0);
+                    draw_marker(chart, marker, txv, tyv, size, rgb, rgb, *alpha).map_err(|e| {
                         PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e))
                     })?;
                 }
@@ -808,14 +1003,18 @@ where
                 x,
                 height,
                 width,
-                color,
+                colors,
                 color_idx,
                 ..
             } => {
-                let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
-                let rgb = to_plotters_color(col);
-                let fill_style: ShapeStyle = rgb.filled();
-                for (&xv, &h) in x.iter().zip(height.iter()) {
+                for (i, (&xv, &h)) in x.iter().zip(height.iter()).enumerate() {
+                    let col = match colors.get(i) {
+                        Some(s) if !s.is_empty() => {
+                            parse_color(s, *color_idx + i).unwrap_or(default_color(*color_idx + i))
+                        }
+                        _ => default_color(*color_idx),
+                    };
+                    let fill_style: ShapeStyle = to_plotters_color(col).filled();
                     let txv = tx(xv);
                     let th = ty(h);
                     let y0 = if ylog {
@@ -839,18 +1038,18 @@ where
                 y,
                 width,
                 height,
-                color,
+                colors,
                 color_idx,
                 ..
             } => {
-                let c = if color.is_empty() {
-                    default_color(*color_idx)
-                } else {
-                    parse_color(color, *color_idx)?
-                };
-                let rgb = to_plotters_color(c);
-                let fill_style: ShapeStyle = rgb.filled();
-                for (&yv, &wv) in y.iter().zip(width.iter()) {
+                for (i, (&yv, &wv)) in y.iter().zip(width.iter()).enumerate() {
+                    let col = match colors.get(i) {
+                        Some(s) if !s.is_empty() => {
+                            parse_color(s, *color_idx + i).unwrap_or(default_color(*color_idx + i))
+                        }
+                        _ => default_color(*color_idx),
+                    };
+                    let fill_style: ShapeStyle = to_plotters_color(col).filled();
                     let tyv = ty(yv);
                     let twv = tx(wv);
                     let bar_y0 = tyv - height / 2.0;
@@ -866,159 +1065,104 @@ where
                 }
             }
             PlotElement::Hist {
-                data_all,
-                bins: num_bins_user,
-                density,
+                bars,
+                outlines,
                 histtype,
+                orientation,
                 alpha,
                 colors,
                 color_idx,
-                bin_edges,
                 label: _,
             } => {
-                if data_all.is_empty() {
-                    continue;
-                }
-                let all_data: Vec<f64> = data_all.iter().flatten().cloned().collect();
-                if all_data.is_empty() {
-                    continue;
-                }
-                let (global_min, global_max) = if let Some(edges) = bin_edges {
-                    (edges[0], edges[edges.len() - 1])
-                } else {
-                    let mn = all_data.iter().cloned().fold(f64::INFINITY, f64::min);
-                    let mx = all_data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    (mn, mx)
-                };
-                let global_range = global_max - global_min;
-                let bin_edges_list: Vec<f64> = if global_range < 1e-10 {
-                    // 所有值相同 -> 在值两侧各扩 0.5 形成一个单柱
-                    vec![global_min - 0.5, global_min + 0.5]
-                } else if let Some(edges) = bin_edges {
-                    edges.clone()
-                } else {
-                    let bw = global_range / *num_bins_user as f64;
-                    (0..=*num_bins_user)
-                        .map(|i| global_min + i as f64 * bw)
-                        .collect()
-                };
-                let effective_bins = bin_edges_list.len() - 1;
-                let total_all = all_data.len() as f64;
-                for (di, dataset) in data_all.iter().enumerate() {
-                    if dataset.is_empty() {
-                        continue;
+                let is_horizontal = orientation == "horizontal";
+                // 将 (分箱位置轴, 计数轴) 映射到数据坐标 (x, y)，竖直时 pos->x,val->y，
+                // 水平时交换；并套用各轴的 log 变换。
+                let to_xy = |pos: f64, val: f64| -> (f64, f64) {
+                    if is_horizontal {
+                        (tx(val), ty(pos))
+                    } else {
+                        (tx(pos), ty(val))
                     }
+                };
+                let is_step = histtype == "step" || histtype == "stepfilled";
+                let draw_fill = histtype != "step";
+                let n_datasets = bars.len().max(outlines.len());
+                for di in 0..n_datasets {
                     let col_str = colors.get(di).map(|s| s.as_str()).unwrap_or("");
                     let col = parse_color(col_str, *color_idx + di)
                         .unwrap_or(default_color(*color_idx + di));
                     let rgb = to_plotters_color(col);
                     let fill_style: ShapeStyle = rgb.mix(*alpha).filled();
-                    let outline_style: ShapeStyle = rgb.mix(*alpha).stroke_width(1);
-                    let mut counts = vec![0usize; effective_bins];
-                    for &val in dataset {
-                        if val < global_min || val > global_max {
-                            continue;
-                        }
-                        let bin = bin_edges_list.partition_point(|&e| e <= val) - 1;
-                        if bin < effective_bins {
-                            counts[bin] += 1;
-                        }
-                    }
-                    for (i, &count) in counts.iter().enumerate() {
-                        let bin_left = bin_edges_list[i];
-                        let bin_right = bin_edges_list[i + 1];
-                        let h = if *density {
-                            count as f64 / (total_all * (bin_right - bin_left))
-                        } else {
-                            count as f64
-                        };
-                        if h <= 0.0 {
-                            continue;
-                        }
-                        if histtype == "stepfilled" {
+
+                    // 柱（填充 patch，zorder=1）→ 网格下方
+                    if layer == GridLayer::BelowGrid
+                        && draw_fill
+                        && let Some(ds_bars) = bars.get(di)
+                    {
+                        for &(pl, pr, vb, vt) in ds_bars {
+                            if (vt - vb).abs() < 1e-12 {
+                                continue;
+                            }
+                            let c1 = to_xy(pl, vb);
+                            let c2 = to_xy(pr, vt);
                             chart
-                                .draw_series(std::iter::once(Rectangle::new(
-                                    [(bin_left, 0.0), (bin_right, h)],
-                                    fill_style,
-                                )))
-                                .map_err(|e| {
-                                    PyRuntimeError::new_err(format!(
-                                        "Failed to draw hist fill: {}",
-                                        e
-                                    ))
-                                })?;
-                            chart
-                                .draw_series(std::iter::once(Rectangle::new(
-                                    [(bin_left, 0.0), (bin_right, h)],
-                                    outline_style,
-                                )))
-                                .map_err(|e| {
-                                    PyRuntimeError::new_err(format!(
-                                        "Failed to draw hist outline: {}",
-                                        e
-                                    ))
-                                })?;
-                        } else {
-                            chart
-                                .draw_series(std::iter::once(Rectangle::new(
-                                    [(bin_left, 0.0), (bin_right, h)],
-                                    fill_style,
-                                )))
+                                .draw_series(std::iter::once(Rectangle::new([c1, c2], fill_style)))
                                 .map_err(|e| {
                                     PyRuntimeError::new_err(format!("Failed to draw hist: {}", e))
                                 })?;
                         }
                     }
-                }
-            }
-            PlotElement::Image { data, cmap } => {
-                if data.is_empty() || data[0].is_empty() {
-                    continue;
-                }
-                let d_min = data.iter().flatten().cloned().fold(f64::INFINITY, f64::min);
-                let d_max = data
-                    .iter()
-                    .flatten()
-                    .cloned()
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let d_range = if (d_max - d_min).abs() < 1e-10 {
-                    1.0
-                } else {
-                    d_max - d_min
-                };
-                for (r, row) in data.iter().enumerate() {
-                    for (c, &val) in row.iter().enumerate() {
-                        let normalized = (val - d_min) / d_range;
-                        let rgb = match cmap.as_str() {
-                            "gray" | "grey" => {
-                                let v = (normalized * 255.0) as u8;
-                                RGBColor(v, v, v)
-                            }
-                            "hot" => {
-                                let r = (normalized * 3.0).clamp(0.0, 1.0);
-                                let g = (normalized * 3.0 - 1.0).clamp(0.0, 1.0);
-                                let b = (normalized * 3.0 - 2.0).clamp(0.0, 1.0);
-                                RGBColor((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
-                            }
-                            "plasma" => plasma_color(normalized),
-                            "inferno" => inferno_color(normalized),
-                            "magma" => magma_color(normalized),
-                            "cool" => cool_color(normalized),
-                            "spring" => spring_color(normalized),
-                            "summer" => summer_color(normalized),
-                            "autumn" => autumn_color(normalized),
-                            "winter" => winter_color(normalized),
-                            _ => viridis_color(normalized),
-                        };
+
+                    // step 轮廓（Line2D，zorder=2）→ 网格上方
+                    if layer == GridLayer::AboveGrid
+                        && is_step
+                        && let Some(pts) = outlines.get(di)
+                    {
+                        let mapped: Vec<(f64, f64)> =
+                            pts.iter().map(|&(p, v)| to_xy(p, v)).collect();
+                        let lw_px = (1.5 * font_scale).max(1.0).round() as u32;
+                        let stroke_w = (lw_px as i32 - 1).max(1) as u32;
+                        let outline_style = rgb.stroke_width(stroke_w);
                         chart
-                            .draw_series(std::iter::once(Rectangle::new(
-                                [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
-                                rgb.filled(),
-                            )))
+                            .draw_series(std::iter::once(PathElement::new(mapped, outline_style)))
                             .map_err(|e| {
-                                PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
+                                PyRuntimeError::new_err(format!(
+                                    "Failed to draw hist outline: {}",
+                                    e
+                                ))
                             })?;
                     }
+                }
+            }
+            PlotElement::Image {
+                pixels,
+                alpha,
+                interpolation,
+            } => {
+                if pixels.is_empty() || pixels[0].is_empty() {
+                    continue;
+                }
+                if interpolation == "nearest" {
+                    // 最近邻：每个源 cell 画一个矩形，块状、有明显分界线。
+                    for (r, row) in pixels.iter().enumerate() {
+                        for (c, &(pr, pg, pb)) in row.iter().enumerate() {
+                            let style = plotters::style::RGBAColor(pr, pg, pb, *alpha).filled();
+                            chart
+                                .draw_series(std::iter::once(Rectangle::new(
+                                    [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
+                                    style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
+                                })?;
+                        }
+                    }
+                } else {
+                    // 平滑插值：bilinear 仅双线性，其余（bicubic/lanczos 等）用双三次。
+                    let bicubic = interpolation != "bilinear";
+                    render_image_smooth(
+                        chart, pixels, *alpha, bicubic, bitmap, x_min, x_max, y_min, y_max,
+                    )?;
                 }
             }
             PlotElement::Text {
@@ -1193,11 +1337,28 @@ where
                 colors,
                 autopct,
                 startangle,
+                explode,
             } => {
                 let total: f64 = x.iter().sum();
                 if total <= 0.0 {
                     continue;
                 }
+                // 使饼图呈正圆：按绘图区像素宽高比压缩 x/y 数据半径，
+                // 让单位圆在两个方向上映射到相同的像素半径（等效 matplotlib 的 aspect='equal'）。
+                let (pw, ph) = chart.plotting_area().dim_in_pixel();
+                let px_per_x = if x_max > x_min {
+                    pw as f64 / (x_max - x_min)
+                } else {
+                    1.0
+                };
+                let px_per_y = if y_max > y_min {
+                    ph as f64 / (y_max - y_min)
+                } else {
+                    1.0
+                };
+                let s = px_per_x.min(px_per_y);
+                let sx = if px_per_x > 0.0 { s / px_per_x } else { 1.0 };
+                let sy = if px_per_y > 0.0 { s / px_per_y } else { 1.0 };
                 let mut current_angle = startangle.to_radians();
                 let pie_colors = colors
                     .as_ref()
@@ -1209,6 +1370,15 @@ where
                     let angle = (val / total) * 360.0_f64;
                     let angle_rad = angle.to_radians();
                     let end_angle = current_angle + angle_rad;
+                    let mid_angle = current_angle + angle_rad / 2.0;
+                    // explode：沿扇形中线方向向外偏移 explode[i] 倍半径
+                    let exp = explode
+                        .as_ref()
+                        .and_then(|e| e.get(i))
+                        .copied()
+                        .unwrap_or(0.0);
+                    let ox = mid_angle.cos() * exp * sx;
+                    let oy = mid_angle.sin() * exp * sy;
                     let col = if let Some(ref pc) = pie_colors {
                         let ci =
                             parse_color(pc.get(i).unwrap_or(&""), i).unwrap_or(default_color(i));
@@ -1217,10 +1387,10 @@ where
                         to_plotters_color(default_color(i))
                     };
                     let steps = ((angle_rad / 0.05).ceil() as usize).max(3);
-                    let mut vertices = vec![(0.0, 0.0)];
+                    let mut vertices = vec![(ox, oy)];
                     for j in 0..=steps {
                         let a = current_angle + (j as f64 / steps as f64) * angle_rad;
-                        vertices.push((a.cos(), a.sin()));
+                        vertices.push((a.cos() * sx + ox, a.sin() * sy + oy));
                     }
                     chart
                         .draw_series(std::iter::once(Polygon::new(
@@ -1230,13 +1400,12 @@ where
                         .map_err(|e| {
                             PyRuntimeError::new_err(format!("Failed to draw pie: {}", e))
                         })?;
-                    let mid_angle = current_angle + angle_rad / 2.0;
                     if let Some(lbls) = labels
                         && let Some(l) = lbls.get(i)
                     {
                         let label_r = 1.3;
-                        let lx = mid_angle.cos() * label_r;
-                        let ly = mid_angle.sin() * label_r;
+                        let lx = mid_angle.cos() * label_r * sx + ox;
+                        let ly = mid_angle.sin() * label_r * sy + oy;
                         // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
                         let pie_family = font_stack::select_family(l);
                         let pie_label_style: TextStyle =
@@ -1263,8 +1432,8 @@ where
                             format!("{:.1}%", pct)
                         };
                         let text_r = 0.7;
-                        let tx = mid_angle.cos() * text_r;
-                        let ty = mid_angle.sin() * text_r;
+                        let tx = mid_angle.cos() * text_r * sx + ox;
+                        let ty = mid_angle.sin() * text_r * sy + oy;
                         let autopct_family = font_stack::select_family(&text);
                         let autopct_style: TextStyle =
                             FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))
@@ -1476,9 +1645,9 @@ where
                     }
                     if !fmt.is_empty() {
                         let marker_name = fmt;
-                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb).map_err(|e| {
-                            PyRuntimeError::new_err(format!("ErrorBar marker: {}", e))
-                        })?;
+                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb, 1.0).map_err(
+                            |e| PyRuntimeError::new_err(format!("ErrorBar marker: {}", e)),
+                        )?;
                     }
                 }
             }
@@ -1524,7 +1693,7 @@ where
                     if !txv.is_finite() || !tyv.is_finite() {
                         continue;
                     }
-                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb)
+                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb, 1.0)
                         .map_err(|e| PyRuntimeError::new_err(format!("Stem marker: {}", e)))?;
                 }
             }

@@ -65,8 +65,9 @@ def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=No
         linestyle = ls
     return _rsplotlib.plot(
         _to_list(x), _to_list(y),
-        label, color, linestyle, marker, linewidth,
-        lw, c, ls, markersize, markeredgewidth, solid_capstyle,
+        label=label, color=color, linestyle=linestyle, marker=marker,
+        linewidth=linewidth, lw=lw, c=c, ls=ls, markersize=markersize,
+        markeredgewidth=markeredgewidth, solid_capstyle=solid_capstyle,
     )
 
 
@@ -115,18 +116,45 @@ def barh(y, width, height=0.8, color=None, label=None):
     return _rsplotlib.barh(_to_list(y), _to_list(width), height, color, label)
 
 
-def hist(x, bins=10, density=False, label=None, alpha=0.7, color=None):
+def hist(x, bins=10, range=None, density=False, weights=None,
+         cumulative=False, bottom=None, histtype='bar', align='mid',
+         orientation='vertical', rwidth=None, log=False, color=None,
+         facecolor=None, label=None, stacked=False, alpha=1.0):
     """绘制直方图
 
     Args:
-        x: 数据
-        bins: 区间数 (默认: 10)
-        density: 是否归一化 (默认: False)
-        label: 图例标签 (默认: None)
-        alpha: 透明度 (默认: 0.7)
-        color: 颜色 (默认: None)
+        x: 数据 (一维数组, 或多组数据组成的列表)
+        bins: 分箱数量 (默认 10) 或箱边界列表
+        range: 值域范围 (lo, hi)
+        density: 是否归一化为概率密度 (默认 False)
+        weights: 每个数据点的权重
+        cumulative: 是否绘制累积分布 (True/False/-1)
+        bottom: 每个柱子的起始基线
+        histtype: 'bar' | 'barstacked' | 'step' | 'stepfilled'
+        align: 'left' | 'mid' | 'right'
+        orientation: 'vertical' | 'horizontal'
+        rwidth: 柱子相对分箱宽度比例 (0~1)
+        log: 计数轴是否对数刻度
+        color / facecolor: 颜色或颜色列表
+        label: 图例标签
+        stacked: 是否堆叠
+        alpha: 透明度 (默认 1.0)
     """
-    return _rsplotlib.hist(_to_list_recursive(x), bins, density, label, alpha, color)
+    if cumulative is True:
+        cum = 1
+    elif cumulative is False or cumulative is None:
+        cum = 0
+    else:
+        cum = int(cumulative)
+    weights_arg = _to_list_recursive(weights) if weights is not None else None
+    range_arg = tuple(range) if range is not None else None
+    return _rsplotlib.hist(
+        _to_list_recursive(x), bins=bins, range=range_arg, density=density,
+        weights=weights_arg, cumulative=cum, bottom=bottom, histtype=histtype,
+        align=align, orientation=orientation, rwidth=rwidth, log=log,
+        color=color, facecolor=facecolor, label=label, stacked=stacked,
+        alpha=alpha,
+    )
 
 
 def pie(x, labels=None, colors=None, autopct=False):
@@ -217,15 +245,20 @@ def step(x, y, where_='pre', label=None, color=None, linestyle='-', linewidth=1.
     return _rsplotlib.step(_to_list(x), _to_list(y), where_, label, color, linestyle, linewidth)
 
 
-def imshow(x, cmap='gray', aspect='auto'):
+def imshow(x, cmap='gray', aspect='auto', vmin=None, vmax=None,
+           alpha=None, origin=None):
     """显示图像
 
     Args:
-        x: 2D 数据数组
-        cmap: 色图 (默认: 'gray', 可选: 'hot', 'cool')
+        x: 2D 标量数组 (经 cmap 上色) 或 3D RGB(A) 数组 (H, W, 3/4)
+        cmap: 色图 (默认: 'gray', 可选: 'hot', 'cool')，仅对 2D 数据生效
         aspect: 纵横比 (默认: 'auto', 可选: 'equal')
+        vmin, vmax: 2D 数据的颜色映射值域 (缺省取数据 min/max)
+        alpha: 图像整体透明度 (0.0-1.0)
+        origin: 'upper' (默认) 或 'lower'
     """
-    return _rsplotlib.imshow(_to_list_recursive(x), cmap, aspect)
+    return _rsplotlib.imshow(_to_list_recursive(x), cmap, aspect,
+                             vmin, vmax, alpha, origin)
 
 
 def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians=True):

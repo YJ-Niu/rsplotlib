@@ -66,9 +66,9 @@ pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
         {
             let fig_ref = fig.borrow();
             if !fig_ref.axes_list.is_empty() {
-                // 返回最后创建的 axes（符合 matplotlib：plt.* 作用于最近操作的 axes）
-                let last_idx = fig_ref.axes_list.len() - 1;
-                return Ok(fig_ref.axes_list[last_idx].clone_ref(py));
+                // 返回当前选中的 axes（plt.subplot 选中的子图；否则为最近创建的那个）
+                let idx = fig_ref.current_axes_index.min(fig_ref.axes_list.len() - 1);
+                return Ok(fig_ref.axes_list[idx].clone_ref(py));
             }
         }
         // 当前 figure 存在但还没有 axes：向其补一个全幅 axes，
@@ -78,6 +78,7 @@ pub fn get_current_axes(py: Python<'_>) -> PyResult<Py<Axes>> {
         let mut fig_mut = fig.borrow_mut();
         fig_mut.axes_list.push(ax_py.clone_ref(py));
         fig_mut.axes_positions.push((0.0, 1.0, 0.0, 1.0));
+        fig_mut.current_axes_index = 0;
         return Ok(ax_py);
     }
     // 没有任何当前 figure：按 matplotlib gca() 语义惰性创建 figure + 全幅 axes，
@@ -220,7 +221,7 @@ pub fn ylim(py: Python, bottom: Option<f64>, top: Option<f64>) -> PyResult<()> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=20.0, c=None, marker="o", label=None, alpha=1.0))]
+#[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0))]
 pub fn scatter<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -254,6 +255,47 @@ pub fn scatter_multi<'a>(
     })
 }
 
+/// 将一组数值按 colormap 映射为 `#rrggbb` 颜色字符串。
+///
+/// 用于 scatter 的 `c=数值数组, cmap=...` 场景：Python 层把数值映射为颜色后，
+/// 再作为逐点颜色传给 `scatter_multi`。未指定 vmin/vmax 时按数据的 min/max 归一化。
+#[pyfunction]
+#[pyo3(signature = (values, cmap="viridis", vmin=None, vmax=None))]
+pub fn colormap_hex(
+    values: Vec<f64>,
+    cmap: &str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+) -> Vec<String> {
+    let vmin = vmin.unwrap_or_else(|| {
+        values
+            .iter()
+            .cloned()
+            .filter(|v| v.is_finite())
+            .fold(f64::INFINITY, f64::min)
+    });
+    let vmax = vmax.unwrap_or_else(|| {
+        values
+            .iter()
+            .cloned()
+            .filter(|v| v.is_finite())
+            .fold(f64::NEG_INFINITY, f64::max)
+    });
+    let range = if (vmax - vmin).abs() < 1e-12 {
+        1.0
+    } else {
+        vmax - vmin
+    };
+    values
+        .iter()
+        .map(|&v| {
+            let t = ((v - vmin) / range).clamp(0.0, 1.0);
+            let color = crate::core::colormap::colormap_color(cmap, t);
+            format!("#{:02x}{:02x}{:02x}", color.0, color.1, color.2)
+        })
+        .collect()
+}
+
 #[pyfunction]
 #[pyo3(signature = (x, height, width=0.8, color=None, label=None))]
 pub fn bar<'a>(
@@ -261,7 +303,7 @@ pub fn bar<'a>(
     x: Bound<'a, PyAny>,
     height: Bound<'a, PyAny>,
     width: f64,
-    color: Option<String>,
+    color: Option<Bound<'a, PyAny>>,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
@@ -270,24 +312,50 @@ pub fn bar<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, bins=None, density=false, label=None, alpha=0.7, color=None, facecolor=None, align=None, histtype=None))]
+#[pyo3(signature = (x, bins=None, range=None, density=false, weights=None, cumulative=0, bottom=None, histtype=None, align=None, orientation=None, rwidth=None, log=false, color=None, facecolor=None, label=None, stacked=false, alpha=1.0))]
+#[allow(clippy::too_many_arguments)]
 pub fn hist<'py>(
     py: Python<'py>,
     x: Bound<'py, PyAny>,
     bins: Option<Bound<'py, PyAny>>,
+    range: Option<(f64, f64)>,
     density: bool,
-    label: Option<String>,
-    alpha: f64,
+    weights: Option<Bound<'py, PyAny>>,
+    cumulative: i64,
+    bottom: Option<f64>,
+    histtype: Option<String>,
+    align: Option<String>,
+    orientation: Option<String>,
+    rwidth: Option<f64>,
+    log: bool,
     color: Option<Bound<'py, PyAny>>,
     facecolor: Option<Bound<'py, PyAny>>,
-    align: Option<String>,
-    histtype: Option<String>,
-) -> PyResult<Bound<'py, PyTuple>> {
-    make_fig_ax!(py, |ax| {
-        ax.hist(
-            py, x, bins, density, label, alpha, color, facecolor, align, histtype,
-        )?;
-    })
+    label: Option<Bound<'py, PyAny>>,
+    stacked: bool,
+    alpha: f64,
+) -> PyResult<(Py<PyAny>, Vec<f64>, Option<Vec<Vec<f64>>>)> {
+    let (_fig_py, ax_py) = _make_fig_ax(py, Axes::new())?;
+    let mut ax_ref = ax_py.borrow_mut(py);
+    ax_ref.hist(
+        py,
+        x,
+        bins,
+        range,
+        density,
+        weights,
+        cumulative,
+        bottom,
+        histtype,
+        align,
+        orientation,
+        rwidth,
+        log,
+        color,
+        facecolor,
+        label,
+        stacked,
+        alpha,
+    )
 }
 
 #[pyfunction]
@@ -372,28 +440,109 @@ pub fn step<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
+#[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None))]
 pub fn imshow<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
     cmap: &'a str,
     aspect: &'a str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+    alpha: Option<f64>,
+    origin: Option<&'a str>,
+    interpolation: Option<&'a str>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
-            v
-        } else if x.hasattr("tolist")? {
-            let list = x.call_method0("tolist")?;
-            list.extract::<Vec<Vec<f64>>>()?
-        } else {
-            x.extract::<Vec<Vec<f64>>>()?
-        };
-        ax.imshow(data, cmap, aspect);
+        ax.imshow(&x, cmap, aspect, vmin, vmax, alpha, origin, interpolation)?;
     })
 }
 
+/// matplotlib.pyplot.imsave 兼容：把图像数组直接写入图片文件（无坐标轴 / 边距 / 留白），
+/// 输出像素尺寸等于数组尺寸（N 列 -> 宽，M 行 -> 高）。
+///
+/// - 二维标量数组：按 vmin/vmax（缺省取数据 min/max）归一化后经 `cmap`（默认 viridis）上色；
+/// - 三维 RGB(A) 数组：直接作为逐像素颜色（浮点取 [0,1]，整数取 [0,255]）。
+///
+/// `origin` 默认 "upper"（数组首行在图像顶部）；"lower" 时上下翻转。格式由 `format`
+/// 显式指定，否则按文件扩展名推断，支持 PNG 与 JPEG。`dpi` 仅写入 PNG 的分辨率元数据。
 #[pyfunction]
-#[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0))]
+#[pyo3(signature = (fname, arr, cmap="viridis", vmin=None, vmax=None, origin=None, format=None, dpi=100.0))]
+pub fn imsave(
+    fname: &str,
+    arr: Bound<'_, PyAny>,
+    cmap: &str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+    origin: Option<&str>,
+    format: Option<&str>,
+    dpi: f64,
+) -> PyResult<()> {
+    let mut rows = crate::figure::axes::image_array_to_rgb_rows(&arr, cmap, vmin, vmax)?;
+    if rows.is_empty() || rows[0].is_empty() {
+        return Err(PyValueError::new_err("imsave: empty image array"));
+    }
+    // origin: 默认 "upper"（首行在顶部，行序即输出行序）；"lower" 需翻转行序。
+    if matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower")) {
+        rows.reverse();
+    }
+    let height = rows.len() as u32;
+    let width = rows[0].len() as u32;
+    // 展平为行主序 RGB 缓冲（每像素 R,G,B）。
+    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
+    for row in &rows {
+        for &(r, g, b) in row {
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+    }
+    let fmt = match format {
+        Some(f) => f.trim().to_ascii_lowercase(),
+        None => {
+            let lower = fname.to_ascii_lowercase();
+            if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+                "jpeg".to_string()
+            } else {
+                "png".to_string()
+            }
+        }
+    };
+    match fmt.as_str() {
+        "jpg" | "jpeg" => {
+            use jpeg_encoder::{ColorType, Encoder};
+            let encoder = Encoder::new_file(fname, 90).map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to create JPEG encoder: {}", e))
+            })?;
+            encoder
+                .encode(&rgb, width as u16, height as u16, ColorType::Rgb)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to encode JPEG: {}", e)))?;
+        }
+        _ => {
+            // 真彩 24-bit RGB PNG，内嵌 DPI 分辨率元数据。
+            let ppm = (dpi / 0.0254).round() as u32;
+            let dims = png::PixelDimensions {
+                xppu: ppm,
+                yppu: ppm,
+                unit: png::Unit::Meter,
+            };
+            let file = std::fs::File::create(fname)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
+            let mut encoder = png::Encoder::new(file, width, height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_pixel_dims(Some(dims));
+            encoder.set_compression(png::Compression::Fast);
+            let mut writer = encoder.write_header().map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e))
+            })?;
+            writer
+                .write_image_data(&rgb)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+        }
+    }
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (x, labels=None, colors=None, autopct=None, startangle=0.0, explode=None))]
 pub fn pie<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -401,6 +550,7 @@ pub fn pie<'a>(
     colors: Option<Vec<String>>,
     autopct: Option<String>,
     startangle: f64,
+    explode: Option<Vec<f64>>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
         let x_vec = if let Ok(v) = x.extract::<Vec<f64>>() {
@@ -411,7 +561,7 @@ pub fn pie<'a>(
         } else {
             x.extract::<Vec<f64>>()?
         };
-        ax.pie(x_vec, labels, colors, autopct, startangle);
+        ax.pie(x_vec, labels, colors, autopct, startangle, explode);
     })
 }
 
@@ -573,6 +723,39 @@ pub fn set_dpi(py: Python, dpi: f64) -> PyResult<()> {
     Ok(())
 }
 
+/// 子图水平方向的基础间距（wspace）：相邻列间隔占单个子图宽度的比例。
+/// 当任一子图设置了 Y 轴标签时，渲染阶段会将其翻倍以容纳 y 刻度数字 + y 轴标签。
+pub const BASE_WSPACE: f64 = 0.24;
+/// 子图垂直方向的基础间距（hspace）：相邻行间隔占单个子图高度的比例。
+/// 当任一子图设置了 X 轴标签时，渲染阶段会将其翻倍以容纳 x 刻度数字 + x 轴标签 + 下方 title。
+pub const BASE_HSPACE: f64 = 0.42;
+
+/// 计算第 `row` 行、第 `col` 列子图在 [0,1] 网格坐标系中的位置 (left, right, bottom, top)。
+///
+/// 采用与 matplotlib 一致的 wspace/hspace 语义，为内侧子图的刻度/坐标标签留出间隙，
+/// 避免相互重叠。`wspace`/`hspace` 分别为相邻列/行间隔占单个子图宽/高的比例。
+/// 行号 0 在最上方（top=1.0 一侧）。
+pub fn grid_position(
+    row: usize,
+    col: usize,
+    nrows: usize,
+    ncols: usize,
+    wspace: f64,
+    hspace: f64,
+) -> (f64, f64, f64, f64) {
+    let ncols_f = ncols as f64;
+    let nrows_f = nrows as f64;
+    let cell_w = 1.0 / (ncols_f + (ncols_f - 1.0) * wspace);
+    let cell_h = 1.0 / (nrows_f + (nrows_f - 1.0) * hspace);
+    let gap_w = cell_w * wspace;
+    let gap_h = cell_h * hspace;
+    let left = col as f64 * (cell_w + gap_w);
+    let right = left + cell_w;
+    let top = 1.0 - row as f64 * (cell_h + gap_h);
+    let bottom = top - cell_h;
+    (left, right, bottom, top)
+}
+
 #[pyfunction]
 #[pyo3(signature = (nrows=1, ncols=1, index=1))]
 pub fn subplot(
@@ -581,19 +764,48 @@ pub fn subplot(
     ncols: usize,
     index: usize,
 ) -> PyResult<Bound<'_, PyTuple>> {
-    if index == 0 || index > nrows * ncols {
+    let total = nrows * ncols;
+    if index == 0 || index > total {
         return Err(PyValueError::new_err("Index out of range"));
     }
-    let result = subplots(py, nrows, ncols, None, None)?;
-    let fig = result.get_item(0)?;
-    let axes_all = result.get_item(1)?;
-    let ax = if nrows * ncols == 1 {
-        axes_all.clone()
-    } else {
-        let lst = axes_all.cast::<PyList>()?;
-        lst.get_item(index - 1)?
+
+    // 复用当前 figure（保留用户已设置的 figsize / dpi 等）；没有则新建一个。
+    let fig_bound = match get_current_figure(py) {
+        Ok(f) => f,
+        Err(_) => {
+            let fig_py = Py::new(py, Figure::new())?;
+            set_current_figure(fig_py.clone_ref(py));
+            fig_py.bind(py).clone()
+        }
     };
-    PyTuple::new(py, [fig, ax])
+
+    // 若现有网格与请求的 nrows×ncols 不一致，则重建为一个空网格，
+    // 并为每个格子写入正确的分数坐标位置；一致时直接复用，仅切换选中项。
+    {
+        let mut fig_ref = fig_bound.borrow_mut();
+        let need_rebuild =
+            fig_ref.nrows != nrows || fig_ref.ncols != ncols || fig_ref.axes_list.len() != total;
+        if need_rebuild {
+            fig_ref.axes_list.clear();
+            fig_ref.axes_positions.clear();
+            fig_ref.nrows = nrows;
+            fig_ref.ncols = ncols;
+            for k in 0..total {
+                let ax_py = Py::new(py, Axes::new())?;
+                init_axes_self_py(&ax_py, py);
+                let pos =
+                    grid_position(k / ncols, k % ncols, nrows, ncols, BASE_WSPACE, BASE_HSPACE);
+                fig_ref.axes_list.push(ax_py.clone_ref(py));
+                fig_ref.axes_positions.push(pos);
+            }
+        }
+        fig_ref.current_axes_index = index - 1;
+    }
+
+    let ax_py = fig_bound.borrow().axes_list[index - 1].clone_ref(py);
+    let fig_obj = fig_bound.as_any().clone();
+    let ax_obj = ax_py.bind(py).as_any().clone();
+    PyTuple::new(py, [fig_obj, ax_obj])
 }
 
 #[pyfunction]
@@ -627,12 +839,13 @@ pub fn subplots(
     set_current_figure(fig_py.clone_ref(py));
 
     if total == 1 {
-        let ax = Axes::new();
-        let ax_py = Py::new(py, ax)?;
+        let ax_py = Py::new(py, Axes::new())?;
         init_axes_self_py(&ax_py, py);
         {
             let mut fig_ref = fig_py.borrow_mut(py);
             fig_ref.axes_list.push(ax_py.clone_ref(py));
+            fig_ref.axes_positions.push((0.0, 1.0, 0.0, 1.0));
+            fig_ref.current_axes_index = 0;
         }
         let fig_obj = fig_py.bind(py).as_any().clone();
         let ax_obj = ax_py.bind(py).as_any().clone();
@@ -641,13 +854,16 @@ pub fn subplots(
         let mut py_axes: Vec<Bound<'_, PyAny>> = Vec::new();
         {
             let mut fig_ref = fig_py.borrow_mut(py);
-            for _ in 0..total {
-                let ax = Axes::new();
-                let ax_py = Py::new(py, ax)?;
+            for k in 0..total {
+                let ax_py = Py::new(py, Axes::new())?;
                 init_axes_self_py(&ax_py, py);
+                let pos =
+                    grid_position(k / ncols, k % ncols, nrows, ncols, BASE_WSPACE, BASE_HSPACE);
                 fig_ref.axes_list.push(ax_py.clone_ref(py));
+                fig_ref.axes_positions.push(pos);
                 py_axes.push(ax_py.bind(py).as_any().clone());
             }
+            fig_ref.current_axes_index = 0;
         }
         let fig_obj = fig_py.bind(py).as_any().clone();
         let axes_list = PyList::new(py, py_axes)?;
@@ -656,12 +872,13 @@ pub fn subplots(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
+#[pyo3(signature = (x, y, fmt=None, label=None, color=None, linestyle=None, marker=None, linewidth=None, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn plot<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
     y: Bound<'a, PyAny>,
+    fmt: Option<String>,
     label: Option<String>,
     color: Option<String>,
     linestyle: Option<String>,
@@ -681,6 +898,7 @@ pub fn plot<'a>(
             py,
             x,
             y,
+            fmt,
             label,
             color,
             &linestyle.unwrap_or_else(|| "-".to_string()),
@@ -733,9 +951,9 @@ pub fn gca(py: Python) -> PyResult<Py<Axes>> {
             "No axes found. Create a figure first.",
         ));
     }
-    // 返回最后创建的axes（更符合matplotlib行为）
-    let last_idx = fig_ref.axes_list.len() - 1;
-    Ok(fig_ref.axes_list[last_idx].clone_ref(py))
+    // 返回当前选中的 axes（plt.subplot 选中的子图；否则为最近创建的那个）
+    let idx = fig_ref.current_axes_index.min(fig_ref.axes_list.len() - 1);
+    Ok(fig_ref.axes_list[idx].clone_ref(py))
 }
 
 #[pyfunction]
@@ -743,6 +961,8 @@ pub fn clf(py: Python) -> PyResult<()> {
     let fig = get_current_figure(py)?;
     let mut fig_ref = fig.borrow_mut();
     fig_ref.axes_list.clear();
+    fig_ref.axes_positions.clear();
+    fig_ref.current_axes_index = 0;
     Ok(())
 }
 
@@ -753,7 +973,7 @@ pub fn barh<'a>(
     y: Bound<'a, PyAny>,
     width: Bound<'a, PyAny>,
     height: f64,
-    color: Option<String>,
+    color: Option<Bound<'a, PyAny>>,
     label: Option<String>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
@@ -779,7 +999,8 @@ pub fn semilogx<'a>(
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
         ax.plot(
-            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+            py, x, y, None, label, color, ls, marker, lw, None, None, None, None, None, None, None,
+            None,
         )?;
     })
 }
@@ -802,7 +1023,8 @@ pub fn semilogy<'a>(
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
         ax.plot(
-            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+            py, x, y, None, label, color, ls, marker, lw, None, None, None, None, None, None, None,
+            None,
         )?;
     })
 }
@@ -826,7 +1048,8 @@ pub fn loglog<'a>(
         let ls = linestyle.as_deref().unwrap_or("-");
         let lw = linewidth.unwrap_or(1.5);
         ax.plot(
-            py, x, y, label, color, ls, marker, lw, None, None, None, None, None, None, None, None,
+            py, x, y, None, label, color, ls, marker, lw, None, None, None, None, None, None, None,
+            None,
         )?;
     })
 }

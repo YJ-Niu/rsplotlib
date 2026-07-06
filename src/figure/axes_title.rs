@@ -62,7 +62,7 @@ where
     let title_size = if title_fontsize > 0.0 {
         title_fontsize
     } else {
-        12.0
+        9.6
     };
     // plotters 的 ab_glyph 字体可见字符高度约 0.94em，而 matplotlib DejaVu Sans 约 1.13em。
     // 为匹配 matplotlib 视觉高度，乘以 1.25 补偿。

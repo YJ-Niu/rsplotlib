@@ -41,6 +41,8 @@ pub fn filter_minor_ticks(minor: &[f64], major: &[f64]) -> Vec<f64> {
 /// - `color`: 网格线颜色
 /// - `lw`: 网格线宽度（points，仅用于向后兼容保留；实际像素宽度由 `is_major` 决定）
 /// - `ls`: 网格线样式（Some("--") 虚线，Some(":") 点线，None 实线）
+/// - `is_minor`: 是否副网格线。副网格线的虚线/点线空格宽度加倍（用户要求），
+///   使副网格的断线间隔更疏朗、与主网格区分更明显。
 /// - `is_major`: 是否主网格线（主=2px，副=1px，按 README 要求）
 /// - `font_scale`: 字体缩放系数（保留以兼容旧调用方）
 /// - `x_min`, `x_max`, `y_min`, `y_max`: 数据范围
@@ -51,6 +53,7 @@ pub fn draw_grid_lines<DB: DrawingBackend>(
     color: RgbColor,
     _lw: f64,
     ls: Option<&str>,
+    is_minor: bool,
     _font_scale: f64,
     x_min: f64,
     x_max: f64,
@@ -90,9 +93,11 @@ where
         }
     }
 
-    // dash/gap 长度与线宽像素成正比，2px 主线对应 8/4 像素，1px 副线对应 4/2 像素
+    // dash/gap 长度与线宽像素成正比，2px 主线对应 8/4 像素，1px 副线对应 4/2 像素。
+    // 副网格线（is_minor）的空格宽度加倍：让副网格虚线/点线的断口更疏朗。
+    let gap_mult = if is_minor { 3.0 } else { 2.0 };
     let dash_px = (stroke_w as f64 * 4.0).max(2.0);
-    let gap_px = (stroke_w as f64 * 2.0).max(2.0);
+    let gap_px = (stroke_w as f64 * 2.0).max(2.0) * gap_mult;
     let dot_px = (stroke_w as f64 * 1.0).max(1.0);
     let dash_len = if vertical {
         dash_px * y_per_pix_p

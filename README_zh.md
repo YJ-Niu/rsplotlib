@@ -3,7 +3,7 @@
 > 一个由 Rust 强力驱动的高性能 Python 绘图库，提供 Matplotlib 兼容 API
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
-[![Rust](https://img.shields.io/badge/Rust-2021-orange)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-2024-orange)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyO3](https://img.shields.io/badge/PyO3-0.29-2c2d72)](https://pyo3.rs/)
 [![plotters](https://img.shields.io/badge/plotters-0.3-7d5cff)](https://github.com/plotters-rs/plotters)

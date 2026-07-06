@@ -11,13 +11,14 @@ use pyo3::prelude::*;
 ///
 /// `face` 为标记填充色 (markerfacecolor)，`edge` 为标记边框色 (markeredgecolor)。当二者相同时
 /// 只填充、不额外描边（与旧行为一致）；不同时先填充再用 edge 描出轮廓。'x' / '+' 为纯描线标记，
-/// 始终使用 edge 色。
+/// 始终使用 edge 色。`alpha` 为透明度 (0.0-1.0)，混入填充与描边色（用于 scatter 的透明散点等）。
 ///
 /// 关键：多边形 / 折线类 marker 必须在「像素空间」构造——plotters 的 `Polygon` / `Rectangle`
 /// / `PathElement` 会把坐标解释为**数据坐标**，直接用像素偏移量作数据坐标会让 marker 尺寸随坐标轴
 /// 量程变化（在小量程下甚至撑满整个绘图区）。这里统一用 `EmptyElement::at(数据点) + 形状(像素偏移)`：
 /// 锚点用数据坐标，子形状坐标按**后端像素**偏移解释（注意后端 y 轴向下）。`Circle` 的圆心可用数据
 /// 坐标而半径本就以像素为单位，故圆 / 点 marker 仍可直接用数据锚点。
+#[allow(clippy::too_many_arguments)]
 pub fn draw_marker<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     marker: &str,
@@ -26,11 +27,12 @@ pub fn draw_marker<DB: DrawingBackend>(
     size: f64,
     face: RGBColor,
     edge: RGBColor,
+    alpha: f64,
 ) -> PyResult<()> {
     let s = size;
     let si = s.round() as i32;
-    let fill: ShapeStyle = face.filled();
-    let edge_style: ShapeStyle = edge.stroke_width(1);
+    let fill: ShapeStyle = face.mix(alpha).filled();
+    let edge_style: ShapeStyle = edge.mix(alpha).stroke_width(1);
     let need_edge = edge != face;
     let err = |e| PyRuntimeError::new_err(format!("Marker error: {}", e));
     match marker {
@@ -116,7 +118,7 @@ pub fn draw_marker<DB: DrawingBackend>(
         }
         "x" => {
             // 纯描线 marker：使用边框色
-            let line_style: ShapeStyle = edge.stroke_width(2);
+            let line_style: ShapeStyle = edge.mix(alpha).stroke_width(2);
             chart
                 .draw_series(std::iter::once(
                     EmptyElement::at((x, y))
@@ -126,7 +128,7 @@ pub fn draw_marker<DB: DrawingBackend>(
                 .map_err(err)?;
         }
         "+" => {
-            let line_style: ShapeStyle = edge.stroke_width(2);
+            let line_style: ShapeStyle = edge.mix(alpha).stroke_width(2);
             chart
                 .draw_series(std::iter::once(
                     EmptyElement::at((x, y))
