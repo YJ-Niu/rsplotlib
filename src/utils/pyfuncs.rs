@@ -440,23 +440,19 @@ pub fn step<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
+#[pyo3(signature = (x, cmap="viridis", aspect="auto", vmin=None, vmax=None, alpha=None, origin=None))]
 pub fn imshow<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
     cmap: &'a str,
     aspect: &'a str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+    alpha: Option<f64>,
+    origin: Option<&'a str>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        let data = if let Ok(v) = x.extract::<Vec<Vec<f64>>>() {
-            v
-        } else if x.hasattr("tolist")? {
-            let list = x.call_method0("tolist")?;
-            list.extract::<Vec<Vec<f64>>>()?
-        } else {
-            x.extract::<Vec<Vec<f64>>>()?
-        };
-        ax.imshow(data, cmap, aspect);
+        ax.imshow(&x, cmap, aspect, vmin, vmax, alpha, origin)?;
     })
 }
 

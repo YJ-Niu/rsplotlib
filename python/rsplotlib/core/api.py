@@ -245,15 +245,20 @@ def step(x, y, where_='pre', label=None, color=None, linestyle='-', linewidth=1.
     return _rsplotlib.step(_to_list(x), _to_list(y), where_, label, color, linestyle, linewidth)
 
 
-def imshow(x, cmap='gray', aspect='auto'):
+def imshow(x, cmap='gray', aspect='auto', vmin=None, vmax=None,
+           alpha=None, origin=None):
     """显示图像
 
     Args:
-        x: 2D 数据数组
-        cmap: 色图 (默认: 'gray', 可选: 'hot', 'cool')
+        x: 2D 标量数组 (经 cmap 上色) 或 3D RGB(A) 数组 (H, W, 3/4)
+        cmap: 色图 (默认: 'gray', 可选: 'hot', 'cool')，仅对 2D 数据生效
         aspect: 纵横比 (默认: 'auto', 可选: 'equal')
+        vmin, vmax: 2D 数据的颜色映射值域 (缺省取数据 min/max)
+        alpha: 图像整体透明度 (0.0-1.0)
+        origin: 'upper' (默认) 或 'lower'
     """
-    return _rsplotlib.imshow(_to_list_recursive(x), cmap, aspect)
+    return _rsplotlib.imshow(_to_list_recursive(x), cmap, aspect,
+                             vmin, vmax, alpha, origin)
 
 
 def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians=True):

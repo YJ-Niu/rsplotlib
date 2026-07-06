@@ -15,7 +15,6 @@ use pyo3::prelude::*;
 
 use std::cell::RefCell;
 
-use crate::core::colormap::colormap_color;
 use crate::core::colors::{RgbColor, default_color, median, parse_color, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
@@ -983,29 +982,17 @@ where
                     }
                 }
             }
-            PlotElement::Image { data, cmap } => {
-                if data.is_empty() || data[0].is_empty() {
+            PlotElement::Image { pixels, alpha } => {
+                if pixels.is_empty() || pixels[0].is_empty() {
                     continue;
                 }
-                let d_min = data.iter().flatten().cloned().fold(f64::INFINITY, f64::min);
-                let d_max = data
-                    .iter()
-                    .flatten()
-                    .cloned()
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let d_range = if (d_max - d_min).abs() < 1e-10 {
-                    1.0
-                } else {
-                    d_max - d_min
-                };
-                for (r, row) in data.iter().enumerate() {
-                    for (c, &val) in row.iter().enumerate() {
-                        let normalized = (val - d_min) / d_range;
-                        let rgb = colormap_color(cmap.as_str(), normalized);
+                for (r, row) in pixels.iter().enumerate() {
+                    for (c, &(pr, pg, pb)) in row.iter().enumerate() {
+                        let style = plotters::style::RGBAColor(pr, pg, pb, *alpha).filled();
                         chart
                             .draw_series(std::iter::once(Rectangle::new(
                                 [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
-                                rgb.filled(),
+                                style,
                             )))
                             .map_err(|e| {
                                 PyRuntimeError::new_err(format!("Failed to draw image: {}", e))

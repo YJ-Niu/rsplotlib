@@ -90,15 +90,19 @@ where
     ))
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar border: {}", e)))?;
 
-    // 刻度：vmin..vmax 之间等距取 6 个刻度，画短横线 + 数值标签
-    let n_ticks = 6i32;
+    // 刻度：用 matplotlib 风格的"漂亮"刻度（0.2 步长等），按真实数值定位。
     let tick_len = (4.0 * ss).max(2.0);
     let label_x = bar_right + tick_len + 3.0 * ss;
     let font_size = scale_font(10.0, font_scale);
 
-    for i in 0..n_ticks {
-        let frac = i as f64 / (n_ticks - 1) as f64; // 0 (底) -> 1 (顶)
-        let v = vmin + (vmax - vmin) * frac;
+    let ticks = crate::figure::axes_mesh::nice_ticks(vmin, vmax);
+    let span = vmax - vmin;
+    for &v in &ticks {
+        let frac = if span.abs() < 1e-12 {
+            0.0
+        } else {
+            (v - vmin) / span
+        }; // 0 (底) -> 1 (顶)
         let y = data_bottom - height * frac;
 
         // 刻度短线（色带右侧向外）

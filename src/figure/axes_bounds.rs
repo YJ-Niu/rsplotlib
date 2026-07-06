@@ -210,14 +210,14 @@ pub fn compute_bounds(
                     y_sticky_min = true;
                 }
             }
-            PlotElement::Image { data, .. } => {
-                if data.is_empty() || data[0].is_empty() {
+            PlotElement::Image { pixels, .. } => {
+                if pixels.is_empty() || pixels[0].is_empty() {
                     continue;
                 }
                 x_min = 0.0;
-                x_max = data[0].len() as f64;
+                x_max = pixels[0].len() as f64;
                 y_min = 0.0;
-                y_max = data.len() as f64;
+                y_max = pixels.len() as f64;
             }
             PlotElement::Text { x, y, .. } => {
                 let tvx = tx(*x);

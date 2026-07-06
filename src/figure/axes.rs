@@ -90,6 +90,51 @@ fn py_to_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
     }
     Err(PyValueError::new_err("Cannot convert to Vec<Vec<f64>>"))
 }
+
+/// 将 Python 对象转换为 Vec<Vec<Vec<f64>>>（用于 imshow 的 RGB(A) 三维图像）。
+/// 失败（例如输入是二维标量图）时返回 Err，调用方据此回退到二维处理路径。
+fn py_to_vec_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    if let Ok(v) = obj.extract::<Vec<Vec<Vec<f64>>>>() {
+        return Ok(v);
+    }
+    if obj.hasattr("tolist")? {
+        let list = obj.call_method0("tolist")?;
+        return list.extract::<Vec<Vec<Vec<f64>>>>();
+    }
+    obj.extract::<Vec<Vec<Vec<f64>>>>()
+}
+
+/// 将三维 RGB(A) 图像数据转换为逐像素 (u8, u8, u8)。
+///
+/// 遵循 matplotlib 约定：浮点 RGB 在 [0,1]，整数 RGB 在 [0,255]。以全局最大值判断：
+/// 最大值 <= 1.0 视为 [0,1] 浮点（乘 255），否则视为已是 0..255。多于 3 个通道
+/// （如 RGBA）时仅取前三个通道。
+fn rgb_pixels_from_3d(data: &[Vec<Vec<f64>>]) -> Vec<Vec<(u8, u8, u8)>> {
+    let mut max_v = 0.0f64;
+    for row in data {
+        for px in row {
+            for &c in px {
+                if c.is_finite() && c > max_v {
+                    max_v = c;
+                }
+            }
+        }
+    }
+    let scale = if max_v <= 1.0 { 255.0 } else { 1.0 };
+    let to_u8 = |v: f64| -> u8 { (v * scale).round().clamp(0.0, 255.0) as u8 };
+    data.iter()
+        .map(|row| {
+            row.iter()
+                .map(|px| {
+                    let r = px.first().copied().unwrap_or(0.0);
+                    let g = px.get(1).copied().unwrap_or(0.0);
+                    let b = px.get(2).copied().unwrap_or(0.0);
+                    (to_u8(r), to_u8(g), to_u8(b))
+                })
+                .collect()
+        })
+        .collect()
+}
 use crate::figure::axis::{Axis, Patch, SpineDict};
 
 /// 字体大小缩放并四舍五入到1位小数
@@ -884,25 +929,67 @@ impl Axes {
         Ok((n_obj, bin_edges, None))
     }
 
-    #[pyo3(signature = (x, cmap="viridis", aspect="auto"))]
+    #[pyo3(signature = (x, cmap="viridis", aspect="auto", vmin=None, vmax=None, alpha=None, origin=None))]
     #[allow(unused_variables)]
-    pub fn imshow(&mut self, x: Vec<Vec<f64>>, cmap: &str, aspect: &str) {
-        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-        for row in &x {
+    pub fn imshow(
+        &mut self,
+        x: &Bound<'_, PyAny>,
+        cmap: &str,
+        aspect: &str,
+        vmin: Option<f64>,
+        vmax: Option<f64>,
+        alpha: Option<f64>,
+        origin: Option<&str>,
+    ) -> PyResult<()> {
+        let a = alpha.unwrap_or(1.0).clamp(0.0, 1.0);
+        // origin 默认 "upper"：数组首行显示在图像顶部。渲染时第 0 行画在底部，
+        // 因此 "upper" 需把行序反转，使原始首行落到顶部。
+        let flip_rows = !matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower"));
+
+        // 三维 RGB(A) 图像：直接使用逐像素颜色，不经 colormap。
+        if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
+            let mut pixels = rgb_pixels_from_3d(&rgb3);
+            if flip_rows {
+                pixels.reverse();
+            }
+            self.elements.push(PlotElement::Image { pixels, alpha: a });
+            return Ok(());
+        }
+
+        // 二维标量图像：按 vmin/vmax（缺省取数据范围）归一化后经 colormap 上色。
+        let data = py_to_vec_vec_f64(x)?;
+        let (mut auto_lo, mut auto_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for row in &data {
             for &v in row {
                 if v.is_finite() {
-                    lo = lo.min(v);
-                    hi = hi.max(v);
+                    auto_lo = auto_lo.min(v);
+                    auto_hi = auto_hi.max(v);
                 }
             }
         }
+        let lo = vmin.unwrap_or(auto_lo);
+        let hi = vmax.unwrap_or(auto_hi);
         if lo.is_finite() && hi.is_finite() {
             self.mappable = Some((cmap.to_string(), lo, hi));
         }
-        self.elements.push(PlotElement::Image {
-            data: x,
-            cmap: cmap.to_string(),
-        });
+        let range = if (hi - lo).abs() < 1e-12 { 1.0 } else { hi - lo };
+        let mut pixels: Vec<Vec<(u8, u8, u8)>> = data
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&v| {
+                        let t = ((v - lo) / range).clamp(0.0, 1.0);
+                        let c = crate::core::colormap::colormap_color(cmap, t);
+                        (c.0, c.1, c.2)
+                    })
+                    .collect()
+            })
+            .collect();
+        if flip_rows {
+            pixels.reverse();
+        }
+        self.elements.push(PlotElement::Image { pixels, alpha: a });
+        Ok(())
     }
 
     /// 记录最近一次可映射绘制的 (cmap, vmin, vmax)，供随后的 colorbar() 使用。

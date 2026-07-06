@@ -66,8 +66,11 @@ pub enum PlotElement {
         color_idx: usize,
     },
     Image {
-        data: Vec<Vec<f64>>,
-        cmap: String,
+        /// 逐像素已解析的 RGB（row-major）。origin 已在构建时应用：
+        /// 绘制时第 0 行画在数据区底部，最后一行画在顶部。
+        pixels: Vec<Vec<(u8, u8, u8)>>,
+        /// 整体透明度（0.0-1.0）
+        alpha: f64,
     },
     Text {
         x: f64,

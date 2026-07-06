@@ -687,16 +687,26 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0, **kwargs):
                         labels=labels, colors=colors, alpha=alpha)
 
 
-def imshow(x, cmap='viridis', aspect='auto', **kwargs):
-    """显示图像 (矩阵热力图)。
+def imshow(x, cmap=None, norm=None, aspect=None, interpolation=None,
+           alpha=None, vmin=None, vmax=None, origin=None, extent=None, **kwargs):
+    """显示图像 (矩阵热力图 / 灰度图 / RGB 彩色图)。
 
     Args:
-        x: 2D 数组 (行对应 y 轴, 列对应 x 轴)
-        cmap: 颜色映射名称 (默认 'viridis')
+        x: 图像数据。2D 数组 (行->y 轴, 列->x 轴) 经 cmap 上色；
+           3D 数组 (H, W, 3/4) 视为 RGB(A) 彩色图，直接按像素颜色绘制
+           (浮点取值 [0,1]，整数取值 [0,255])。
+        cmap: 颜色映射名称 (默认 'viridis')，仅对 2D 数据生效
         aspect: 宽高比 ('auto', 'equal', 或数值)
+        alpha: 图像整体透明度 (0.0-1.0)
+        vmin, vmax: 2D 数据的颜色映射值域 (缺省取数据 min/max)
+        origin: 'upper' (默认, 首行在顶部) 或 'lower' (首行在底部)
+        norm/interpolation/extent 等: 接受但当前不生效
     """
     x = _to_list_recursive(x)
-    return _route_to_ax('imshow', _rsplotlib.imshow, x, cmap, aspect)
+    cmap = 'viridis' if cmap is None else cmap
+    aspect = 'auto' if aspect is None else aspect
+    return _route_to_ax('imshow', _rsplotlib.imshow, x, cmap, aspect,
+                        vmin, vmax, alpha, origin)
 
 
 def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
