@@ -31,6 +31,23 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+# ========== 依据 rust-toolchain.toml 准备工具链与 clippy 组件 ==========
+# 项目用 rust-toolchain.toml 固定了 Rust channel；rustup 会自动据此选择工具链，
+# 但构建前的 clippy 检查依赖 clippy 组件，全新环境未必已安装，这里显式补齐。
+if [[ -f rust-toolchain.toml ]]; then
+  RUST_CHANNEL=$(grep -m1 '^channel *= *' rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\1/')
+  if [[ -n "${RUST_CHANNEL:-}" ]]; then
+    echo "Pinned Rust toolchain (rust-toolchain.toml): $RUST_CHANNEL"
+    if command -v rustup >/dev/null 2>&1; then
+      # 幂等：已安装则为空操作；离线且缺失时失败被忽略，交由后续 clippy 步骤明确报错。
+      rustup toolchain install "$RUST_CHANNEL" >/dev/null 2>&1 || true
+      rustup component add clippy --toolchain "$RUST_CHANNEL" >/dev/null 2>&1 || true
+    else
+      echo "  -> rustup not found; using the cargo/clippy already on PATH." >&2
+    fi
+  fi
+fi
+
 RELEASE=true
 OUT_DIR="wheelhouse"
 
