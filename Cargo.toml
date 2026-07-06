@@ -11,8 +11,9 @@ crate-type = ["cdylib"]
 pyo3 = "0.29.0"
 plotters = { version = "0.3.7", default-features = false, features = ["svg_backend", "bitmap_backend", "bitmap_encoder", "ab_glyph", "line_series", "point_series"] }
 png = "0.18.1"
-owned_ttf_parser = "0.25"
+owned_ttf_parser = "0.25.1"
 jpeg-encoder = "0.7.0"
+jpeg-decoder = "0.3.2"
 
 [profile.release]
 lto = "fat"

@@ -8,27 +8,27 @@ from . import rsplotlib as _rsplotlib
 from .figure._defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
 # ============ 样式接口 ============
 from .utils import style as _style_module
+from .pylab import mpl
 
 # 延迟获取 mpl.rcParams，避免 pyplot <-> pylab 循环导入
 
 
 def _get_rcparams():
     """从 pylab.mpl 获取 rcParams，统一配置入口"""
-    from .pylab import mpl
     return mpl.rcParams
 
 
 # ==================== 内部辅助函数 ====================
 
 def _to_list(obj):
-    """将 numpy 数组或其他可迭代对象转换为 Python list
+    """将 rsnumpy 数组或其他可迭代对象转换为 Python list
 
-    支持 numpy ndarray、Python list、tuple 及其他可迭代对象。
+    支持 rsnumpy ndarray、Python list、tuple 及其他可迭代对象。
     标量值直接返回。
     """
     if obj is None:
         return None
-    # numpy ndarray
+    # rsnumpy ndarray 或其他 rsnumpy 数组对象
     if hasattr(obj, 'tolist'):
         return obj.tolist()
     # Python list/tuple 或其他可迭代对象
@@ -39,7 +39,7 @@ def _to_list(obj):
 
 
 def _to_list_recursive(obj):
-    """递归转换嵌套的 numpy 数组为 Python list"""
+    """递归转换嵌套的 rsnumpy 数组为 Python list"""
     if obj is None:
         return None
     if hasattr(obj, 'tolist'):
@@ -50,7 +50,7 @@ def _to_list_recursive(obj):
 
 
 def _is_scatter_sequence(obj):
-    """判断是否为序列（含 numpy 数组），但排除字符串标量。"""
+    """判断是否为序列（含 rsnumpy 数组），但排除字符串标量。"""
     if obj is None or isinstance(obj, str):
         return False
     return hasattr(obj, 'tolist') or isinstance(obj, (list, tuple))
@@ -373,7 +373,7 @@ def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
         plt.scatter(x, y, c=[[1,0,0],[0,1,0]])         # RGB(A) 二维行数组
 
     Args:
-        x, y: 长度相同的数据点坐标 (list / tuple / numpy array)
+        x, y: 长度相同的数据点坐标 (list / tuple / rsnumpy array)
         s: 点大小, 默认 20; 可为标量或与点数等长的数组
         c: 颜色; 默认蓝色; 可为颜色字符串、颜色字符串数组、数值数组
            (配合 cmap) 或 RGB(A) 二维行数组
@@ -405,7 +405,7 @@ def bar(x, height, width=0.8, color=None, label=None):
     """绘制柱状图。
 
     Args:
-        x: 每个柱子的 x 坐标 (list / tuple / numpy array)
+        x: 每个柱子的 x 坐标 (list / tuple / rsnumpy array)
         height: 每个柱子的高度 (y 值)
         width: 柱子的宽度 (默认 0.8)
         color: 柱子的颜色字符串
@@ -738,6 +738,22 @@ def imsave(fname, arr, **kwargs):
     dpi = kwargs.pop('dpi', None)
     dpi = 100.0 if dpi is None else float(dpi)
     return _rsplotlib.imsave(fname, arr, cmap, vmin, vmax, origin, fmt, dpi)
+
+
+def imread(fname, format=None):
+    """从图像文件读取图像数据，兼容 matplotlib.pyplot.imread。
+
+    返回 ndarray，形状为 (nrows, ncols) 或 (nrows, ncols, nchannels):
+    灰度图为 2D (无通道维)；彩色图 nchannels 为 3 (RGB) 或 4 (RGBA)。
+
+    Args:
+        fname: 图像文件名或路径 (相对或绝对)。
+        format: 图像格式 (如 'png' / 'jpeg')，缺省先按文件内容嗅探，再按扩展名识别。
+
+    按 matplotlib 约定: PNG 返回取值 [0,1] 的浮点数组，其余格式返回取值
+    [0,255] 的整数数组。图像解码完全由 Rust 底层实现，返回结果可直接传给 imshow。
+    """
+    return _rsplotlib.imread(fname, format)
 
 
 def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
@@ -1143,6 +1159,76 @@ def minorticks_off():
 
 # ==================== 子图与布局 ====================
 
+class _AxesArray:
+    """轻量 Axes 网格容器，模拟 rsnumpy 数组的常用索引方式。
+
+    使 plt.subplots 的返回值支持 axs[i, j] 元组索引、axs[i] 行/元素索引、
+    迭代、.flat / .flatten() / .ravel()，且不依赖 rsnumpy 或 rsnumpy。
+
+    内部以行主序扁平 list 保存 Axes；shape 为 (n,) 表示一维、(nrows, ncols)
+    表示二维。
+    """
+    __slots__ = ('_data', 'shape')
+
+    def __init__(self, data, shape):
+        self._data = list(data)
+        self.shape = shape
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    @property
+    def size(self):
+        return len(self._data)
+
+    @property
+    def flat(self):
+        """按行主序遍历所有 Axes 的迭代器。"""
+        return iter(self._data)
+
+    def flatten(self):
+        """返回按行主序排列的一维 list。"""
+        return list(self._data)
+
+    ravel = flatten
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __iter__(self):
+        # 一维：逐个产出 Axes；二维：逐行产出子 _AxesArray（与 rsnumpy 一致）。
+        if self.ndim == 1:
+            return iter(self._data)
+        ncols = self.shape[1]
+        return (
+            _AxesArray(self._data[r * ncols:(r + 1) * ncols], (ncols,))
+            for r in range(self.shape[0])
+        )
+
+    def __getitem__(self, key):
+        if isinstance(key, tuple):
+            if self.ndim != 2 or len(key) != 2:
+                raise IndexError('二维索引仅适用于二维 Axes 数组')
+            nrows, ncols = self.shape
+            r, c = key
+            if r < 0:
+                r += nrows
+            if c < 0:
+                c += ncols
+            return self._data[r * ncols + c]
+        if self.ndim == 1:
+            return self._data[key]
+        # 二维单整数索引返回对应行（子 _AxesArray）。
+        nrows, ncols = self.shape
+        if key < 0:
+            key += nrows
+        return _AxesArray(self._data[key * ncols:(key + 1) * ncols], (ncols,))
+
+    def __repr__(self):
+        return f'AxesArray(shape={self.shape})'
+
+
 def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     """创建子图网格 (Figure + Axes)。
 
@@ -1176,28 +1262,13 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     else:
         flat = list(result[1])
 
-    try:
-        import numpy as np
-    except ImportError:
-        # numpy 不可用时降级为嵌套 list（不支持 axs[i, j] 元组索引）。
-        # matplotlib 本身依赖 numpy，多子图场景下建议安装 numpy。
-        rows = [[flat[r * ncols + c] for c in range(ncols)] for r in range(nrows)]
-        if squeeze:
-            if nrows == 1:
-                return fig, rows[0]
-            if ncols == 1:
-                return fig, [row[0] for row in rows]
-        return fig, rows
-
-    axarr = np.empty((nrows, ncols), dtype=object)
-    for r in range(nrows):
-        for c in range(ncols):
-            axarr[r, c] = flat[r * ncols + c]
-    if squeeze:
-        axarr = axarr.squeeze()
-        if axarr.ndim == 0:
-            return fig, axarr.item()
-    return fig, axarr
+    # 依 matplotlib 的 squeeze 规则确定返回形状：单行 / 单列压成一维，其余保持二维。
+    # 用模块自带的 _AxesArray 提供 axs[i, j] 索引，不依赖 rsnumpy / rsnumpy。
+    if squeeze and nrows == 1:
+        return fig, _AxesArray(flat, (ncols,))
+    if squeeze and ncols == 1:
+        return fig, _AxesArray(flat, (nrows,))
+    return fig, _AxesArray(flat, (nrows, ncols))
 
 
 def subplot(nrows, ncols, index, **kwargs):
@@ -1462,7 +1533,7 @@ def _patch_axes():
             setter = getattr(self, 'set_' + key, None)
             if setter is None:
                 continue
-            # numpy/rsnumpy 数组转 list, 供 Rust 侧 Vec<f64> 提取; tuple 保留给 set_xlim 处理
+            # rsnumpy/rsnumpy 数组转 list, 供 Rust 侧 Vec<f64> 提取; tuple 保留给 set_xlim 处理
             if hasattr(value, 'tolist'):
                 value = value.tolist()
             setter(value)
