@@ -195,6 +195,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(utils::pyfuncs::stem, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::step, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::imshow, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::pyfuncs::imsave, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::pie, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::boxplot, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::text, m)?)?;

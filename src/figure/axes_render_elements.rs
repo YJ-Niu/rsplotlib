@@ -515,6 +515,154 @@ fn element_below_grid(el: &PlotElement) -> bool {
     )
 }
 
+/// 三次卷积核（Keys, a = -0.5），bicubic 插值用。对任意小数位置，四个权重之和为 1。
+fn cubic_kernel(t: f64) -> f64 {
+    const A: f64 = -0.5;
+    let t = t.abs();
+    if t <= 1.0 {
+        ((A + 2.0) * t - (A + 3.0)) * t * t + 1.0
+    } else if t < 2.0 {
+        (((t - 5.0) * t + 8.0) * t - 4.0) * A
+    } else {
+        0.0
+    }
+}
+
+/// 在源 RGB 网格上采样连续坐标 (sr 行, sc 列)：`bicubic=false` 双线性，`true` 双三次。
+/// 越界索引 clamp 到网格边缘，避免出现黑边。返回未取整的 f64 RGB。
+fn sample_image(pixels: &[Vec<(u8, u8, u8)>], sr: f64, sc: f64, bicubic: bool) -> (f64, f64, f64) {
+    let nrows = pixels.len() as isize;
+    let ncols = pixels[0].len() as isize;
+    let get = |r: isize, c: isize| -> (f64, f64, f64) {
+        let r = r.clamp(0, nrows - 1) as usize;
+        let c = c.clamp(0, ncols - 1) as usize;
+        let (pr, pg, pb) = pixels[r][c];
+        (pr as f64, pg as f64, pb as f64)
+    };
+    if bicubic {
+        let ir = sr.floor() as isize;
+        let ic = sc.floor() as isize;
+        let (mut ar, mut ag, mut ab) = (0.0, 0.0, 0.0);
+        for m in -1..=2isize {
+            let wy = cubic_kernel(sr - (ir + m) as f64);
+            if wy == 0.0 {
+                continue;
+            }
+            for n in -1..=2isize {
+                let wx = cubic_kernel(sc - (ic + n) as f64);
+                if wx == 0.0 {
+                    continue;
+                }
+                let w = wy * wx;
+                let (pr, pg, pb) = get(ir + m, ic + n);
+                ar += w * pr;
+                ag += w * pg;
+                ab += w * pb;
+            }
+        }
+        (ar, ag, ab)
+    } else {
+        let r0 = sr.floor();
+        let c0 = sc.floor();
+        let dr = sr - r0;
+        let dc = sc - c0;
+        let (r0i, c0i) = (r0 as isize, c0 as isize);
+        let lerp = |a: f64, b: f64, t: f64| a + (b - a) * t;
+        let mix = |pa: (f64, f64, f64), pb: (f64, f64, f64), t: f64| {
+            (lerp(pa.0, pb.0, t), lerp(pa.1, pb.1, t), lerp(pa.2, pb.2, t))
+        };
+        let top = mix(get(r0i, c0i), get(r0i, c0i + 1), dc);
+        let bot = mix(get(r0i + 1, c0i), get(r0i + 1, c0i + 1), dc);
+        mix(top, bot, dr)
+    }
+}
+
+/// 平滑插值渲染图像（bilinear / bicubic），颜色渐变、无硬分界线。
+///
+/// - 位图后端：逐绘图区像素中心反映射到数据坐标 → 源网格连续坐标 → 采样 → `draw_pixel`，
+///   分辨率等于绘图区像素分辨率，最平滑；
+/// - SVG 后端：无法逐像素绘制（会产生海量 `<rect>`），改为上采样到有上限的目标网格，
+///   每个目标 cell 画一个覆盖对应数据子区间的矩形。
+#[allow(clippy::too_many_arguments)]
+fn render_image_smooth<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    pixels: &[Vec<(u8, u8, u8)>],
+    alpha: f64,
+    bicubic: bool,
+    bitmap: bool,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    let n_rows = pixels.len();
+    let n_cols = pixels[0].len();
+    let (pw, ph) = {
+        let dim = chart.plotting_area().dim_in_pixel();
+        (dim.0 as f64, dim.1 as f64)
+    };
+    if pw < 1.0 || ph < 1.0 {
+        return Ok(());
+    }
+    let to_u8 = |v: f64| v.round().clamp(0.0, 255.0) as u8;
+
+    if bitmap {
+        let x_per_pix = (x_max - x_min) / pw;
+        let y_per_pix = (y_max - y_min) / ph;
+        if x_per_pix == 0.0 || y_per_pix == 0.0 {
+            return Ok(());
+        }
+        let area = chart.plotting_area().strip_coord_spec();
+        let (pw_i, ph_i) = (pw as i32, ph as i32);
+        let (max_r, max_c) = ((n_rows - 1) as f64, (n_cols - 1) as f64);
+        for yy in 0..ph_i {
+            // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
+            let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
+            if data_y < 0.0 || data_y > n_rows as f64 {
+                continue;
+            }
+            let sr = (data_y - 0.5).clamp(0.0, max_r);
+            for xx in 0..pw_i {
+                let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
+                if data_x < 0.0 || data_x > n_cols as f64 {
+                    continue;
+                }
+                let sc = (data_x - 0.5).clamp(0.0, max_c);
+                let (r, g, b) = sample_image(pixels, sr, sc, bicubic);
+                let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
+                area.draw_pixel((xx, yy), &color)
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            }
+        }
+    } else {
+        // SVG：上采样到目标网格（每维不超过 CAP），逐 cell 画矩形。
+        const CAP: usize = 200;
+        let target_cols = (pw as usize).clamp(n_cols, CAP);
+        let target_rows = (ph as usize).clamp(n_rows, CAP);
+        let (max_r, max_c) = ((n_rows - 1) as f64, (n_cols - 1) as f64);
+        for tj in 0..target_rows {
+            let y0 = tj as f64 / target_rows as f64 * n_rows as f64;
+            let y1 = (tj + 1) as f64 / target_rows as f64 * n_rows as f64;
+            let sr = ((y0 + y1) * 0.5 - 0.5).clamp(0.0, max_r);
+            for ti in 0..target_cols {
+                let x0 = ti as f64 / target_cols as f64 * n_cols as f64;
+                let x1 = (ti + 1) as f64 / target_cols as f64 * n_cols as f64;
+                let sc = ((x0 + x1) * 0.5 - 0.5).clamp(0.0, max_c);
+                let (r, g, b) = sample_image(pixels, sr, sc, bicubic);
+                let style =
+                    plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha).filled();
+                chart
+                    .draw_series(std::iter::once(Rectangle::new([(x0, y0), (x1, y1)], style)))
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 渲染所有 PlotElement（按网格分层 `layer` 只绘制归属该层的元素）
 ///
 /// # 参数
@@ -982,22 +1130,35 @@ where
                     }
                 }
             }
-            PlotElement::Image { pixels, alpha } => {
+            PlotElement::Image {
+                pixels,
+                alpha,
+                interpolation,
+            } => {
                 if pixels.is_empty() || pixels[0].is_empty() {
                     continue;
                 }
-                for (r, row) in pixels.iter().enumerate() {
-                    for (c, &(pr, pg, pb)) in row.iter().enumerate() {
-                        let style = plotters::style::RGBAColor(pr, pg, pb, *alpha).filled();
-                        chart
-                            .draw_series(std::iter::once(Rectangle::new(
-                                [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
-                                style,
-                            )))
-                            .map_err(|e| {
-                                PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
-                            })?;
+                if interpolation == "nearest" {
+                    // 最近邻：每个源 cell 画一个矩形，块状、有明显分界线。
+                    for (r, row) in pixels.iter().enumerate() {
+                        for (c, &(pr, pg, pb)) in row.iter().enumerate() {
+                            let style = plotters::style::RGBAColor(pr, pg, pb, *alpha).filled();
+                            chart
+                                .draw_series(std::iter::once(Rectangle::new(
+                                    [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
+                                    style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
+                                })?;
+                        }
                     }
+                } else {
+                    // 平滑插值：bilinear 仅双线性，其余（bicubic/lanczos 等）用双三次。
+                    let bicubic = interpolation != "bilinear";
+                    render_image_smooth(
+                        chart, pixels, *alpha, bicubic, bitmap, x_min, x_max, y_min, y_max,
+                    )?;
                 }
             }
             PlotElement::Text {

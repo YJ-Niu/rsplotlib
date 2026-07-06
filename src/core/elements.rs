@@ -71,6 +71,8 @@ pub enum PlotElement {
         pixels: Vec<Vec<(u8, u8, u8)>>,
         /// 整体透明度（0.0-1.0）
         alpha: f64,
+        /// 插值方法：`nearest`（块状、有分界线）或 `bilinear`/`bicubic`（平滑渐变）。
+        interpolation: String,
     },
     Text {
         x: f64,

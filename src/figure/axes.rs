@@ -137,6 +137,63 @@ fn rgb_pixels_from_3d(data: &[Vec<Vec<f64>>]) -> Vec<Vec<(u8, u8, u8)>> {
 }
 use crate::figure::axis::{Axis, Patch, SpineDict};
 
+/// 将 imshow / imsave 的图像数组转换为逐像素 RGB，按数组自然行序（第 0 行在最前）。
+///
+/// - 三维 MxNx3/4：取 RGB(A) 前三通道作为像素颜色（浮点 [0,1] 或整数 [0,255]）；
+/// - 二维 MxN 标量：按 vmin/vmax（缺省取有限值 min/max）归一化后经 `cmap` 上色。
+///
+/// 不做 origin 翻转——调用方按 'upper'/'lower' 自行处理行序。
+pub(crate) fn image_array_to_rgb_rows(
+    x: &Bound<'_, PyAny>,
+    cmap: &str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+) -> PyResult<Vec<Vec<(u8, u8, u8)>>> {
+    if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
+        return Ok(rgb_pixels_from_3d(&rgb3));
+    }
+    let data = py_to_vec_vec_f64(x)?;
+    let (mut auto_lo, mut auto_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for row in &data {
+        for &v in row {
+            if v.is_finite() {
+                auto_lo = auto_lo.min(v);
+                auto_hi = auto_hi.max(v);
+            }
+        }
+    }
+    let lo = vmin.unwrap_or(auto_lo);
+    let hi = vmax.unwrap_or(auto_hi);
+    let range = if (hi - lo).abs() < 1e-12 { 1.0 } else { hi - lo };
+    Ok(data
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|&v| {
+                    let t = ((v - lo) / range).clamp(0.0, 1.0);
+                    let c = crate::core::colormap::colormap_color(cmap, t);
+                    (c.0, c.1, c.2)
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// 解析 matplotlib 风格的 aspect 值。
+///
+/// - `auto` / `none` / 空 → None（数据区填满子图框，不约束单位长度）；
+/// - `equal` → Some(1.0)（X/Y 轴单位长度相同）；
+/// - 数值字符串 → Some(该值)，为「y 单位显示长度 / x 单位显示长度」，须 > 0；
+/// - 其余无法识别的值 → None。
+fn parse_aspect(s: &str) -> Option<f64> {
+    let key = s.trim().to_ascii_lowercase();
+    match key.as_str() {
+        "" | "auto" | "none" => None,
+        "equal" => Some(1.0),
+        _ => key.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0),
+    }
+}
+
 /// 字体大小缩放并四舍五入到1位小数
 /// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
 /// 通过 * 14.5 将字号放大到与 matplotlib 一致。
@@ -234,6 +291,10 @@ pub struct Axes {
     pub mappable: Option<(String, f64, f64)>,
     /// 若为 Some，则渲染时在数据区右侧绘制颜色条 (cmap, vmin, vmax)
     pub colorbar: Option<(String, f64, f64)>,
+    /// 纵横比：None = 'auto'（数据区填满子图框）；Some(a) = 固定比例，a 为
+    /// 「一个 y 数据单位的显示长度 / 一个 x 数据单位的显示长度」，'equal' 即 Some(1.0)，
+    /// 使 X/Y 轴单位长度相同（imshow 默认）。
+    pub aspect: Option<f64>,
 }
 
 impl Clone for Axes {
@@ -302,6 +363,7 @@ impl Clone for Axes {
             y_axis_inverted: self.y_axis_inverted,
             mappable: self.mappable.clone(),
             colorbar: self.colorbar.clone(),
+            aspect: self.aspect,
         }
     }
 }
@@ -443,6 +505,7 @@ impl Axes {
             y_axis_inverted: false,
             mappable: None,
             colorbar: None,
+            aspect: None,
         }
     }
 
@@ -929,8 +992,7 @@ impl Axes {
         Ok((n_obj, bin_edges, None))
     }
 
-    #[pyo3(signature = (x, cmap="viridis", aspect="auto", vmin=None, vmax=None, alpha=None, origin=None))]
-    #[allow(unused_variables)]
+    #[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None))]
     pub fn imshow(
         &mut self,
         x: &Bound<'_, PyAny>,
@@ -940,8 +1002,17 @@ impl Axes {
         vmax: Option<f64>,
         alpha: Option<f64>,
         origin: Option<&str>,
+        interpolation: Option<&str>,
     ) -> PyResult<()> {
+        // imshow 默认 aspect='equal'：X/Y 轴单位长度相同（图像单元为正方形），与 matplotlib 一致。
+        self.aspect = parse_aspect(aspect);
         let a = alpha.unwrap_or(1.0).clamp(0.0, 1.0);
+        // 插值方法：None / "none" / "nearest" / "antialiased" 视为最近邻（块状、有分界线）；
+        // 其余（bilinear/bicubic/lanczos 等平滑滤波）统一走平滑上采样。
+        let interp = interpolation
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty() && s != "none")
+            .unwrap_or_else(|| "nearest".to_string());
         // origin 默认 "upper"：数组首行显示在图像顶部。渲染时第 0 行画在底部，
         // 因此 "upper" 需把行序反转，使原始首行落到顶部。
         let flip_rows = !matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower"));
@@ -952,7 +1023,11 @@ impl Axes {
             if flip_rows {
                 pixels.reverse();
             }
-            self.elements.push(PlotElement::Image { pixels, alpha: a });
+            self.elements.push(PlotElement::Image {
+                pixels,
+                alpha: a,
+                interpolation: interp,
+            });
             return Ok(());
         }
 
@@ -988,7 +1063,11 @@ impl Axes {
         if flip_rows {
             pixels.reverse();
         }
-        self.elements.push(PlotElement::Image { pixels, alpha: a });
+        self.elements.push(PlotElement::Image {
+            pixels,
+            alpha: a,
+            interpolation: interp,
+        });
         Ok(())
     }
 
@@ -1819,7 +1898,10 @@ impl Axes {
         self.minor_grid_y_visible = false;
     }
 
-    pub fn set_aspect(&mut self, _aspect: &str) {}
+    /// 设置纵横比：'auto'（默认，填满子图框）、'equal'（X/Y 轴单位长度相同）或数值比例。
+    pub fn set_aspect(&mut self, aspect: &str) {
+        self.aspect = parse_aspect(aspect);
+    }
 
     pub fn set_xaxis_major_locator(&mut self, locator: Py<PyAny>) {
         self.xaxis_major_locator = Some(locator);

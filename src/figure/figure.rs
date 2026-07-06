@@ -583,14 +583,33 @@ impl Figure {
             let plot_bottom_frac = bottom * usable_h + margin_b;
             let plot_top_frac = top * usable_h + margin_b;
 
-            let x0 = plot_left * total_w;
-            let y0 = (1.0 - plot_top_frac) * total_h;
-            let sub_w = (plot_right - plot_left) * total_w;
-            let sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
+            let mut x0 = plot_left * total_w;
+            let mut y0 = (1.0 - plot_top_frac) * total_h;
+            let mut sub_w = (plot_right - plot_left) * total_w;
+            let mut sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
 
             if sub_w <= 0.0 || sub_h <= 0.0 {
                 drop(ax);
                 continue;
+            }
+
+            // 纵横比约束（imshow 默认 aspect='equal'）：使 X/Y 轴单位长度按给定比例一致。
+            // aspect = 一个 y 单位显示长度 / 一个 x 单位显示长度；取能放进子图框的最大统一
+            // 缩放，随后把缩小后的数据区在原框内居中（与 matplotlib anchor='C' 一致）。
+            if let Some(aspect_ratio) = ax.aspect {
+                let dx = x_max - x_min;
+                let dy = y_max - y_min;
+                if dx > 0.0 && dy > 0.0 && aspect_ratio > 0.0 {
+                    let s = (sub_w / dx).min(sub_h / (dy * aspect_ratio));
+                    if s.is_finite() && s > 0.0 {
+                        let new_w = s * dx;
+                        let new_h = s * dy * aspect_ratio;
+                        x0 += (sub_w - new_w) / 2.0;
+                        y0 += (sub_h - new_h) / 2.0;
+                        sub_w = new_w;
+                        sub_h = new_h;
+                    }
+                }
             }
 
             // —— 刻度值 / 坐标轴标签区域尺寸（随刻度值位数、字号自动调整）——

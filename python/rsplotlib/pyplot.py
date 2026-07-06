@@ -696,17 +696,48 @@ def imshow(x, cmap=None, norm=None, aspect=None, interpolation=None,
            3D 数组 (H, W, 3/4) 视为 RGB(A) 彩色图，直接按像素颜色绘制
            (浮点取值 [0,1]，整数取值 [0,255])。
         cmap: 颜色映射名称 (默认 'viridis')，仅对 2D 数据生效
-        aspect: 宽高比 ('auto', 'equal', 或数值)
+        aspect: 宽高比。'equal'(默认) 使 X/Y 轴单位长度相同 (图像单元为正方形)；
+           'auto' 让图像填满子图框；也可传数值比例
         alpha: 图像整体透明度 (0.0-1.0)
         vmin, vmax: 2D 数据的颜色映射值域 (缺省取数据 min/max)
         origin: 'upper' (默认, 首行在顶部) 或 'lower' (首行在底部)
-        norm/interpolation/extent 等: 接受但当前不生效
+        interpolation: 插值方法，控制平滑程度。'nearest'/'none'/'antialiased'(默认)
+           为块状显示、有明显分界线；'bilinear'/'bicubic' 等对像素做平滑上采样，
+           颜色渐变、无硬分界线
+        norm/extent 等: 接受但当前不生效
     """
     x = _to_list_recursive(x)
     cmap = 'viridis' if cmap is None else cmap
-    aspect = 'auto' if aspect is None else aspect
+    aspect = 'equal' if aspect is None else aspect
     return _route_to_ax('imshow', _rsplotlib.imshow, x, cmap, aspect,
-                        vmin, vmax, alpha, origin)
+                        vmin, vmax, alpha, origin, interpolation)
+
+
+def imsave(fname, arr, **kwargs):
+    """将图像数据直接保存为图片文件 (无坐标轴 / 边距)，兼容 matplotlib.pyplot.imsave。
+
+    输出图片的像素尺寸等于数组尺寸 (N 列 -> 宽, M 行 -> 高)。
+
+    Args:
+        fname: 保存的文件名, 相对或绝对路径。格式由 `format` 或文件扩展名决定,
+            支持 PNG / JPEG。
+        arr: 图像的数组数据。2D 数组经 cmap 上色 (缺省 'viridis'); 3D 数组
+            (H, W, 3/4) 视为 RGB(A), 直接按像素颜色写出 (浮点取 [0,1], 整数取 [0,255])。
+        cmap: 2D 数据的颜色映射名称 (默认 'viridis')。
+        vmin, vmax: 2D 数据的颜色映射值域 (缺省取数据 min/max)。
+        origin: 'upper' (默认, 首行在顶部) 或 'lower' (首行在底部)。
+        format: 显式指定图片格式 ('png' / 'jpeg')，缺省按扩展名推断。
+        dpi: 写入 PNG 的分辨率元数据 (默认 100)。
+    """
+    arr = _to_list_recursive(arr)
+    cmap = kwargs.pop('cmap', None) or 'viridis'
+    vmin = kwargs.pop('vmin', None)
+    vmax = kwargs.pop('vmax', None)
+    origin = kwargs.pop('origin', None)
+    fmt = kwargs.pop('format', None)
+    dpi = kwargs.pop('dpi', None)
+    dpi = 100.0 if dpi is None else float(dpi)
+    return _rsplotlib.imsave(fname, arr, cmap, vmin, vmax, origin, fmt, dpi)
 
 
 def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):

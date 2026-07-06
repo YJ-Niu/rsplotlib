@@ -440,7 +440,7 @@ pub fn step<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, cmap="viridis", aspect="auto", vmin=None, vmax=None, alpha=None, origin=None))]
+#[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None))]
 pub fn imshow<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -450,10 +450,95 @@ pub fn imshow<'a>(
     vmax: Option<f64>,
     alpha: Option<f64>,
     origin: Option<&'a str>,
+    interpolation: Option<&'a str>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.imshow(&x, cmap, aspect, vmin, vmax, alpha, origin)?;
+        ax.imshow(&x, cmap, aspect, vmin, vmax, alpha, origin, interpolation)?;
     })
+}
+
+/// matplotlib.pyplot.imsave 兼容：把图像数组直接写入图片文件（无坐标轴 / 边距 / 留白），
+/// 输出像素尺寸等于数组尺寸（N 列 -> 宽，M 行 -> 高）。
+///
+/// - 二维标量数组：按 vmin/vmax（缺省取数据 min/max）归一化后经 `cmap`（默认 viridis）上色；
+/// - 三维 RGB(A) 数组：直接作为逐像素颜色（浮点取 [0,1]，整数取 [0,255]）。
+///
+/// `origin` 默认 "upper"（数组首行在图像顶部）；"lower" 时上下翻转。格式由 `format`
+/// 显式指定，否则按文件扩展名推断，支持 PNG 与 JPEG。`dpi` 仅写入 PNG 的分辨率元数据。
+#[pyfunction]
+#[pyo3(signature = (fname, arr, cmap="viridis", vmin=None, vmax=None, origin=None, format=None, dpi=100.0))]
+pub fn imsave(
+    fname: &str,
+    arr: Bound<'_, PyAny>,
+    cmap: &str,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
+    origin: Option<&str>,
+    format: Option<&str>,
+    dpi: f64,
+) -> PyResult<()> {
+    let mut rows = crate::figure::axes::image_array_to_rgb_rows(&arr, cmap, vmin, vmax)?;
+    if rows.is_empty() || rows[0].is_empty() {
+        return Err(PyValueError::new_err("imsave: empty image array"));
+    }
+    // origin: 默认 "upper"（首行在顶部，行序即输出行序）；"lower" 需翻转行序。
+    if matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower")) {
+        rows.reverse();
+    }
+    let height = rows.len() as u32;
+    let width = rows[0].len() as u32;
+    // 展平为行主序 RGB 缓冲（每像素 R,G,B）。
+    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
+    for row in &rows {
+        for &(r, g, b) in row {
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+    }
+    let fmt = match format {
+        Some(f) => f.trim().to_ascii_lowercase(),
+        None => {
+            let lower = fname.to_ascii_lowercase();
+            if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+                "jpeg".to_string()
+            } else {
+                "png".to_string()
+            }
+        }
+    };
+    match fmt.as_str() {
+        "jpg" | "jpeg" => {
+            use jpeg_encoder::{ColorType, Encoder};
+            let encoder = Encoder::new_file(fname, 90).map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to create JPEG encoder: {}", e))
+            })?;
+            encoder
+                .encode(&rgb, width as u16, height as u16, ColorType::Rgb)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to encode JPEG: {}", e)))?;
+        }
+        _ => {
+            // 真彩 24-bit RGB PNG，内嵌 DPI 分辨率元数据。
+            let ppm = (dpi / 0.0254).round() as u32;
+            let dims = png::PixelDimensions {
+                xppu: ppm,
+                yppu: ppm,
+                unit: png::Unit::Meter,
+            };
+            let file = std::fs::File::create(fname)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create file: {}", e)))?;
+            let mut encoder = png::Encoder::new(file, width, height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_pixel_dims(Some(dims));
+            encoder.set_compression(png::Compression::Fast);
+            let mut writer = encoder.write_header().map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to write PNG header: {}", e))
+            })?;
+            writer
+                .write_image_data(&rgb)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write PNG data: {}", e)))?;
+        }
+    }
+    Ok(())
 }
 
 #[pyfunction]
