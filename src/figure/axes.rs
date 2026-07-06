@@ -164,7 +164,11 @@ pub(crate) fn image_array_to_rgb_rows(
     }
     let lo = vmin.unwrap_or(auto_lo);
     let hi = vmax.unwrap_or(auto_hi);
-    let range = if (hi - lo).abs() < 1e-12 { 1.0 } else { hi - lo };
+    let range = if (hi - lo).abs() < 1e-12 {
+        1.0
+    } else {
+        hi - lo
+    };
     Ok(data
         .iter()
         .map(|row| {
@@ -190,7 +194,10 @@ fn parse_aspect(s: &str) -> Option<f64> {
     match key.as_str() {
         "" | "auto" | "none" => None,
         "equal" => Some(1.0),
-        _ => key.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0),
+        _ => key
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.0),
     }
 }
 
@@ -1047,7 +1054,11 @@ impl Axes {
         if lo.is_finite() && hi.is_finite() {
             self.mappable = Some((cmap.to_string(), lo, hi));
         }
-        let range = if (hi - lo).abs() < 1e-12 { 1.0 } else { hi - lo };
+        let range = if (hi - lo).abs() < 1e-12 {
+            1.0
+        } else {
+            hi - lo
+        };
         let mut pixels: Vec<Vec<(u8, u8, u8)>> = data
             .iter()
             .map(|row| {

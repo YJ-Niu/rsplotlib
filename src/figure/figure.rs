@@ -649,12 +649,20 @@ impl Figure {
             // 会自动把 ylabel 左移、远离刻度值；刻度值为空时 y_tick_area=0，ylabel 紧贴坐标轴。
             // 无标签也无刻度值时最小保留 pad2，确保 plotters 正确绘制边界 spine。
             let y_label_area = if ax.ylabel.is_empty() {
-                if y_ticklabels_shown { y_tick_area + pad2 } else { pad2 }
+                if y_ticklabels_shown {
+                    y_tick_area + pad2
+                } else {
+                    pad2
+                }
             } else {
                 y_tick_area + pad6 + tick_label_size
             };
             let x_label_area = if ax.xlabel.is_empty() {
-                if x_ticklabels_shown { x_tick_area + pad2 } else { pad2 }
+                if x_ticklabels_shown {
+                    x_tick_area + pad2
+                } else {
+                    pad2
+                }
             } else {
                 x_tick_area + pad6 + tick_label_size
             };

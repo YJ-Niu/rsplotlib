@@ -569,7 +569,11 @@ fn sample_image(pixels: &[Vec<(u8, u8, u8)>], sr: f64, sc: f64, bicubic: bool) -
         let (r0i, c0i) = (r0 as isize, c0 as isize);
         let lerp = |a: f64, b: f64, t: f64| a + (b - a) * t;
         let mix = |pa: (f64, f64, f64), pb: (f64, f64, f64), t: f64| {
-            (lerp(pa.0, pb.0, t), lerp(pa.1, pb.1, t), lerp(pa.2, pb.2, t))
+            (
+                lerp(pa.0, pb.0, t),
+                lerp(pa.1, pb.1, t),
+                lerp(pa.2, pb.2, t),
+            )
         };
         let top = mix(get(r0i, c0i), get(r0i, c0i + 1), dc);
         let bot = mix(get(r0i + 1, c0i), get(r0i + 1, c0i + 1), dc);
