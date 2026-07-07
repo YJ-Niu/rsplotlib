@@ -13,7 +13,7 @@ MaxNLocator = ticker.MaxNLocator
 MultipleLocator = ticker.MultipleLocator
 AutoMinorLocator = ticker.AutoMinorLocator
 
-__version__ = "0.1.9"
+__version__ = "1.0.1"
 # 从内部 Rust 模块导出字体注册函数
 
 __all__ = list(_api_all) + [

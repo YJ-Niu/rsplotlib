@@ -667,6 +667,65 @@ where
     Ok(())
 }
 
+/// 最近邻插值渲染图像（位图后端专用）。
+///
+/// 按绘图区像素分辨率逐输出像素反映射到数据坐标，取所在源 cell（floor 取整，
+/// cell c 覆盖数据区间 [c, c+1)）的颜色直接写入位图。开销正比于输出面积而非
+/// 源像素数——大图（数十万像素）由「每源像素一次 draw_series」的 O(源像素)
+/// 降为 O(绘图区面积)，且视觉上与逐 cell 画矩形等价（块状、硬分界线）。
+#[allow(clippy::too_many_arguments)]
+fn render_image_nearest_bitmap<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    pixels: &[Vec<(u8, u8, u8)>],
+    alpha: f64,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    let n_rows = pixels.len();
+    let n_cols = pixels[0].len();
+    let (pw, ph) = {
+        let dim = chart.plotting_area().dim_in_pixel();
+        (dim.0 as f64, dim.1 as f64)
+    };
+    if pw < 1.0 || ph < 1.0 {
+        return Ok(());
+    }
+    let x_per_pix = (x_max - x_min) / pw;
+    let y_per_pix = (y_max - y_min) / ph;
+    if x_per_pix == 0.0 || y_per_pix == 0.0 {
+        return Ok(());
+    }
+    let area = chart.plotting_area().strip_coord_spec();
+    let (pw_i, ph_i) = (pw as i32, ph as i32);
+    let (max_r, max_c) = (n_rows as isize - 1, n_cols as isize - 1);
+    for yy in 0..ph_i {
+        // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
+        let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
+        if data_y < 0.0 || data_y > n_rows as f64 {
+            continue;
+        }
+        let r = (data_y.floor() as isize).clamp(0, max_r) as usize;
+        let row = &pixels[r];
+        for xx in 0..pw_i {
+            let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
+            if data_x < 0.0 || data_x > n_cols as f64 {
+                continue;
+            }
+            let c = (data_x.floor() as isize).clamp(0, max_c) as usize;
+            let (pr, pg, pb) = row[c];
+            let color = plotters::style::RGBAColor(pr, pg, pb, alpha);
+            area.draw_pixel((xx, yy), &color)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+        }
+    }
+    Ok(())
+}
+
 /// 渲染所有 PlotElement（按网格分层 `layer` 只绘制归属该层的元素）
 ///
 /// # 参数
@@ -1143,18 +1202,29 @@ where
                     continue;
                 }
                 if interpolation == "nearest" {
-                    // 最近邻：每个源 cell 画一个矩形，块状、有明显分界线。
-                    for (r, row) in pixels.iter().enumerate() {
-                        for (c, &(pr, pg, pb)) in row.iter().enumerate() {
-                            let style = plotters::style::RGBAColor(pr, pg, pb, *alpha).filled();
-                            chart
-                                .draw_series(std::iter::once(Rectangle::new(
-                                    [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
-                                    style,
-                                )))
-                                .map_err(|e| {
-                                    PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
-                                })?;
+                    if bitmap {
+                        // 位图后端：按绘图区分辨率逐输出像素取最近源 cell，
+                        // 开销与输出面积成正比（而非源像素数），大图快很多。
+                        render_image_nearest_bitmap(
+                            chart, pixels, *alpha, x_min, x_max, y_min, y_max,
+                        )?;
+                    } else {
+                        // SVG 后端：每个源 cell 画一个矩形，块状、有明显分界线。
+                        for (r, row) in pixels.iter().enumerate() {
+                            for (c, &(pr, pg, pb)) in row.iter().enumerate() {
+                                let style = plotters::style::RGBAColor(pr, pg, pb, *alpha).filled();
+                                chart
+                                    .draw_series(std::iter::once(Rectangle::new(
+                                        [(c as f64, r as f64), ((c + 1) as f64, (r + 1) as f64)],
+                                        style,
+                                    )))
+                                    .map_err(|e| {
+                                        PyRuntimeError::new_err(format!(
+                                            "Failed to draw image: {}",
+                                            e
+                                        ))
+                                    })?;
+                            }
                         }
                     }
                 } else {

@@ -5,7 +5,7 @@ use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyList, PyTuple};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyTuple};
 
 use crate::core::colors::{
     RgbColor, default_color, default_color_str, parse_color, to_plotters_color,
@@ -15,6 +15,13 @@ use crate::utils::font_stack;
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<f64>
 fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
+    // 快路径：一维 numpy 风格数组直接读原始缓冲区，避免 .tolist() 生成
+    // 数百万 Python 浮点对象的开销。仅限一维；多维交由后续路径按各自语义处理。
+    if let Some((shape, flat)) = array_interface_flat(obj)
+        && shape.len() == 1
+    {
+        return Ok(flat);
+    }
     // 先尝试直接 extract（Python list）
     if let Ok(v) = obj.extract::<Vec<f64>>() {
         return Ok(v);
@@ -33,6 +40,13 @@ fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<Option<f64>>
 /// 支持 None 值和空字符串 ""（均视为无值）
 fn py_to_vec_option_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Option<f64>>> {
+    // 快路径：一维 numpy 风格数组直接读原始缓冲区。NaN 保留为 Some(nan)，
+    // 与旧 .tolist() 路径行为一致（缺失值语义由上层 None/"" 负责，不在此处理）。
+    if let Some((shape, flat)) = array_interface_flat(obj)
+        && shape.len() == 1
+    {
+        return Ok(flat.into_iter().map(Some).collect());
+    }
     // 先尝试直接 extract
     if let Ok(v) = obj.extract::<Vec<Option<f64>>>() {
         return Ok(v);
@@ -69,8 +83,130 @@ fn py_to_vec_option_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Option<f64>>> {
     Ok(result)
 }
 
+/// 将 numpy 风格 typestr（如 `<f8`、`|u1`、`<i8`）描述的原始字节解码为 `Vec<f64>`。
+///
+/// 支持浮点 / 有 (无) 符号整数 / 布尔的常见位宽。字节序：`>` 为大端，其余
+/// （`<` `|` `=`）按小端处理（本平台原生小端）。无法识别的 dtype 返回 None，
+/// 由调用方回退到 `.tolist()` 路径。
+fn bytes_to_f64_vec(typestr: &str, data: &[u8]) -> Option<Vec<f64>> {
+    let tb = typestr.as_bytes();
+    if tb.len() < 3 {
+        return None;
+    }
+    let kind = tb[1];
+    let size: usize = typestr.get(2..)?.parse().ok()?;
+    if size == 0 || !data.len().is_multiple_of(size) {
+        return None;
+    }
+    let be = tb[0] == b'>';
+    let n = data.len() / size;
+    let mut out = Vec::with_capacity(n);
+    macro_rules! decode {
+        ($t:ty, $sz:literal) => {{
+            for i in 0..n {
+                let arr: [u8; $sz] = data[i * $sz..i * $sz + $sz].try_into().ok()?;
+                let v = if be {
+                    <$t>::from_be_bytes(arr)
+                } else {
+                    <$t>::from_le_bytes(arr)
+                };
+                out.push(v as f64);
+            }
+        }};
+    }
+    match (kind, size) {
+        (b'f', 4) => decode!(f32, 4),
+        (b'f', 8) => decode!(f64, 8),
+        (b'i', 1) => decode!(i8, 1),
+        (b'i', 2) => decode!(i16, 2),
+        (b'i', 4) => decode!(i32, 4),
+        (b'i', 8) => decode!(i64, 8),
+        (b'u', 1) | (b'b', 1) => decode!(u8, 1),
+        (b'u', 2) => decode!(u16, 2),
+        (b'u', 4) => decode!(u32, 4),
+        (b'u', 8) => decode!(u64, 8),
+        _ => return None,
+    }
+    Some(out)
+}
+
+/// 通过 `__array_interface__` 直接读取数组的原始缓冲区（C 序连续），避免
+/// `.tolist()` 生成数百万 Python 浮点对象的开销。
+///
+/// 仅当对象暴露 `__array_interface__`、`data` 为 `bytes`、dtype 可识别、且元素数
+/// 与 shape 吻合时返回 `Some((shape, flat_c_order))`；否则返回 None，调用方回退。
+/// 注意：读取 `__array_interface__` 会复制整个缓冲区，故每次转换只应调用一次。
+fn array_interface_flat(obj: &Bound<'_, PyAny>) -> Option<(Vec<usize>, Vec<f64>)> {
+    let ai = obj.getattr("__array_interface__").ok()?;
+    let dict = ai.cast::<PyDict>().ok()?;
+    let shape: Vec<usize> = dict.get_item("shape").ok()??.extract().ok()?;
+    let typestr: String = dict.get_item("typestr").ok()??.extract().ok()?;
+    let data_item = dict.get_item("data").ok()??;
+    let bytes = data_item.cast::<PyBytes>().ok()?;
+    let flat = bytes_to_f64_vec(&typestr, bytes.as_bytes())?;
+    let expected: usize = shape.iter().product();
+    if expected != flat.len() {
+        return None;
+    }
+    Some((shape, flat))
+}
+
+/// 从 `__array_interface__` 的扁平缓冲区直接构造三维 RGB(A) 图像的逐像素颜色，
+/// 跳过 `Vec<Vec<Vec<f64>>>` 的百万级小分配（大图 imshow 的主要开销）。
+///
+/// 仅处理通道数 >= 3 的三维数组；其余情形返回 None，调用方回退到通用路径
+/// （`py_to_vec_vec_vec_f64` + `rgb_pixels_from_3d`，可处理缺失通道）。
+/// 颜色约定同 `rgb_pixels_from_3d`：全局最大值 <= 1.0 视为 [0,1] 浮点（乘 255），
+/// 否则视为已是 0..255。
+fn rgb_rows_from_array_interface(obj: &Bound<'_, PyAny>) -> Option<Vec<Vec<(u8, u8, u8)>>> {
+    let (shape, flat) = array_interface_flat(obj)?;
+    let &[rows, cols, ch] = shape.as_slice() else {
+        return None;
+    };
+    if ch < 3 {
+        return None;
+    }
+    let mut max_v = 0.0f64;
+    for &v in &flat {
+        if v.is_finite() && v > max_v {
+            max_v = v;
+        }
+    }
+    let scale = if max_v <= 1.0 { 255.0 } else { 1.0 };
+    let to_u8 = |v: f64| -> u8 { (v * scale).round().clamp(0.0, 255.0) as u8 };
+    let mut out = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let mut row = Vec::with_capacity(cols);
+        let base_r = r * cols * ch;
+        for c in 0..cols {
+            let base = base_r + c * ch;
+            row.push((
+                to_u8(flat[base]),
+                to_u8(flat[base + 1]),
+                to_u8(flat[base + 2]),
+            ));
+        }
+        out.push(row);
+    }
+    Some(out)
+}
+
 /// 将 Python 对象转换为 Vec<Vec<f64>>（用于 boxplot、hist 等）
 fn py_to_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
+    // 快路径：numpy 风格数组直接读原始缓冲区，避免 .tolist() 开销。
+    if let Some((shape, flat)) = array_interface_flat(obj) {
+        match shape.as_slice() {
+            [rows, cols] => {
+                let mut out = Vec::with_capacity(*rows);
+                for r in 0..*rows {
+                    out.push(flat[r * cols..(r + 1) * cols].to_vec());
+                }
+                return Ok(out);
+            }
+            [_] => return Ok(vec![flat]),
+            _ => {}
+        }
+    }
     if let Ok(v) = obj.extract::<Vec<Vec<f64>>>() {
         return Ok(v);
     }
@@ -94,6 +230,24 @@ fn py_to_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
 /// 将 Python 对象转换为 Vec<Vec<Vec<f64>>>（用于 imshow 的 RGB(A) 三维图像）。
 /// 失败（例如输入是二维标量图）时返回 Err，调用方据此回退到二维处理路径。
 fn py_to_vec_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    // 快路径：numpy 风格数组直接读原始缓冲区，避免 .tolist() 开销。
+    if let Some((shape, flat)) = array_interface_flat(obj) {
+        if let [d0, d1, d2] = shape.as_slice() {
+            let mut out = Vec::with_capacity(*d0);
+            for i in 0..*d0 {
+                let mut plane = Vec::with_capacity(*d1);
+                for j in 0..*d1 {
+                    let start = (i * d1 + j) * d2;
+                    plane.push(flat[start..start + d2].to_vec());
+                }
+                out.push(plane);
+            }
+            return Ok(out);
+        }
+        // 是数组但非三维（如二维标量图）：明确失败，让调用方回退到二维路径，
+        // 不再调用 .tolist()（避免大数组转 Python 列表的巨额开销）。
+        return Err(PyValueError::new_err("array is not a 3-D RGB(A) image"));
+    }
     if let Ok(v) = obj.extract::<Vec<Vec<Vec<f64>>>>() {
         return Ok(v);
     }
@@ -149,6 +303,10 @@ pub(crate) fn image_array_to_rgb_rows(
     vmin: Option<f64>,
     vmax: Option<f64>,
 ) -> PyResult<Vec<Vec<(u8, u8, u8)>>> {
+    // 快路径：三维 RGB(A) 数组直接从扁平缓冲区取色，跳过嵌套 Vec 分配。
+    if let Some(pixels) = rgb_rows_from_array_interface(x) {
+        return Ok(pixels);
+    }
     if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
         return Ok(rgb_pixels_from_3d(&rgb3));
     }
@@ -1025,6 +1183,18 @@ impl Axes {
         let flip_rows = !matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower"));
 
         // 三维 RGB(A) 图像：直接使用逐像素颜色，不经 colormap。
+        // 快路径：从扁平缓冲区直接取色，跳过嵌套 Vec 分配（大图 imshow 主要开销）。
+        if let Some(mut pixels) = rgb_rows_from_array_interface(x) {
+            if flip_rows {
+                pixels.reverse();
+            }
+            self.elements.push(PlotElement::Image {
+                pixels,
+                alpha: a,
+                interpolation: interp,
+            });
+            return Ok(());
+        }
         if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
             let mut pixels = rgb_pixels_from_3d(&rgb3);
             if flip_rows {

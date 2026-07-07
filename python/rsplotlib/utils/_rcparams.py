@@ -6,8 +6,6 @@
 Rust 的字体解析器 `apply_rcparams_font()`，把对应的字体文件注册到 plotters 的
 字体数据库中，从而真正影响文本渲染（而不是像普通 dict 一样只更新值）。
 """
-import copy as _copy
-from typing import Any
 
 # 默认配置：与 matplotlib 保持一致的常用项
 _DEFAULT_RC = {
@@ -43,7 +41,7 @@ class RcParams(dict):
         except KeyError:
             return None
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value) -> None:
         super().__setitem__(key, value)
         self._trigger_font_hook(key)
 
@@ -97,5 +95,9 @@ class RcParams(dict):
 
 # 全局单例
 rcParams = RcParams()
-# 原始默认配置副本（用于 rcParams.reset() 等恢复操作）
-rcParamsOrig = _copy.deepcopy(rcParams)
+# 原始默认配置的独立副本（供 rcParams.reset() 等恢复操作使用）。
+# _DEFAULT_RC 的值仅含 list 与不可变标量，逐项复制 list 即可得到与 rcParams
+# 互不影响的快照，因此不依赖 copy 模块。dict.__setitem__ 直写以跳过字体钩子。
+rcParamsOrig = RcParams()
+for _k, _v in rcParams.items():
+    dict.__setitem__(rcParamsOrig, _k, list(_v) if isinstance(_v, list) else _v)
