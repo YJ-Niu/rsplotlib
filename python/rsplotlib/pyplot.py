@@ -62,6 +62,19 @@ def _to_seq(obj):
     return _to_list(obj)
 
 
+def _replace_from_data(value, data):
+    """matplotlib `data` 关键字支持：当 data 提供且 value 为字符串键时，
+    以 data[value] 替换。查找失败（非键 / data 不支持索引）时保持原值，
+    这样普通颜色字符串（如 c='red'）不会被误当作数据键。
+    """
+    if data is not None and isinstance(value, str):
+        try:
+            return data[value]
+        except (KeyError, TypeError, IndexError):
+            return value
+    return value
+
+
 def _is_scatter_sequence(obj):
     """判断是否为序列（含 rsnumpy 数组），但排除字符串标量。"""
     if obj is None or isinstance(obj, str):
@@ -398,9 +411,18 @@ def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
         cmap: 当 c 为数值数组时使用的 colormap 名称 (如 'viridis')
         vmin, vmax: colormap 归一化范围
         alpha: 透明度 (0.0 - 1.0)
-        norm / linewidths / edgecolors / plotnonfinite / data: 接受但当前不生效
+        norm / linewidths / edgecolors / plotnonfinite: 接受但当前不生效
+        data: 若提供 (如 dict / DataFrame)，x/y/s/c 等字符串参数将按键在 data 中查找取值
         **kwargs: 额外关键字参数 (color 将作为 c 的别名)
     """
+    if data is not None:
+        # matplotlib 兼容：以字符串键索引 data 得到实际数据。
+        x = _replace_from_data(x, data)
+        y = _replace_from_data(y, data)
+        s = _replace_from_data(s, data)
+        c = _replace_from_data(c, data)
+        if 'color' in kwargs:
+            kwargs['color'] = _replace_from_data(kwargs['color'], data)
     kwargs['cmap'] = cmap
     kwargs['vmin'] = vmin
     kwargs['vmax'] = vmax
