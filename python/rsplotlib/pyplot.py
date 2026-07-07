@@ -1970,6 +1970,22 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
     return fig
 
 
+def axes(arg=None, **kwargs):
+    """向当前图形添加一个坐标区并返回它 (matplotlib plt.axes 兼容)。
+
+    arg 为 None 时在当前图形上创建一个全幅坐标区 (等价于 add_subplot())；
+    没有当前图形则新建一个。传入 rect [left, bottom, width, height] 的定位形式
+    当前不支持，按全幅处理。其余关键字作为坐标区属性 (如 xlabel/ylabel/title) 应用。
+    """
+    fig = _get_figure()
+    if fig is None:
+        fig = figure()
+    ax = fig.add_subplot()
+    if kwargs:
+        ax.set(**kwargs)
+    return ax
+
+
 def savefig(fname, **kwargs):
     """保存图形到文件。
 
@@ -2122,9 +2138,12 @@ def _patch_figure_add_subplot():
 
     _orig_add_subplot = _rs.Figure.add_subplot
 
-    def _add_subplot(self, *args):
+    def _add_subplot(self, *args, **kwargs):
+        if len(args) == 0:
+            # matplotlib: add_subplot() 等价于 add_subplot(1, 1, 1)
+            args = (1, 1, 1)
         if len(args) == 1:
-            return _orig_add_subplot(self, args[0])
+            ax = _orig_add_subplot(self, args[0])
         elif len(args) == 3:
             nrows, ncols, index = args
             if isinstance(index, tuple):
@@ -2141,11 +2160,15 @@ def _patch_figure_add_subplot():
                 col_end = col_start + 1
             from .layout.gridspec import SubplotSpec
             spec = SubplotSpec(None, row_start, row_end, col_start, col_end)
-            return _orig_add_subplot(self, spec)
+            ax = _orig_add_subplot(self, spec)
         else:
             raise TypeError(
                 f"add_subplot() takes 1 or 3 positional arguments but {len(args)} were given"
             )
+        # matplotlib: 余下关键字作为 Axes 属性，经 ax.set(**kwargs) 应用
+        if kwargs:
+            ax.set(**kwargs)
+        return ax
 
     _rs.Figure.add_subplot = _add_subplot
 
