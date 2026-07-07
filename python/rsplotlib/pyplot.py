@@ -285,6 +285,10 @@ def _parse_fmt(fmt):
         result['marker'] = marker
     if linestyle is not None:
         result['linestyle'] = linestyle
+    elif marker is not None:
+        # fmt 指定了 marker 但未指定线型：与 matplotlib 一致，只画标记不画线
+        # （' ' 为本库的"无线"表示，见 _map_aliases）。
+        result['linestyle'] = ' '
     if color is not None:
         result['color'] = color
     return result
@@ -1419,14 +1423,59 @@ def close(fig=None):
 
 
 def axis(arg=None, **kwargs):
-    """坐标轴控制: axis('off') 隐藏, axis('equal') 等比例。"""
-    if arg == 'off':
+    """获取或设置坐标轴属性，兼容 matplotlib.pyplot.axis。
+
+    调用形式:
+        axis()                          -> 返回当前 (xmin, xmax, ymin, ymax)
+        axis((xmin, xmax, ymin, ymax))  -> 一次性设置四个轴限 (也接受 list)
+        axis('off')  / axis(False)      -> 隐藏坐标轴装饰
+        axis('on')   / axis(True)       -> 显示坐标轴装饰
+        axis('equal') / axis('scaled')  -> 等比例缩放
+        axis(xmin=.., xmax=.., ymin=.., ymax=..)  -> 关键字设置轴限
+
+    返回当前的 (xmin, xmax, ymin, ymax)（无法获取时返回 None）。
+    """
+    ax = _get_axes()
+    if isinstance(arg, (list, tuple)):
+        # 序列形式: [xmin, xmax, ymin, ymax]
+        if len(arg) != 4:
+            raise ValueError(
+                "axis(): 序列参数必须为 (xmin, xmax, ymin, ymax) 四个值"
+            )
+        xmin, xmax, ymin, ymax = arg
+        xlim(xmin, xmax)
+        ylim(ymin, ymax)
+    elif arg is False or arg == 'off':
+        if ax is not None:
+            try:
+                ax._axis_off()
+            except Exception:
+                pass
+    elif arg is True or arg == 'on':
+        if ax is not None and hasattr(ax, '_axis_on'):
+            ax._axis_on()
+    elif arg in ('equal', 'scaled', 'image', 'square'):
+        if ax is not None:
+            ax.set_aspect('equal')
+    # 'tight' / 'auto' 等自动缩放选项：数据本已填充绘图框，保持当前行为。
+
+    # 关键字形式: axis(xmin=.., xmax=.., ymin=.., ymax=..)
+    if kwargs:
+        xmn, xmx = kwargs.get('xmin'), kwargs.get('xmax')
+        ymn, ymx = kwargs.get('ymin'), kwargs.get('ymax')
+        if xmn is not None or xmx is not None:
+            xlim(xmn, xmx)
+        if ymn is not None or ymx is not None:
+            ylim(ymn, ymx)
+
+    # 返回当前范围 (xmin, xmax, ymin, ymax)
+    if ax is not None and hasattr(ax, 'get_xlim') and hasattr(ax, 'get_ylim'):
         try:
-            _rsplotlib.gca()._axis_off()
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            return (x0, x1, y0, y1)
         except Exception:
-            pass
-    elif arg in ('equal', 'scaled'):
-        gca().set_aspect('equal')
+            return None
     return None
 
 
