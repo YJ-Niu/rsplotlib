@@ -524,12 +524,86 @@ impl Figure {
         let total_w = actual_w as f64;
         let total_h = actual_h as f64;
 
+        // 规则网格：由 subplot/subplots 创建（格子数 == nrows×ncols 且多于 1 个）。
+        // 仅此类网格在渲染阶段按坐标轴标签/刻度值宽度动态调整间距；add_subplot/gridspec
+        // 等自定义布局（nrows×ncols 与格子数不符）保持原位置不变。
+        let is_regular_grid =
+            self.axes_list.len() == self.nrows * self.ncols && self.axes_list.len() > 1;
+
+        // 自适应列间距：预扫描各子图，测量右列（col>0）子图 y 刻度值 + y 轴标签向左占用的
+        // 像素宽度，以及有右邻居的子图最右端 x 刻度值向右溢出的半宽；据此反解所需的 wspace，
+        // 使右列 y 刻度值与左列绘图区/x 刻度值之间留有足够间隙。刻度值越长，列间距越大。
+        let auto_wspace = if is_regular_grid && self.ncols > 1 {
+            let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
+            let label_dist = tick_px * 2;
+            let mut max_left_ext = 0u32; // 右列子图向左延伸像素（y 刻度值 + y 标签）
+            let mut max_x_half = 0u32; // 有右邻居的子图最右 x 刻度值半宽像素
+            for (i, ax_py) in self.axes_list.iter().enumerate() {
+                let ax = ax_py.borrow(py);
+                let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
+                let col = i % self.ncols;
+                let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
+                let tick_label_h = tick_font_size.ceil() as u32;
+                let y_shown = (ax.tick_left || ax.tick_right)
+                    && (ax.spine_left || ax.spine_right)
+                    && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+                if col > 0 && y_shown {
+                    let labels = y_tick_label_strings(py, &ax, y_min, y_max);
+                    let y_tick_area = measure_max_text_width(&labels, tick_font_size) + label_dist;
+                    let ext = if ax.ylabel.is_empty() {
+                        y_tick_area + pad2
+                    } else {
+                        let base = pad6 + tick_label_h;
+                        let extra = if crate::utils::mathtext::has_script(&ax.ylabel) {
+                            (base as f64 * 1.4).round() as u32
+                        } else {
+                            base
+                        };
+                        y_tick_area + extra
+                    };
+                    max_left_ext = max_left_ext.max(ext);
+                }
+                let x_shown = (ax.tick_bottom || ax.tick_top)
+                    && (ax.spine_bottom || ax.spine_top)
+                    && !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
+                if col + 1 < self.ncols && x_shown {
+                    let xlabels: Vec<String> = crate::figure::axes_mesh::nice_ticks(x_min, x_max)
+                        .iter()
+                        .map(|&v| {
+                            if ax.xscale == "log" {
+                                format!("{:.1e}", 10f64.powf(v))
+                            } else {
+                                crate::figure::axes_mesh::format_linear_tick(v)
+                            }
+                        })
+                        .collect();
+                    max_x_half =
+                        max_x_half.max(measure_max_text_width(&xlabels, tick_font_size) / 2);
+                }
+            }
+            if max_left_ext == 0 {
+                0.0
+            } else {
+                // 反解 wspace：像素列间距 = U*wspace/(ncols + (ncols-1)*wspace) ≥ needed。
+                let needed = (max_left_ext + max_x_half + pad6) as f64;
+                let u_px = (self.subplot_right - self.subplot_left) * total_w;
+                let ncf = self.ncols as f64;
+                let denom = u_px - needed * (ncf - 1.0);
+                if denom > 1.0 {
+                    (needed * ncf / denom).clamp(0.0, 1.5)
+                } else {
+                    1.5
+                }
+            }
+        } else {
+            0.0
+        };
+
         // 规则网格（由 subplot/subplots 创建，格子数 == nrows×ncols 且多于 1 个）在渲染阶段
         // 依据坐标轴标签动态调整间距：只要有子图设置了 Y 轴标签，水平间距翻倍；只要有子图
         // 设置了 X 轴标签，垂直间距翻倍——为标签腾出空间，避免与相邻子图重叠。
+        // 水平间距再与 auto_wspace（按刻度值宽度反解）取较大者。
         // 通过 add_subplot/gridspec 等自定义布局（nrows×ncols 与格子数不符）保持原位置不变。
-        let is_regular_grid =
-            self.axes_list.len() == self.nrows * self.ncols && self.axes_list.len() > 1;
         let (grid_wspace, grid_hspace) = if is_regular_grid {
             let any_ylabel = self
                 .axes_list
@@ -544,6 +618,7 @@ impl Figure {
             } else {
                 BASE_WSPACE
             };
+            let w = w.max(auto_wspace);
             let h = if any_xlabel {
                 BASE_HSPACE * 2.0
             } else {

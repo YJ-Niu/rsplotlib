@@ -2268,6 +2268,7 @@ impl Axes {
         let ylog = self.yscale == "log";
 
         // 计算主/副刻度
+        let x_tick_font_size = scale_font(self.tick_labelsize, font_scale);
         let ticks_info = crate::figure::axes_mesh::compute_ticks(
             py,
             &self.xticks_val,
@@ -2285,6 +2286,8 @@ impl Axes {
             self.minor_grid_x_visible,
             self.minor_grid_y_visible,
             self.minor_grid_visible,
+            x_tick_font_size,
+            xlog,
         );
 
         // 计算网格线颜色/线宽/样式
