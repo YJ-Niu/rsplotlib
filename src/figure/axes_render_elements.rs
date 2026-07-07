@@ -1303,6 +1303,7 @@ where
                     font_family.as_deref(),
                     HAlign::Left,
                     VAlign::Center,
+                    0.0,
                 )?;
             }
             PlotElement::HLine {
@@ -2040,6 +2041,7 @@ where
                     None,
                     HAlign::Center,
                     VAlign::Center,
+                    0.0,
                 )?;
             }
         }

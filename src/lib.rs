@@ -232,6 +232,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::clear_font_stack, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::font_stack::glyph_supported, m)?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::debug_font_stack, m)?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::debug_select_family, m)?)?;
     m.add_function(wrap_pyfunction!(figure::figure::get_default_figsize, m)?)?;

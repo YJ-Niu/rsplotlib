@@ -367,6 +367,73 @@ _FONT_COMMANDS = {
 }
 # \text 系列在数学模式里保留字面空格；其余字体命令与普通数学模式一致（忽略空格）。
 _TEXT_COMMANDS = {'text', 'textrm', 'textit', 'textbf'}
+
+# 数学字体命令 -> 样式键。映射到 Unicode 数学字母符号（Mathematical Alphanumeric
+# Symbols）。未列出的字体命令（mathrm/mathnormal/text/operatorname 等）视为默认
+# 罗马体，仅剥离命令、内容不改字形。
+_MATH_FONT_STYLES = {
+    'mathbf': 'bf', 'boldsymbol': 'bf', 'textbf': 'bf',
+    'mathit': 'it', 'textit': 'it',
+    'mathbfit': 'bfit',
+    'mathcal': 'cal',
+    'mathfrak': 'frak',
+    'mathbb': 'bb',
+    'mathsf': 'sf',
+    'mathtt': 'tt',
+}
+# 每种样式：(大写字母基址, 小写字母基址, 数字基址或 None, 例外洞表)。
+# 例外洞：部分字形在 SMP 数学字母块中留空，Unicode 把它们放到 BMP 的
+# Letterlike Symbols 区（如 \mathcal{R}=ℛ U+211B、\mathbb{R}=ℝ U+211D）。
+_MATH_ALPHA = {
+    'bf': (0x1D400, 0x1D41A, 0x1D7CE, {}),
+    'it': (0x1D434, 0x1D44E, None, {'h': 0x210E}),
+    'bfit': (0x1D468, 0x1D482, None, {}),
+    'cal': (0x1D49C, 0x1D4B6, None, {
+        'B': 0x212C, 'E': 0x2130, 'F': 0x2131, 'H': 0x210B, 'I': 0x2110,
+        'L': 0x2112, 'M': 0x2133, 'R': 0x211B, 'e': 0x212F, 'g': 0x210A,
+        'o': 0x2134}),
+    'frak': (0x1D504, 0x1D51E, None, {
+        'C': 0x212D, 'H': 0x210C, 'I': 0x2111, 'R': 0x211C, 'Z': 0x2128}),
+    'bb': (0x1D538, 0x1D552, 0x1D7D8, {
+        'C': 0x2102, 'H': 0x210D, 'N': 0x2115, 'P': 0x2119, 'Q': 0x211A,
+        'R': 0x211D, 'Z': 0x2124}),
+    'sf': (0x1D5A0, 0x1D5BA, 0x1D7E2, {}),
+    'tt': (0x1D670, 0x1D68A, 0x1D7F6, {}),
+}
+
+
+def _style_char(ch, style):
+    """把单个 ASCII 字母/数字映射为对应数学字体的 Unicode 字符。
+
+    非字母/数字、或该样式无对应字形（如斜体数字）时原样返回。若目标字形不被
+    实际渲染字体支持（如 macOS Arial Unicode 缺 SMP 数学字母块），回退为原字符，
+    避免渲染出缺字形方框。
+    """
+    if not style:
+        return ch
+    spec = _MATH_ALPHA.get(style)
+    if spec is None:
+        return ch
+    up, low, dig, holes = spec
+    if ch in holes:
+        cp = holes[ch]
+    elif 'A' <= ch <= 'Z':
+        cp = up + (ord(ch) - ord('A'))
+    elif 'a' <= ch <= 'z':
+        cp = low + (ord(ch) - ord('a'))
+    elif dig is not None and '0' <= ch <= '9':
+        cp = dig + (ord(ch) - ord('0'))
+    else:
+        return ch
+    mapped = chr(cp)
+    try:
+        if not _rsplotlib.glyph_supported(mapped):
+            return ch
+    except Exception:
+        pass
+    return mapped
+
+
 # 罗马体函数名：原样输出名称本身（如 \sin -> "sin"）。
 _FUNCTION_NAMES = {
     'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'sinh', 'cosh', 'tanh',
@@ -438,7 +505,7 @@ def _read_command(expr, i):
     return '', j
 
 
-def _read_atom(expr, i, keep_spaces):
+def _read_atom(expr, i, keep_spaces, font_style=None):
     """读取上/下标作用的“原子”，返回 (已转换的 Unicode 串, 新下标)。
 
     原子可为 {..} 组、\\命令、或单个字符。
@@ -449,11 +516,11 @@ def _read_atom(expr, i, keep_spaces):
     ch = expr[i]
     if ch == '{':
         content, i = _read_group(expr, i)
-        return _convert_math(content, keep_spaces), i
+        return _convert_math(content, keep_spaces, font_style), i
     if ch == '\\':
         _, after = _read_command(expr, i)
-        return _convert_math(expr[i:after], keep_spaces), after
-    return ch, i + 1
+        return _convert_math(expr[i:after], keep_spaces, font_style), after
+    return _style_char(ch, font_style), i + 1
 
 
 def _thickness_is_zero(spec):
@@ -474,7 +541,7 @@ def _thickness_is_zero(spec):
         return False
 
 
-def _convert_math(expr, keep_spaces=False):
+def _convert_math(expr, keep_spaces=False, font_style=None):
     """把一段数学模式文本（$...$ 内部）转换为可供渲染的字符串。
 
     希腊字母/符号/字体命令/函数名/变音符号/间距等转换为 Unicode 文本；
@@ -508,7 +575,7 @@ def _convert_math(expr, keep_spaces=False):
                 i = after
                 continue
             if cmd in _ACCENTS:
-                atom, i = _read_atom(expr, after, keep_spaces)
+                atom, i = _read_atom(expr, after, keep_spaces, font_style)
                 comb = _ACCENTS[cmd]
                 if cmd in _ACCENTS_SPREAD and atom:
                     out.append(''.join(c + comb for c in atom))
@@ -518,10 +585,14 @@ def _convert_math(expr, keep_spaces=False):
                     out.append(comb)
                 continue
             if cmd in _FONT_COMMANDS:
+                # 字体命令：进入其花括号内容并切换字体样式。未列入 _MATH_FONT_STYLES
+                # 的命令（mathrm/text/… 罗马体）把样式重置为默认（None）。
+                new_style = _MATH_FONT_STYLES.get(cmd)
                 if after < n and expr[after] == '{':
                     content, i = _read_group(expr, after)
                     out.append(_convert_math(
-                        content, keep_spaces or cmd in _TEXT_COMMANDS))
+                        content, keep_spaces or cmd in _TEXT_COMMANDS,
+                        new_style))
                 else:
                     i = after
                 continue
@@ -534,10 +605,11 @@ def _convert_math(expr, keep_spaces=False):
                         root, i = expr[i + 1:end], end + 1
                 if i < n and expr[i] == '{':
                     content, i = _read_group(expr, i)
-                    body = _convert_math(content, keep_spaces)
+                    body = _convert_math(content, keep_spaces, font_style)
                 else:
                     body = ''
-                index = _convert_math(root, keep_spaces) if root else ''
+                index = (_convert_math(root, keep_spaces, font_style)
+                         if root else '')
                 out.append(_IR_START + 'r' + index + _IR_SEP + body + _IR_END)
                 continue
             if cmd in ('frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'):
@@ -546,7 +618,7 @@ def _convert_math(expr, keep_spaces=False):
                 for _ in range(2):
                     if i < n and expr[i] == '{':
                         grp, i = _read_group(expr, i)
-                        parts.append(_convert_math(grp, keep_spaces))
+                        parts.append(_convert_math(grp, keep_spaces, font_style))
                     else:
                         parts.append('')
                 kind = 'b' if cmd.endswith('binom') else 'f'
@@ -560,11 +632,11 @@ def _convert_math(expr, keep_spaces=False):
                     grp, i = _read_group(expr, i)
                     groups.append(grp)
                 groups += [''] * (6 - len(groups))
-                ld = _convert_math(groups[0], keep_spaces)
-                rd = _convert_math(groups[1], keep_spaces)
+                ld = _convert_math(groups[0], keep_spaces, font_style)
+                rd = _convert_math(groups[1], keep_spaces, font_style)
                 bar_flag = '0' if _thickness_is_zero(groups[2]) else '1'
-                num = _convert_math(groups[4], keep_spaces)
-                den = _convert_math(groups[5], keep_spaces)
+                num = _convert_math(groups[4], keep_spaces, font_style)
+                den = _convert_math(groups[5], keep_spaces, font_style)
                 out.append(''.join(
                     (_IR_START, 'g', ld, _IR_SEP, rd, _IR_SEP,
                      bar_flag, _IR_SEP, num, _IR_SEP, den, _IR_END)))
@@ -596,14 +668,14 @@ def _convert_math(expr, keep_spaces=False):
             # ^ 与 _ 合并到同一 base，交给 Rust 二维排版为真正的上下标。
             base = out.pop() if out else ''
             sup = sub = ''
-            atom, i = _read_atom(expr, i + 1, keep_spaces)
+            atom, i = _read_atom(expr, i + 1, keep_spaces, font_style)
             if ch == '^':
                 sup = atom
             else:
                 sub = atom
             if i < n and expr[i] in '^_':
                 ch2 = expr[i]
-                atom2, i = _read_atom(expr, i + 1, keep_spaces)
+                atom2, i = _read_atom(expr, i + 1, keep_spaces, font_style)
                 if ch2 == '^':
                     sup = atom2
                 else:
@@ -613,7 +685,7 @@ def _convert_math(expr, keep_spaces=False):
             continue
         if ch == '{':
             content, i = _read_group(expr, i)
-            out.append(_convert_math(content, keep_spaces))
+            out.append(_convert_math(content, keep_spaces, font_style))
             continue
         if ch == '}':
             i += 1
@@ -625,7 +697,7 @@ def _convert_math(expr, keep_spaces=False):
         if ch == ' ' and not keep_spaces:
             i += 1                                # 数学模式忽略字面空格
             continue
-        out.append(ch)
+        out.append(_style_char(ch, font_style))
         i += 1
     return ''.join(out)
 

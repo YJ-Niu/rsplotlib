@@ -67,6 +67,14 @@ pub fn char_supported(c: char) -> bool {
     }
 }
 
+/// Python 侧查询：给定单个字符，判断实际渲染字体能否绘制其字形。
+/// 供 `_convert_math` 的数学字体命令（\mathcal/\mathbb/…）映射到 Unicode
+/// 数学字母符号时做回退决策，缺字形则退回普通字符，避免「豆腐块」。
+#[pyfunction]
+pub fn glyph_supported(c: char) -> bool {
+    char_supported(c)
+}
+
 /// 判断文本是否全为 ASCII 字符。
 /// 纯 ASCII 文本可以走快速路径——直接使用第一个字体（西文字体肯定能覆盖 ASCII）。
 #[inline]

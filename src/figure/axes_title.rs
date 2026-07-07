@@ -76,6 +76,7 @@ where
         title_family,
         h_align,
         VAlign::Bottom,
+        0.0,
     )?;
     Ok(())
 }

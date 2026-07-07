@@ -650,6 +650,15 @@ impl Figure {
             // plotters 把 y_desc 贴 y_label_area 左边缘、刻度值贴右边缘（近轴），故加宽 y_tick_area
             // 会自动把 ylabel 左移、远离刻度值；刻度值为空时 y_tick_area=0，ylabel 紧贴坐标轴。
             // 无标签也无刻度值时最小保留 pad2，确保 plotters 正确绘制边界 spine。
+            // 带上/下标的数学标签排版块比单行更高，离轴距离额外加 30%，避免上标/下标挤向刻度值。
+            let label_extra = |label: &str| -> u32 {
+                let base = pad6 + tick_label_size;
+                if crate::utils::mathtext::has_script(label) {
+                    (base as f64 * 1.4).round() as u32
+                } else {
+                    base
+                }
+            };
             let y_label_area = if ax.ylabel.is_empty() {
                 if y_ticklabels_shown {
                     y_tick_area + pad2
@@ -657,7 +666,7 @@ impl Figure {
                     pad2
                 }
             } else {
-                y_tick_area + pad6 + tick_label_size
+                y_tick_area + label_extra(&ax.ylabel)
             };
             let x_label_area = if ax.xlabel.is_empty() {
                 if x_ticklabels_shown {
@@ -666,7 +675,7 @@ impl Figure {
                     pad2
                 }
             } else {
-                x_tick_area + pad6 + tick_label_size
+                x_tick_area + label_extra(&ax.xlabel)
             };
 
             // 顶部边距：ax.title 是通过 chart.draw_series(Text) 渲染的，

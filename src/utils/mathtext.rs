@@ -36,6 +36,12 @@ pub fn contains_ir(s: &str) -> bool {
     s.contains(START)
 }
 
+/// 字符串是否包含上/下标构造（IR 中的 `START 's'`）。上标/下标使排版块比单行更高，
+/// 供坐标轴标签据此增加离轴距离，避免上标/下标挤向刻度值与坐标轴。
+pub fn has_script(s: &str) -> bool {
+    s.contains("\u{2}s")
+}
+
 // ==================== 解析 ====================
 
 enum Node {
@@ -312,6 +318,14 @@ fn node_to_plain(n: &Node) -> String {
     out
 }
 
+/// 该节点是否为大型（n 元）算符——上/下标应堆叠在符号上下方而非置于右侧。
+fn is_bigop(n: &Node) -> bool {
+    matches!(
+        node_to_plain(n).trim(),
+        "∑" | "∏" | "∐" | "⋀" | "⋁" | "⋂" | "⋃" | "⨆" | "⨅" | "⨁" | "⨂" | "⨀"
+    )
+}
+
 fn plain_into(n: &Node, out: &mut String) {
     match n {
         Node::Row(v) => {
@@ -364,15 +378,21 @@ pub fn to_plain(s: &str) -> String {
 // ==================== 布局 ====================
 
 // 布局常量（相对字号 em 的比例），按视觉效果调优。
-const SCRIPT_SCALE: f64 = 0.7; // 上下标缩放
+const SCRIPT_SCALE: f64 = 0.7; // 大型算符上/下极限（∑ ∏ 上下方）的缩放
+const SIDE_SCRIPT_SCALE: f64 = 0.49; // 右侧上/下标缩放（比极限再小 30%）
 const LEAF_UP: f64 = 0.42; // 叶子字形中心线以上视觉半高
 const LEAF_DOWN: f64 = 0.30; // 叶子字形中心线以下视觉半高
 const SUP_SHIFT: f64 = 0.44; // 上标中心相对基线中心上移
 const SUB_SHIFT: f64 = 0.34; // 下标中心相对基线中心下移
 const SCRIPT_KERN: f64 = 0.04; // 基字符与上下标之间的水平间隙
-const FRAC_GAP: f64 = 0.18; // 分子/分母与分数线的间距
+const FRAC_GAP: f64 = 0.12; // 分子/分母与分数线的间距
 const FRAC_PAD: f64 = 0.12; // 分式左右内边距
-const SQRT_GAP: f64 = 0.12; // 根号盖线与被开方内容的间距
+const FRAC_AXIS: f64 = 0.22; // 分数线相对中心线的上移量（对齐相邻文字的数学轴）
+const FRAC_BAR: f64 = 0.05; // 分数线厚度（相对字号）
+const FRAC_INK: f64 = 0.18; // 分子/分母整体下移补偿（抵消字体盒居中偏移），使横线居中
+const DELIM_FILL: f64 = 0.8; // 定界符字号 = 内容高度 / 此值（越小括号越大、越能包住内容）
+const SQRT_GAP: f64 = 0.42; // 根号盖线与被开方内容的间距
+const LIMIT_GAP: f64 = 0.05; // 大型算符（∑ ∏ 等）上/下标与符号之间的竖直间距
 
 struct Run {
     text: String,
@@ -462,15 +482,95 @@ fn layout(node: &Node, size: f64, family: &str) -> Layout {
         }
         Node::Script { base, sup, sub } => {
             let b = layout(base, size, family);
+            let ssize = SCRIPT_SCALE * size;
+            // 大型算符（∑ ∏ …）：上标居中堆在符号上方、下标居中堆在符号下方。
+            if is_bigop(base) && (sup.is_some() || sub.is_some()) {
+                let gap = LIMIT_GAP * size;
+                let sup_l = sup.as_ref().map(|n| layout(n, ssize, family));
+                let sub_l = sub.as_ref().map(|n| layout(n, ssize, family));
+                let sup_w = sup_l.as_ref().map(|l| l.width).unwrap_or(0.0);
+                let sub_w = sub_l.as_ref().map(|l| l.width).unwrap_or(0.0);
+                let total_w = b.width.max(sup_w).max(sub_w);
+                let mut runs = Vec::new();
+                let mut rules = Vec::new();
+                let bx = (total_w - b.width) / 2.0;
+                for r in b.runs {
+                    runs.push(Run {
+                        text: r.text,
+                        dx: r.dx + bx,
+                        dy: r.dy,
+                        size: r.size,
+                    });
+                }
+                for r in b.rules {
+                    rules.push(Rule {
+                        x0: r.x0 + bx,
+                        x1: r.x1 + bx,
+                        y: r.y,
+                        thick: r.thick,
+                    });
+                }
+                let mut up = b.up;
+                let mut down = b.down;
+                if let Some(s) = sup_l {
+                    let sx = (total_w - s.width) / 2.0;
+                    let cy = -(b.up + gap + s.down);
+                    for r in s.runs {
+                        runs.push(Run {
+                            text: r.text,
+                            dx: r.dx + sx,
+                            dy: r.dy + cy,
+                            size: r.size,
+                        });
+                    }
+                    for r in s.rules {
+                        rules.push(Rule {
+                            x0: r.x0 + sx,
+                            x1: r.x1 + sx,
+                            y: r.y + cy,
+                            thick: r.thick,
+                        });
+                    }
+                    up = up.max(-cy + s.up);
+                }
+                if let Some(s) = sub_l {
+                    let sx = (total_w - s.width) / 2.0;
+                    let cy = b.down + gap + s.up;
+                    for r in s.runs {
+                        runs.push(Run {
+                            text: r.text,
+                            dx: r.dx + sx,
+                            dy: r.dy + cy,
+                            size: r.size,
+                        });
+                    }
+                    for r in s.rules {
+                        rules.push(Rule {
+                            x0: r.x0 + sx,
+                            x1: r.x1 + sx,
+                            y: r.y + cy,
+                            thick: r.thick,
+                        });
+                    }
+                    down = down.max(cy + s.down);
+                }
+                return Layout {
+                    runs,
+                    rules,
+                    width: total_w,
+                    up,
+                    down,
+                };
+            }
             let mut runs = b.runs;
             let mut rules = b.rules;
             let mut up = b.up;
             let mut down = b.down;
             let sx = b.width + SCRIPT_KERN * size;
-            let ssize = SCRIPT_SCALE * size;
+            let side_size = SIDE_SCRIPT_SCALE * size;
             let mut script_w: f64 = 0.0;
             if let Some(sup) = sup {
-                let s = layout(sup, ssize, family);
+                let s = layout(sup, side_size, family);
                 let cy = -SUP_SHIFT * size;
                 for r in s.runs {
                     runs.push(Run {
@@ -492,7 +592,7 @@ fn layout(node: &Node, size: f64, family: &str) -> Layout {
                 script_w = script_w.max(s.width);
             }
             if let Some(sub) = sub {
-                let s = layout(sub, ssize, family);
+                let s = layout(sub, side_size, family);
                 let cy = SUB_SHIFT * size;
                 for r in s.runs {
                     runs.push(Run {
@@ -547,10 +647,17 @@ fn layout_frac(
     let inner = n.width.max(d.width);
     let pad = FRAC_PAD * size;
     let fw = inner + 2.0 * pad;
-    let bar_thick = (0.055 * size).max(1.0);
+    let bar_thick = (FRAC_BAR * size).max(1.0);
     let gap = FRAC_GAP * size;
-    let num_cy = -(bar_thick * 0.5 + gap + n.down);
-    let den_cy = bar_thick * 0.5 + gap + d.up;
+    // 分数线上移 FRAC_AXIS（数学轴），使其对齐相邻文字视觉中线，而非落在偏低的行中线。
+    let axis = FRAC_AXIS * size;
+    let bar_y = -axis;
+    // 字形以 VPos::Center 绘制时，plotters 居中的是整个字体盒（含 descent 空白），墨迹
+    // 视觉中心比给定 dy 偏高；而分数线按精确 y 绘制，于是相对偏低、贴向分母。将分子分母
+    // 整体下移 FRAC_INK 抵消该偏移，使墨迹落回模型位置、横线居中于两者之间。
+    let ink = FRAC_INK * size;
+    let num_cy = bar_y - (bar_thick * 0.5 + gap + n.down) + ink;
+    let den_cy = bar_y + bar_thick * 0.5 + gap + d.up + ink;
 
     let mut runs = Vec::new();
     let mut rules = Vec::new();
@@ -592,7 +699,7 @@ fn layout_frac(
         rules.push(Rule {
             x0: pad * 0.5,
             x1: fw - pad * 0.5,
-            y: 0.0,
+            y: bar_y,
             thick: bar_thick,
         });
     }
@@ -612,11 +719,16 @@ fn layout_frac(
     out
 }
 
-/// 用与内容等高的括号（近似）把分式/二项式包起来。
+/// 用放大的定界符字形（如 `(` `)`）把分式/二项式包起来。字号由内容高度决定
+/// （DELIM_FILL 越小括号越大），竖直方向以内容盒中心对齐。
 fn wrap_delims(inner: &mut Layout, ldelim: &str, rdelim: &str, family: &str) {
     let h = inner.up + inner.down;
-    // 括号字形可见高度约 0.7em，放大字号使其覆盖内容高度。
-    let dsize = (h / 0.62).max(1.0);
+    // 定界符字号由内容高度决定（DELIM_FILL 越小括号越大）。
+    let dsize = (h / DELIM_FILL * 0.8).max(1.0);
+    // 竖直中心：内容盒中心 (down-up)/2，随分数上移一并抬升。
+    let cy = (inner.down - inner.up) / 2.0;
+    // 定界符字形微调：向右、向下各偏移括号大小的 5%。
+    let nudge = 0.05 * dsize;
     let lw = if ldelim.is_empty() {
         0.0
     } else {
@@ -627,6 +739,7 @@ fn wrap_delims(inner: &mut Layout, ldelim: &str, rdelim: &str, family: &str) {
     } else {
         text_width(rdelim, family, dsize)
     };
+    // 内容整体右移 lw，为左定界符腾出空间。
     for r in inner.runs.iter_mut() {
         r.dx += lw;
     }
@@ -637,16 +750,16 @@ fn wrap_delims(inner: &mut Layout, ldelim: &str, rdelim: &str, family: &str) {
     if !ldelim.is_empty() {
         inner.runs.push(Run {
             text: ldelim.to_string(),
-            dx: 0.0,
-            dy: 0.0,
+            dx: nudge,
+            dy: cy + nudge * 1.1,
             size: dsize,
         });
     }
     if !rdelim.is_empty() {
         inner.runs.push(Run {
             text: rdelim.to_string(),
-            dx: lw + inner.width,
-            dy: 0.0,
+            dx: lw + inner.width * 0.9 + nudge,
+            dy: cy + nudge * 1.1,
             size: dsize,
         });
     }
@@ -656,12 +769,14 @@ fn wrap_delims(inner: &mut Layout, ldelim: &str, rdelim: &str, family: &str) {
 #[allow(clippy::borrowed_box)]
 fn layout_sqrt(index: Option<&Node>, body: &Node, size: f64, family: &str) -> Layout {
     let b = layout(body, size, family);
-    let gap = SQRT_GAP * size;
     let vth = (0.05 * size).max(1.0);
     let body_h = b.up + b.down;
     // 根号字形放大以贴近内容高度。
     let rad_size = (body_h / 0.72).max(size);
     let rad_w = text_width("√", family, rad_size);
+    // 盖线与内容的间距随根号字形大小缩放：√ 越大其顶端越高，盖线也应相应上移，
+    // 才能与放大的根号符号顶端衔接（用 size 会使大根号的盖线偏低、贴住内容）。
+    let gap = SQRT_GAP * rad_size * 0.77;
 
     // n 次根：先布局指数，为其在根号左侧预留宽度（指数与根号斜线部分重叠，
     // 因此只预留其大部分宽度，而非全宽）。
@@ -703,8 +818,8 @@ fn layout_sqrt(index: Option<&Node>, body: &Node, size: f64, family: &str) -> La
     }
     let vin_y = -(b.up + gap);
     rules.push(Rule {
-        x0: bx,
-        x1: bx + b.width,
+        x0: bx * 1.1,
+        x1: bx + b.width * 1.1,
         y: vin_y,
         thick: vth,
     });
@@ -807,22 +922,23 @@ pub fn draw_math_chart<DB: DrawingBackend>(
     family: Option<&str>,
     h: HAlign,
     v: VAlign,
+    dy_px: f64,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
 {
     let plain = to_plain(s);
     let fam = font_stack::resolve_font_family(&plain, family);
+    let nudge = dy_px.round() as i32;
     if !contains_ir(s) {
         let style = FontDesc::from((fam.as_str(), size))
             .color(&color)
             .pos(plotters_pos(h, v));
         chart
-            .draw_series(std::iter::once(plotters::element::Text::new(
-                s.to_string(),
-                (x, y),
-                style,
-            )))
+            .draw_series(std::iter::once(
+                plotters::element::EmptyElement::at((x, y))
+                    + plotters::element::Text::new(s.to_string(), (0, nudge), style),
+            ))
             .map_err(|e| PyRuntimeError::new_err(format!("math text: {}", e)))?;
         return Ok(());
     }
@@ -833,7 +949,7 @@ where
             .color(&color)
             .pos(Pos::new(HPos::Left, VPos::Center));
         let dx = (ox + r.dx).round() as i32;
-        let dy = (oy + r.dy).round() as i32;
+        let dy = (oy + r.dy).round() as i32 + nudge;
         chart
             .draw_series(std::iter::once(
                 plotters::element::EmptyElement::at((x, y))
@@ -845,7 +961,7 @@ where
         let style = color.stroke_width(rule_stroke(r.thick));
         let x0 = (ox + r.x0).round() as i32;
         let x1 = (ox + r.x1).round() as i32;
-        let yy = (oy + r.y).round() as i32;
+        let yy = (oy + r.y).round() as i32 + nudge;
         chart
             .draw_series(std::iter::once(
                 plotters::element::EmptyElement::at((x, y))

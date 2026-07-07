@@ -540,6 +540,7 @@ where
                 None,
                 HAlign::Left,
                 VAlign::Top,
+                -0.4 * scale_font(11.0, font_scale),
             )?;
         }
     }
