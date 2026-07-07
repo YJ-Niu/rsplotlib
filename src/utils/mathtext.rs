@@ -375,6 +375,23 @@ pub fn to_plain(s: &str) -> String {
     node_to_plain(&parse(s))
 }
 
+/// 估算一段文本（可含 mathtext IR）渲染后的像素外框 `(宽, 高)`。
+///
+/// 先降级为单行 Unicode 近似，再用与渲染一致的字体族 + 字号 `box_size` 度量。
+/// `size` 应为最终像素字号（即 `scale_font` 之后的值）。度量失败时用字符数估算。
+/// 供 annotate 箭头计算文本包围盒边缘、以便箭尾从文本框边缘出发。
+pub fn measure_plain(s: &str, family: Option<&str>, size: f64) -> (f64, f64) {
+    let plain = to_plain(s);
+    if plain.is_empty() {
+        return (0.0, 0.0);
+    }
+    let fam = font_stack::resolve_font_family(&plain, family);
+    let font: FontDesc = (fam.as_str(), size).into();
+    font.box_size(&plain)
+        .map(|(w, h)| (w as f64, h as f64))
+        .unwrap_or((0.55 * size * plain.chars().count() as f64, size))
+}
+
 // ==================== 布局 ====================
 
 // 布局常量（相对字号 em 的比例），按视觉效果调优。

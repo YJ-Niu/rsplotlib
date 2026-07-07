@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 use std::cell::RefCell;
 
 use crate::core::colors::{RgbColor, default_color, median, parse_color, to_plotters_color};
-use crate::core::elements::PlotElement;
+use crate::core::elements::{ArrowSpec, PlotElement};
 use crate::core::marker::draw_marker;
 use crate::figure::axes::scale_font;
 use crate::utils::font_stack;
@@ -104,6 +104,273 @@ where
             style,
         )))
         .map_err(|e| PyRuntimeError::new_err(format!("Line: {}", e)))?;
+    Ok(())
+}
+
+/// 绘制单个箭头头部（花式箭头端点）。
+///
+/// `tip`/`dir`/`perp` 为像素坐标：`tip` 为尖端，`dir` 为指向尖端的单位向量，
+/// `perp` 为其垂直单位向量。`fill=true` 画实心三角（"-|>" 类），否则画空心 V
+/// （"->" 类，两条描边线段）。顶点经 `to_data` 转回数据坐标后绘制。
+#[allow(clippy::too_many_arguments)]
+fn draw_arrow_head<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    tip: (f64, f64),
+    dir: (f64, f64),
+    perp: (f64, f64),
+    head_len: f64,
+    head_half: f64,
+    fill: bool,
+    fill_rgb: RgbColor,
+    alpha: f64,
+    stroke_rgb: RgbColor,
+    linewidth: f64,
+    font_scale: f64,
+    to_data: &dyn Fn(f64, f64) -> (f64, f64),
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    let base = (tip.0 - dir.0 * head_len, tip.1 - dir.1 * head_len);
+    let l = (base.0 + perp.0 * head_half, base.1 + perp.1 * head_half);
+    let r = (base.0 - perp.0 * head_half, base.1 - perp.1 * head_half);
+    if fill {
+        let tri: Vec<(f64, f64)> = [tip, l, r].iter().map(|&(x, y)| to_data(x, y)).collect();
+        let style = to_plotters_color(fill_rgb).mix(alpha).filled();
+        chart
+            .draw_series(std::iter::once(Polygon::new(tri, style)))
+            .map_err(|e| PyRuntimeError::new_err(format!("annotate head: {}", e)))?;
+    } else {
+        let (tdx, tdy) = to_data(tip.0, tip.1);
+        let (ldx, ldy) = to_data(l.0, l.1);
+        let (rdx, rdy) = to_data(r.0, r.1);
+        draw_single_line(chart, tdx, tdy, ldx, ldy, stroke_rgb, linewidth, font_scale)?;
+        draw_single_line(chart, tdx, tdy, rdx, rdy, stroke_rgb, linewidth, font_scale)?;
+    }
+    Ok(())
+}
+
+/// 绘制 annotate 的箭头（matplotlib 风格），箭头从文本框边缘指向被标注点 `xy`。
+///
+/// 在像素空间计算方向、文本框边缘起点与两端收缩，再转回数据坐标绘制：
+/// - 「简单」箭头（`style` 为空 / "simple" / "fancy" / "wedge"）：实心多边形箭头，
+///   杆宽 `width`、头底宽 `head_width`、头长 `head_length`（均为 points）；
+/// - 「花式」箭头：直杆 + 端点头，`"-"` 仅直线，`"->"/"<-"/"<->"` 空心 V，
+///   `"-|>"/"<|-"/"<|-|>"` 实心三角。头部尺寸取 `mutation_scale`。
+///
+/// `text_x/text_y`、`target_x/target_y` 为（经 log 变换后的）数据坐标。
+#[allow(clippy::too_many_arguments)]
+fn draw_annotation_arrow<DB: DrawingBackend>(
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    spec: &ArrowSpec,
+    text: &str,
+    text_size_px: f64,
+    text_x: f64,
+    text_y: f64,
+    target_x: f64,
+    target_y: f64,
+    font_scale: f64,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    text_color: RgbColor,
+) -> PyResult<()>
+where
+    DB::ErrorType: 'static,
+{
+    let (pw, ph) = {
+        let d = chart.plotting_area().dim_in_pixel();
+        (d.0 as f64, d.1 as f64)
+    };
+    if pw < 1.0 || ph < 1.0 {
+        return Ok(());
+    }
+    let x_per_pix = (x_max - x_min) / pw;
+    let y_per_pix = (y_max - y_min) / ph;
+    if x_per_pix == 0.0 || y_per_pix == 0.0 {
+        return Ok(());
+    }
+    // 数据 <-> 绘图区局部像素（y 轴翻转：y_max 对应 py=0）。
+    let to_px =
+        |x: f64, y: f64| -> (f64, f64) { ((x - x_min) / x_per_pix, (y_max - y) / y_per_pix) };
+    let to_data =
+        |px: f64, py: f64| -> (f64, f64) { (x_min + px * x_per_pix, y_max - py * y_per_pix) };
+
+    let (tpx, tpy) = to_px(text_x, text_y);
+    let (qpx, qpy) = to_px(target_x, target_y);
+    let dx = qpx - tpx;
+    let dy = qpy - tpy;
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist < 1e-6 {
+        return Ok(());
+    }
+    let (ux, uy) = (dx / dist, dy / dist);
+    let (perp_x, perp_y) = (-uy, ux);
+
+    // 文本框半宽高（像素）；文本居中放置于 (tpx, tpy)，箭尾从框边缘出发。
+    let (tw, th) = mathtext::measure_plain(text, None, text_size_px);
+    let hw = tw / 2.0 + 2.0;
+    let hh = th / 2.0 + 2.0;
+    let mut t_edge = f64::INFINITY;
+    if ux.abs() > 1e-9 {
+        t_edge = t_edge.min(hw / ux.abs());
+    }
+    if uy.abs() > 1e-9 {
+        t_edge = t_edge.min(hh / uy.abs());
+    }
+    if !t_edge.is_finite() {
+        t_edge = 0.0;
+    }
+    let mut ax = tpx + ux * t_edge;
+    let mut ay = tpy + uy * t_edge;
+    let mut bx = qpx;
+    let mut by = qpy;
+
+    // 「简单」箭头的 shrink：从两端各按总长比例收缩。
+    if spec.shrink_frac > 0.0 {
+        let s = spec.shrink_frac * dist;
+        ax += ux * s;
+        ay += uy * s;
+        bx -= ux * s;
+        by -= uy * s;
+    }
+    // 端点收缩（points -> px）。
+    ax += ux * spec.shrink_a * font_scale;
+    ay += uy * spec.shrink_a * font_scale;
+    bx -= ux * spec.shrink_b * font_scale;
+    by -= uy * spec.shrink_b * font_scale;
+
+    let rem = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+    if rem < 1e-6 {
+        return Ok(());
+    }
+
+    let stroke_rgb = parse_color(&spec.color, 0).unwrap_or(text_color);
+    let fill_rgb = match &spec.face_color {
+        Some(fc) => parse_color(fc, 0).unwrap_or(stroke_rgb),
+        None => stroke_rgb,
+    };
+
+    let style = spec.style.as_str();
+    let is_simple = style.is_empty() || matches!(style, "simple" | "fancy" | "wedge");
+
+    if is_simple {
+        // 实心多边形箭头：矩形杆 + 三角头，尖端在 B。
+        let w = (spec.width * font_scale).max(1.0);
+        let hwid = (spec.head_width * font_scale).max(w);
+        let hlen = (spec.head_length * font_scale).max(1.0).min(rem * 0.98);
+        let neck = (bx - ux * hlen, by - uy * hlen); // 杆与头的分界
+        let (hw2, hh2) = (w / 2.0, hwid / 2.0);
+        let poly_px = [
+            (ax + perp_x * hw2, ay + perp_y * hw2),
+            (neck.0 + perp_x * hw2, neck.1 + perp_y * hw2),
+            (neck.0 + perp_x * hh2, neck.1 + perp_y * hh2),
+            (bx, by),
+            (neck.0 - perp_x * hh2, neck.1 - perp_y * hh2),
+            (neck.0 - perp_x * hw2, neck.1 - perp_y * hw2),
+            (ax - perp_x * hw2, ay - perp_y * hw2),
+        ];
+        let poly: Vec<(f64, f64)> = poly_px.iter().map(|&(x, y)| to_data(x, y)).collect();
+        let fill_style = to_plotters_color(fill_rgb).mix(spec.alpha).filled();
+        chart
+            .draw_series(std::iter::once(Polygon::new(poly, fill_style)))
+            .map_err(|e| PyRuntimeError::new_err(format!("annotate arrow: {}", e)))?;
+        return Ok(());
+    }
+
+    // 「花式」箭头：直杆 + 端点头。
+    let head_len = (spec.mutation_scale * font_scale * 0.5).clamp(4.0, rem * 0.6);
+    let head_half = head_len * 0.5;
+    let start_open = style == "<-" || style == "<->";
+    let end_open = style == "->" || style == "<->";
+    let start_fill = style == "<|-" || style == "<|-|>";
+    let end_fill = style == "-|>" || style == "<|-|>";
+
+    let (adx, ady) = to_data(ax, ay);
+    let (bdx, bdy) = to_data(bx, by);
+    draw_single_line(
+        chart,
+        adx,
+        ady,
+        bdx,
+        bdy,
+        stroke_rgb,
+        spec.linewidth,
+        font_scale,
+    )?;
+
+    let dir = (ux, uy);
+    let rdir = (-ux, -uy);
+    let perp = (perp_x, perp_y);
+    if end_open {
+        draw_arrow_head(
+            chart,
+            (bx, by),
+            dir,
+            perp,
+            head_len,
+            head_half,
+            false,
+            fill_rgb,
+            spec.alpha,
+            stroke_rgb,
+            spec.linewidth,
+            font_scale,
+            &to_data,
+        )?;
+    }
+    if end_fill {
+        draw_arrow_head(
+            chart,
+            (bx, by),
+            dir,
+            perp,
+            head_len,
+            head_half,
+            true,
+            fill_rgb,
+            spec.alpha,
+            stroke_rgb,
+            spec.linewidth,
+            font_scale,
+            &to_data,
+        )?;
+    }
+    if start_open {
+        draw_arrow_head(
+            chart,
+            (ax, ay),
+            rdir,
+            perp,
+            head_len,
+            head_half,
+            false,
+            fill_rgb,
+            spec.alpha,
+            stroke_rgb,
+            spec.linewidth,
+            font_scale,
+            &to_data,
+        )?;
+    }
+    if start_fill {
+        draw_arrow_head(
+            chart,
+            (ax, ay),
+            rdir,
+            perp,
+            head_len,
+            head_half,
+            true,
+            fill_rgb,
+            spec.alpha,
+            stroke_rgb,
+            spec.linewidth,
+            font_scale,
+            &to_data,
+        )?;
+    }
     Ok(())
 }
 
@@ -1399,51 +1666,6 @@ where
                     let _ = linestyle;
                 }
             }
-            PlotElement::Arrow {
-                x1,
-                y1,
-                x2,
-                y2,
-                color,
-                linewidth,
-                head_size,
-            } => {
-                let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
-                let tx1 = tx(*x1);
-                let ty1 = ty(*y1);
-                let tx2 = tx(*x2);
-                let ty2 = ty(*y2);
-                if !(tx1.is_finite() && ty1.is_finite() && tx2.is_finite() && ty2.is_finite()) {
-                    continue;
-                }
-                draw_single_line(chart, tx1, ty1, tx2, ty2, col, *linewidth, font_scale)?;
-                // 箭头头部：简单三角形
-                let dx = tx2 - tx1;
-                let dy = ty2 - ty1;
-                let len = (dx * dx + dy * dy).sqrt();
-                if len < 1e-10 {
-                    continue;
-                }
-                let nx = dx / len;
-                let ny = dy / len;
-                let head = *head_size;
-                let p1 = (tx2, ty2);
-                let p2 = (
-                    tx2 - head * nx - head * 0.5 * ny,
-                    ty2 - head * ny + head * 0.5 * nx,
-                );
-                let p3 = (
-                    tx2 - head * nx + head * 0.5 * ny,
-                    ty2 - head * ny - head * 0.5 * nx,
-                );
-                let rgb = to_plotters_color(col);
-                chart
-                    .draw_series(std::iter::once(Polygon::new(
-                        vec![p1, p2, p3],
-                        rgb.filled(),
-                    )))
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw arrow: {}", e)))?;
-            }
             PlotElement::Pie {
                 x,
                 labels,
@@ -2009,32 +2231,46 @@ where
                 xytext,
                 fontsize,
                 color,
+                arrow,
             } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let rgb = to_plotters_color(col);
-                let (txy_x, txy_y) = xytext.unwrap_or((xy.0, xy.1));
-                let txy_x = tx(txy_x);
-                let txy_y = ty(txy_y);
-                let txy_xy_x = tx(xy.0);
-                let txy_xy_y = ty(xy.1);
-                if !txy_x.is_finite()
-                    || !txy_y.is_finite()
-                    || !txy_xy_x.is_finite()
-                    || !txy_xy_y.is_finite()
-                {
+                let (tx_data, ty_data) = xytext.unwrap_or(*xy);
+                let text_x = tx(tx_data);
+                let text_y = ty(ty_data);
+                if !text_x.is_finite() || !text_y.is_finite() {
                     continue;
                 }
-                let arrow_style: ShapeStyle = rgb.stroke_width(1);
-                chart
-                    .draw_series(std::iter::once(PathElement::new(
-                        vec![(txy_x, txy_y), (txy_xy_x, txy_xy_y)],
-                        arrow_style,
-                    )))
-                    .map_err(|e| PyRuntimeError::new_err(format!("Annotate arrow: {}", e)))?;
+                // 先画箭头（置于文本下层，使文本压住箭尾）。仅当提供 xytext 且
+                // arrowprops 非 None 时绘制。
+                if let Some(spec) = arrow
+                    && xytext.is_some()
+                {
+                    let target_x = tx(xy.0);
+                    let target_y = ty(xy.1);
+                    if target_x.is_finite() && target_y.is_finite() {
+                        draw_annotation_arrow(
+                            chart,
+                            spec,
+                            text,
+                            scale_font(*fontsize, font_scale),
+                            text_x,
+                            text_y,
+                            target_x,
+                            target_y,
+                            font_scale,
+                            x_min,
+                            x_max,
+                            y_min,
+                            y_max,
+                            col,
+                        )?;
+                    }
+                }
                 mathtext::draw_math_chart(
                     chart,
-                    txy_x,
-                    txy_y,
+                    text_x,
+                    text_y,
                     text,
                     scale_font(*fontsize, font_scale),
                     rgb,

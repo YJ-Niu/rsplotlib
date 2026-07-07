@@ -10,7 +10,7 @@ use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyTuple};
 use crate::core::colors::{
     RgbColor, default_color, default_color_str, parse_color, to_plotters_color,
 };
-use crate::core::elements::PlotElement;
+use crate::core::elements::{ArrowSpec, PlotElement};
 use crate::utils::font_stack;
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<f64>
@@ -364,6 +364,75 @@ fn parse_aspect(s: &str) -> Option<f64> {
 /// 通过 * 14.5 将字号放大到与 matplotlib 一致。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
     (size * font_scale * 14.5).round() / 10.0
+}
+
+/// 解析 matplotlib `arrowprops` dict 为 [`ArrowSpec`]。
+///
+/// 传入的 `props` 应为 dict（非 dict 时按空 dict 处理，即简单箭头）。
+/// - 含 `arrowstyle` 键 → 「花式」箭头，`style` 为归一化样式（逗号后的参数被忽略）；
+/// - 否则 → 「简单」箭头，`style` 为空串，用 `width`/`headwidth`/`headlength`/`shrink`。
+///
+/// 颜色回退：描边色取 `color`/`ec`/`edgecolor`，缺省用标注文本色 `text_color`；
+/// 填充色取 `facecolor`/`fc`，缺省用描边色。
+fn parse_arrowprops(
+    props: &Bound<'_, PyAny>,
+    text_color: &str,
+    fontsize: f64,
+) -> Option<ArrowSpec> {
+    let dict = props.cast::<PyDict>().ok();
+    let get_f64 = |keys: &[&str]| -> Option<f64> {
+        let d = dict.as_ref()?;
+        for k in keys {
+            if let Ok(Some(v)) = d.get_item(k)
+                && let Ok(f) = v.extract::<f64>()
+            {
+                return Some(f);
+            }
+        }
+        None
+    };
+    let get_str = |keys: &[&str]| -> Option<String> {
+        let d = dict.as_ref()?;
+        for k in keys {
+            if let Ok(Some(v)) = d.get_item(k)
+                && let Ok(s) = v.extract::<String>()
+            {
+                return Some(s);
+            }
+        }
+        None
+    };
+
+    // arrowstyle：只取逗号前的样式记号（忽略 "->,head_width=0.4" 里的参数）。
+    let style = get_str(&["arrowstyle"])
+        .map(|s| s.split(',').next().unwrap_or("").trim().to_string())
+        .unwrap_or_default();
+    let color = get_str(&["color", "ec", "edgecolor"]).unwrap_or_else(|| text_color.to_string());
+    let face_color = get_str(&["facecolor", "fc"]);
+    let linewidth = get_f64(&["linewidth", "lw"]).unwrap_or(1.0);
+    let mutation_scale = get_f64(&["mutation_scale"]).unwrap_or(fontsize);
+    let shrink_frac = get_f64(&["shrink"]).unwrap_or(0.0).clamp(0.0, 0.45);
+    let shrink_a = get_f64(&["shrinkA"]).unwrap_or(2.0);
+    let shrink_b = get_f64(&["shrinkB"]).unwrap_or(2.0);
+    let alpha = get_f64(&["alpha"]).unwrap_or(1.0);
+    let width = get_f64(&["width"]).unwrap_or(4.0);
+    let head_width = get_f64(&["headwidth"]).unwrap_or(12.0);
+    let head_length = get_f64(&["headlength"]).unwrap_or(15.0);
+
+    Some(ArrowSpec {
+        style,
+        color,
+        face_color,
+        linewidth,
+        mutation_scale,
+        shrink_a,
+        shrink_b,
+        shrink_frac,
+        alpha,
+        width,
+        head_width,
+        head_length,
+    })
 }
 
 /// 解析并注册用户显式指定的字体族名。
@@ -1843,8 +1912,8 @@ impl Axes {
         Ok(())
     }
 
-    #[doc = "添加带箭头的文本标注 (由 Rust 层实现)\n\n参数:\n    text: 标注文本\n    xy: 被标注点的坐标 (x, y)\n    xytext: 文本放置位置, 若提供则自动绘制箭头到 xy\n    fontsize: 字体大小 (默认 12.0)\n    color: 颜色\n    arrowprops: 箭头属性字典 (可选)\n    arrowstyle: 箭头样式 (可选)\n    arrowsize: 箭头大小 (默认 1.0)"]
-    #[pyo3(signature = (text, xy, xytext=None, fontsize=12.0, color="black", arrowprops=None, arrowstyle=None, arrowsize=1.0))]
+    #[doc = "添加带箭头的文本标注 (由 Rust 层实现)\n\n参数:\n    text: 标注文本\n    xy: 被标注点的坐标 (x, y)\n    xytext: 文本放置位置, 若提供且 arrowprops 非 None 则绘制箭头到 xy\n    fontsize: 字体大小 (默认 12.0)\n    color: 文本颜色\n    arrowprops: 箭头属性字典 (None 表示不画箭头; 空 dict 表示简单箭头)"]
+    #[pyo3(signature = (text, xy, xytext=None, fontsize=12.0, color="black", arrowprops=None))]
     pub fn annotate(
         &mut self,
         text: &str,
@@ -1853,34 +1922,20 @@ impl Axes {
         fontsize: f64,
         color: &str,
         arrowprops: Option<Bound<'_, PyAny>>,
-        arrowstyle: Option<String>,
-        arrowsize: f64,
     ) {
-        // 判断是否需要绘制箭头
-        let needs_arrow = xytext.is_some();
+        // 仅当 arrowprops 非 None 且提供了 xytext 时才绘制箭头（matplotlib 语义）。
+        let arrow = match (&arrowprops, xytext) {
+            (Some(props), Some(_)) => parse_arrowprops(props, color, fontsize),
+            _ => None,
+        };
         self.elements.push(PlotElement::Annotate {
             text: text.to_string(),
             xy,
             xytext,
             fontsize,
             color: color.to_string(),
+            arrow,
         });
-        // 如果有 xytext，绘制一条箭头线从 xy 指向 xytext
-        if needs_arrow {
-            let text_pos = xytext.unwrap();
-            self.elements.push(PlotElement::Arrow {
-                x1: text_pos.0,
-                y1: text_pos.1,
-                x2: xy.0,
-                y2: xy.1,
-                color: color.to_string(),
-                linewidth: 1.0 * arrowsize,
-                head_size: 8.0 * arrowsize,
-            });
-            // 忽略 arrowprops dict（简单实现即可）
-            let _ = arrowprops;
-            let _ = arrowstyle;
-        }
     }
 
     #[doc = "散点图 (支持每个点独立颜色和大小, Rust 层批量实现)\n\n参数:\n    x: x 坐标列表\n    y: y 坐标列表\n    s: 每个点的大小 (列表), 或 None 用默认\n    c: 每个点的颜色 (列表), 或 None 用默认\n    marker: 标记形状 ('o', 's', '^', 'D', '*', 'x', '+', 'v', '<', '>')\n    label: 图例标签\n    alpha: 透明度 (0.0-1.0)"]

@@ -1478,27 +1478,22 @@ def annotate(text, xy, xytext=None, fontsize=12.0, color='black', arrowprops=Non
     Args:
         text: 标注文本内容
         xy: 被标注点的坐标 (数据坐标)
-        xytext: 文本放置位置 (数据坐标)。若提供, 自动从该位置绘制箭头到 xy
+        xytext: 文本放置位置 (数据坐标)。默认与 xy 相同
         fontsize: 字体大小 (默认 12.0)
-        color: 文本和箭头颜色
-        arrowprops: 箭头属性字典 (支持 arrowstyle, arrowsize 等)
-        **kwargs: 其他关键字参数
+        color: 文本颜色
+        arrowprops: 箭头属性字典。None 表示不画箭头; 提供 (哪怕空 dict) 则从
+            xytext 绘制箭头指向 xy。支持简单箭头 (width/headwidth/headlength/
+            shrink) 与花式箭头 (arrowstyle/connectionstyle/mutation_scale/
+            shrinkA/shrinkB 等)。
+        **kwargs: 其他关键字参数 (如 xycoords/textcoords, 当前忽略)
     """
-    arrowstyle = None
-    arrowsize = 1.0
-    if arrowprops is not None:
-        if isinstance(arrowprops, dict):
-            if 'arrowstyle' in arrowprops:
-                arrowstyle = arrowprops['arrowstyle']
-            if 'arrowsize' in arrowprops:
-                arrowsize = arrowprops['arrowsize']
     text = _render_mathtext(text)
     ax = _get_axes()
     if ax is not None and hasattr(ax, 'annotate'):
-        ax.annotate(text, xy, xytext, fontsize, color, arrowprops, arrowstyle, arrowsize)
+        ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
         return _get_figure()
     fig, ax = _rsplotlib.subplots()
-    ax.annotate(text, xy, xytext, fontsize, color, arrowprops, arrowstyle, arrowsize)
+    ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
     return fig, ax
 
 

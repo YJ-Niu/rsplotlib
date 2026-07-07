@@ -503,22 +503,25 @@ ax.axline(xy1, xy2, color=None, linestyle=None, linewidth=None)
 Add arrowed text annotations.
 
 ```python
-ax.annotate(text, xy, xytext=None, fontsize=12.0, color='black',
-            arrowprops=None, arrowstyle=None, arrowsize=1.0)
+ax.annotate(text, xy, xytext=None, fontsize=12.0, color='black', arrowprops=None)
 ```
 
 **Parameters:**
 
 - `text` (str): Annotation text
 - `xy` (tuple): Coordinates of the point being annotated `(x, y)`
-- `xytext` (tuple, optional): Position to place the text. If provided, an arrow is automatically drawn from this position to `xy`
+- `xytext` (tuple, optional): Position to place the text. Defaults to `xy`
 - `fontsize` (float): Font size, default 12.0
-- `color` (str): Text and arrow color, default `'black'`
-- `arrowprops` (dict, optional): Arrow properties dictionary. Supports:
-  - `arrowstyle`: Arrow style (e.g., `'->'`, `'-|>'`)
-  - `arrowsize`: Arrow relative size
-- `arrowstyle` (str, optional): Arrow style independent of `arrowprops`
-- `arrowsize` (float, optional): Arrow size independent of `arrowprops`
+- `color` (str): Text color, default `'black'`
+- `arrowprops` (dict, optional): Arrow properties dictionary. `None` (default)
+  draws no arrow; when provided (even an empty dict) an arrow is drawn from the
+  text-box edge to `xy`. Two modes, matching matplotlib:
+  - **Simple** (no `arrowstyle` key): `width`, `headwidth`, `headlength` (points)
+    and `shrink` (fraction) produce a filled arrow.
+  - **Fancy** (`arrowstyle` given): `arrowstyle` (`'-'`, `'->'`, `'<-'`, `'<->'`,
+    `'-|>'`, `'<|-'`, `'<|-|>'`, `'simple'`, `'fancy'`, `'wedge'`),
+    `mutation_scale` (head size, defaults to font size), `shrinkA` / `shrinkB`
+    (points), `linewidth` / `lw`, `color` / `ec`, `facecolor` / `fc`, `alpha`.
 
 ### hlines / vlines (Rust-level batch implementation)
 

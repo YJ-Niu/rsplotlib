@@ -1,5 +1,40 @@
 use crate::core::colors::RgbColor;
 
+/// 标注箭头参数（对应 matplotlib annotate 的 arrowprops）。
+///
+/// `arrowprops` 为 None 时不绘制箭头；非 None（哪怕空 dict）即绘制。
+/// 两种模式：
+/// - 「花式」：提供 `arrowstyle`（如 "->"、"<->"、"-|>"），按样式画杆 + 端点箭头；
+/// - 「简单」：无 `arrowstyle`，用 `width`/`headwidth`/`headlength` 画一个实心渐变箭头。
+#[derive(Clone)]
+pub struct ArrowSpec {
+    /// 归一化后的箭头样式（"-"/"->"/"<-"/"<->"/"-|>"/"<|-"/"<|-|>"/"simple"/"fancy"/"wedge"）。
+    /// 空串表示未指定 arrowstyle（走「简单」实心箭头）。
+    pub style: String,
+    /// 描边 / 空心箭头颜色（来自 color / ec / edgecolor，回退到标注文本色）。
+    pub color: String,
+    /// 实心填充色（来自 facecolor / fc；None 时用 `color`）。
+    pub face_color: Option<String>,
+    /// 杆线宽（points）。
+    pub linewidth: f64,
+    /// 箭头头部尺寸缩放（points）；matplotlib 默认取文本字号。
+    pub mutation_scale: f64,
+    /// 文本一侧收缩量（points）。
+    pub shrink_a: f64,
+    /// 被标注点一侧收缩量（points）。
+    pub shrink_b: f64,
+    /// 「简单」箭头 `shrink`：从两端各收缩的总长度比例（0.0-0.5）。
+    pub shrink_frac: f64,
+    /// 透明度。
+    pub alpha: f64,
+    /// 「简单」箭头：杆宽（points）。
+    pub width: f64,
+    /// 「简单」箭头：头部底宽（points）。
+    pub head_width: f64,
+    /// 「简单」箭头：头部长度（points）。
+    pub head_length: f64,
+}
+
 #[derive(Clone)]
 pub enum PlotElement {
     Line {
@@ -153,6 +188,8 @@ pub enum PlotElement {
         xytext: Option<(f64, f64)>,
         fontsize: f64,
         color: String,
+        /// 箭头参数；None 表示不画箭头（仅放置文本）。
+        arrow: Option<ArrowSpec>,
     },
     Stack {
         x: Vec<f64>,
@@ -179,14 +216,5 @@ pub enum PlotElement {
         color: String,
         linestyle: String,
         linewidth: f64,
-    },
-    Arrow {
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
-        color: String,
-        linewidth: f64,
-        head_size: f64,
     },
 }
