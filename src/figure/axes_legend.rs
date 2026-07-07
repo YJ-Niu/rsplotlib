@@ -13,7 +13,7 @@ use crate::core::colors::{RgbColor, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
 use crate::figure::axes::scale_font;
-use crate::utils::font_stack;
+use crate::utils::mathtext::{self, HAlign, VAlign};
 
 /// 采样一个矩形填充区域内的代表点（3x3 网格），用于图例 "best" 位置的遮挡评估。
 fn push_rect(pts: &mut Vec<(f64, f64)>, x0: f64, x1: f64, y0: f64, y1: f64) {
@@ -530,19 +530,17 @@ where
                 )?;
             }
 
-            let legend_family = font_stack::select_family(label);
-            let legend_font: TextStyle = (legend_family.as_str(), scale_font(11.0, font_scale))
-                .into_font()
-                .color(&BLACK);
-            chart
-                .draw_series(std::iter::once(plotters::element::Text::new(
-                    label.to_string(),
-                    (x_text, y_pos),
-                    legend_font,
-                )))
-                .map_err(|e| {
-                    PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e))
-                })?;
+            mathtext::draw_math_chart(
+                chart,
+                x_text,
+                y_pos,
+                label,
+                scale_font(11.0, font_scale),
+                BLACK,
+                None,
+                HAlign::Left,
+                VAlign::Top,
+            )?;
         }
     }
     Ok(())

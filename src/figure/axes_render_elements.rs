@@ -20,6 +20,7 @@ use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
 use crate::figure::axes::scale_font;
 use crate::utils::font_stack;
+use crate::utils::mathtext::{self, HAlign, VAlign};
 
 thread_local! {
     /// SVG 后端虚线注入表。位图后端无原生 dash，需把折线切成一段段独立描边；
@@ -1290,19 +1291,19 @@ where
                     continue;
                 }
                 let fs = scale_font(*fontsize, font_scale);
-                let family_name = font_stack::resolve_font_family(text, font_family.as_deref());
-                let font: FontDesc = (family_name.as_str(), fs).into();
-                let colored_font = font.color(&to_plotters_color(*color));
                 // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
                 // 与 axhline/axvline 在同一坐标时的视觉位置一致。
-                let text_style = colored_font.pos(Pos::new(HPos::Left, VPos::Center));
-                chart
-                    .draw_series(std::iter::once(plotters::element::Text::new(
-                        text.to_string(),
-                        (txv, tyv),
-                        text_style,
-                    )))
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw text: {}", e)))?;
+                mathtext::draw_math_chart(
+                    chart,
+                    txv,
+                    tyv,
+                    text,
+                    fs,
+                    to_plotters_color(*color),
+                    font_family.as_deref(),
+                    HAlign::Left,
+                    VAlign::Center,
+                )?;
             }
             PlotElement::HLine {
                 y,
@@ -2029,18 +2030,17 @@ where
                         arrow_style,
                     )))
                     .map_err(|e| PyRuntimeError::new_err(format!("Annotate arrow: {}", e)))?;
-                let anno_family = font_stack::select_family(text);
-                let anno_style: TextStyle =
-                    FontDesc::from((anno_family.as_str(), scale_font(*fontsize, font_scale)))
-                        .color(&rgb)
-                        .pos(Pos::new(HPos::Center, VPos::Center));
-                chart
-                    .draw_series(std::iter::once(plotters::element::Text::new(
-                        text.to_string(),
-                        (txy_x, txy_y),
-                        anno_style,
-                    )))
-                    .map_err(|e| PyRuntimeError::new_err(format!("Annotate text: {}", e)))?;
+                mathtext::draw_math_chart(
+                    chart,
+                    txy_x,
+                    txy_y,
+                    text,
+                    scale_font(*fontsize, font_scale),
+                    rgb,
+                    None,
+                    HAlign::Center,
+                    VAlign::Center,
+                )?;
             }
         }
     }

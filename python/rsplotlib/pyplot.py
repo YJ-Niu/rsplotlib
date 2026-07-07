@@ -313,6 +313,365 @@ _LINESTYLE_ALIASES = {
 }
 
 
+# ==================== 轻量 mathtext (LaTeX -> Unicode) ====================
+
+# LaTeX 命令 -> Unicode。覆盖希腊字母（大小写）与常见数学符号，满足 matplotlib
+# mathtext 最常见的用法（如 r'$\mu=100,\ \sigma=15$' 渲染为 'μ=100, σ=15'）。
+# 完整的 LaTeX 数学排版（真正的上下标定位、分式、根号盒子）不在支持范围内。
+_MATHTEXT_SYMBOLS = {
+    'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'delta': 'δ', 'epsilon': 'ε',
+    'varepsilon': 'ε', 'zeta': 'ζ', 'eta': 'η', 'theta': 'θ', 'vartheta': 'ϑ',
+    'iota': 'ι', 'kappa': 'κ', 'lambda': 'λ', 'mu': 'μ', 'nu': 'ν', 'xi': 'ξ',
+    'omicron': 'ο', 'pi': 'π', 'varpi': 'ϖ', 'rho': 'ρ', 'varrho': 'ϱ',
+    'sigma': 'σ', 'varsigma': 'ς', 'tau': 'τ', 'upsilon': 'υ', 'phi': 'φ',
+    'varphi': 'φ', 'chi': 'χ', 'psi': 'ψ', 'omega': 'ω',
+    'Gamma': 'Γ', 'Delta': 'Δ', 'Theta': 'Θ', 'Lambda': 'Λ', 'Xi': 'Ξ',
+    'Pi': 'Π', 'Sigma': 'Σ', 'Upsilon': 'Υ', 'Phi': 'Φ', 'Psi': 'Ψ',
+    'Omega': 'Ω',
+    'times': '×', 'div': '÷', 'pm': '±', 'mp': '∓', 'cdot': '·',
+    'ast': '∗', 'star': '⋆', 'circ': '∘', 'bullet': '•',
+    'infty': '∞', 'partial': '∂', 'nabla': '∇', 'forall': '∀', 'exists': '∃',
+    'leq': '≤', 'le': '≤', 'geq': '≥', 'ge': '≥', 'neq': '≠', 'ne': '≠',
+    'approx': '≈', 'equiv': '≡', 'sim': '∼', 'propto': '∝', 'll': '≪',
+    'gg': '≫', 'in': '∈', 'notin': '∉', 'subset': '⊂', 'supset': '⊃',
+    'cup': '∪', 'cap': '∩', 'sum': '∑', 'prod': '∏', 'int': '∫',
+    'sqrt': '√', 'angle': '∠', 'degree': '°', 'prime': '′', 'ell': 'ℓ',
+    'hbar': 'ℏ', 'Re': 'ℜ', 'Im': 'ℑ', 'aleph': 'ℵ', 'emptyset': '∅',
+    'rightarrow': '→', 'to': '→', 'leftarrow': '←', 'gets': '←',
+    'Rightarrow': '⇒', 'Leftarrow': '⇐', 'leftrightarrow': '↔',
+    'Leftrightarrow': '⇔', 'uparrow': '↑', 'downarrow': '↓',
+    'langle': '⟨', 'rangle': '⟩', 'cdots': '⋯', 'ldots': '…', 'dots': '…',
+    'imath': 'ı', 'jmath': 'ȷ', 'wp': '℘', 'surd': '√', 'neg': '¬',
+    'perp': '⊥', 'parallel': '∥', 'therefore': '∴', 'because': '∵',
+    'oplus': '⊕', 'otimes': '⊗', 'wedge': '∧', 'vee': '∨', 'setminus': '∖',
+}
+
+# 变音符号命令 -> 组合用 Unicode 变音符（跟在基字符之后即叠加其上）。
+_ACCENTS = {
+    'hat': '\u0302', 'widehat': '\u0302', 'check': '\u030c',
+    'tilde': '\u0303', 'widetilde': '\u0303', 'acute': '\u0301',
+    'grave': '\u0300', 'bar': '\u0304', 'overline': '\u0305',
+    'breve': '\u0306', 'dot': '\u0307', 'ddot': '\u0308',
+    'dddot': '\u20db', 'ddddot': '\u20dc', 'vec': '\u20d7',
+    'overrightarrow': '\u20d7', 'mathring': '\u030a',
+}
+# 覆盖每个字符（而非仅首字符）的变音符命令。
+_ACCENTS_SPREAD = {'overline', 'widehat', 'widetilde', 'overrightarrow'}
+
+# 字体命令：仅剥离命令本身，递归转换其花括号内的内容。
+_FONT_COMMANDS = {
+    'mathrm', 'mathit', 'mathtt', 'mathcal', 'mathbb', 'mathfrak',
+    'mathsf', 'mathbf', 'mathbfit', 'mathdefault', 'mathregular',
+    'mathnormal', 'boldsymbol', 'text', 'textrm', 'textit', 'textbf',
+    'operatorname',
+}
+# \text 系列在数学模式里保留字面空格；其余字体命令与普通数学模式一致（忽略空格）。
+_TEXT_COMMANDS = {'text', 'textrm', 'textit', 'textbf'}
+# 罗马体函数名：原样输出名称本身（如 \sin -> "sin"）。
+_FUNCTION_NAMES = {
+    'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'sinh', 'cosh', 'tanh',
+    'coth', 'arcsin', 'arccos', 'arctan', 'exp', 'log', 'ln', 'lg',
+    'det', 'dim', 'ker', 'deg', 'gcd', 'hom', 'lim', 'liminf', 'limsup',
+    'max', 'min', 'sup', 'inf', 'arg', 'Pr', 'sgn',
+}
+# 需要吞掉一个 {..} 尺寸参数、输出等宽空白的间距 / 占位命令。
+_SPACE_GROUP_COMMANDS = {
+    'hspace', 'mspace', 'kern', 'mkern', 'phantom', 'hphantom', 'vphantom',
+}
+# 无参数间距命令 -> 空格。
+_SPACE_COMMANDS = {
+    'quad', 'qquad', 'thinspace', 'medspace', 'thickspace', 'space',
+    'enspace', 'negthinspace',
+}
+# 反斜杠 + 单个非字母字符 -> 空格（TeX 显式间距）。
+_BACKSLASH_SPACE = set(' ,;:><./')
+
+# 结构化数学构造的中间表示（IR）控制字符，交给 Rust 二维排版引擎解析。
+# 必须与 src/utils/mathtext.rs 中的常量完全一致：
+#   script:  START 's' base SEP sup SEP sub END
+#   frac:    START 'f' num SEP den END           （带分数线）
+#   binom:   START 'b' num SEP den END            （括号，无线）
+#   genfrac: START 'g' ld SEP rd SEP bar SEP num SEP den END
+#   sqrt:    START 'r' index SEP body END          （index 为空表示平方根）
+_IR_START = '\u0002'
+_IR_SEP = '\u001f'
+_IR_END = '\u0003'
+
+
+def _read_group(expr, i):
+    """expr[i] 为 '{'，返回 (组内内容, 右括号之后的下标)。允许花括号嵌套。"""
+    depth, i, buf = 1, i + 1, []
+    n = len(expr)
+    while i < n and depth > 0:
+        c = expr[i]
+        if c == '{':
+            depth += 1
+            buf.append(c)
+        elif c == '}':
+            depth -= 1
+            if depth > 0:
+                buf.append(c)
+        else:
+            buf.append(c)
+        i += 1
+    return ''.join(buf), i
+
+
+def _read_command(expr, i):
+    """expr[i] 为 '\\'，返回 (命令名或单字符, 之后的下标)。
+
+    命令名是紧随的连续字母；若反斜杠后为非字母，则命令为该单个字符。
+    与 TeX 一致：字母命令名后的空白被忽略（这样 '\\hat i' 的重音作用于 i）。
+    """
+    n = len(expr)
+    j = i + 1
+    if j < n and expr[j].isalpha():
+        k = j
+        while k < n and expr[k].isalpha():
+            k += 1
+        cmd = expr[j:k]
+        while k < n and expr[k] == ' ':
+            k += 1
+        return cmd, k
+    if j < n:
+        return expr[j], j + 1
+    return '', j
+
+
+def _read_atom(expr, i, keep_spaces):
+    """读取上/下标作用的“原子”，返回 (已转换的 Unicode 串, 新下标)。
+
+    原子可为 {..} 组、\\命令、或单个字符。
+    """
+    n = len(expr)
+    if i >= n:
+        return '', i
+    ch = expr[i]
+    if ch == '{':
+        content, i = _read_group(expr, i)
+        return _convert_math(content, keep_spaces), i
+    if ch == '\\':
+        _, after = _read_command(expr, i)
+        return _convert_math(expr[i:after], keep_spaces), after
+    return ch, i + 1
+
+
+def _thickness_is_zero(spec):
+    """genfrac 的分数线粗细参数是否表示“无线”（堆叠数字）。
+
+    空串表示默认线宽（有线）；数值 0（含 '0pt'/'0mm' 等单位）表示无线。
+    """
+    spec = spec.strip()
+    if not spec:
+        return False
+    for unit in ('pt', 'mm', 'cm', 'in', 'em', 'ex', 'px'):
+        if spec.endswith(unit):
+            spec = spec[:-len(unit)].strip()
+            break
+    try:
+        return float(spec) == 0.0
+    except ValueError:
+        return False
+
+
+def _convert_math(expr, keep_spaces=False):
+    """把一段数学模式文本（$...$ 内部）转换为可供渲染的字符串。
+
+    希腊字母/符号/字体命令/函数名/变音符号/间距等转换为 Unicode 文本；
+    结构化构造（^ / _ 上下标、\\frac/\\binom/\\genfrac、\\sqrt[n]{}）编码为
+    控制字符 IR（见 _IR_START 等），交给 Rust 二维排版引擎堆叠、画分数线/
+    根号盖线；无法承载二维排版的渲染站点会把 IR 降级为单行 Unicode 近似。
+    支持范围：希腊字母与常见符号命令；字体命令
+    (\\mathrm/\\mathcal/\\text ... 剥离保留内容)；函数名 (\\sin -> "sin")；
+    ^ / _ 上下标；\\frac/\\binom/\\genfrac；\\sqrt[n]{}；变音符号
+    (\\hat/\\bar/\\vec ... 组合字符)；间距命令 (\\hspace{}/\\,/\\;/\\quad ...)；
+    \\left/\\right（丢弃）。数学模式忽略字面空格（\\text{} 内保留）。
+    """
+    out = []
+    i, n = 0, len(expr)
+    while i < n:
+        ch = expr[i]
+        if ch == '\\':
+            cmd, after = _read_command(expr, i)
+            if cmd == '':
+                i = after
+                continue
+            if len(cmd) == 1 and not cmd.isalpha():
+                if cmd in _BACKSLASH_SPACE:
+                    out.append(' ')
+                elif cmd == '!':
+                    pass                       # \! 负间距 -> 忽略
+                elif cmd == '\\':
+                    out.append('\n')           # \\ -> 换行
+                else:
+                    out.append(cmd)            # \$ \% \# \& \_ \{ \} \| 等 -> 字面
+                i = after
+                continue
+            if cmd in _ACCENTS:
+                atom, i = _read_atom(expr, after, keep_spaces)
+                comb = _ACCENTS[cmd]
+                if cmd in _ACCENTS_SPREAD and atom:
+                    out.append(''.join(c + comb for c in atom))
+                elif atom:
+                    out.append(atom[0] + comb + atom[1:])
+                else:
+                    out.append(comb)
+                continue
+            if cmd in _FONT_COMMANDS:
+                if after < n and expr[after] == '{':
+                    content, i = _read_group(expr, after)
+                    out.append(_convert_math(
+                        content, keep_spaces or cmd in _TEXT_COMMANDS))
+                else:
+                    i = after
+                continue
+            if cmd == 'sqrt':
+                i = after
+                root = ''
+                if i < n and expr[i] == '[':
+                    end = expr.find(']', i)
+                    if end != -1:
+                        root, i = expr[i + 1:end], end + 1
+                if i < n and expr[i] == '{':
+                    content, i = _read_group(expr, i)
+                    body = _convert_math(content, keep_spaces)
+                else:
+                    body = ''
+                index = _convert_math(root, keep_spaces) if root else ''
+                out.append(_IR_START + 'r' + index + _IR_SEP + body + _IR_END)
+                continue
+            if cmd in ('frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'):
+                i = after
+                parts = []
+                for _ in range(2):
+                    if i < n and expr[i] == '{':
+                        grp, i = _read_group(expr, i)
+                        parts.append(_convert_math(grp, keep_spaces))
+                    else:
+                        parts.append('')
+                kind = 'b' if cmd.endswith('binom') else 'f'
+                out.append(''.join(
+                    (_IR_START, kind, parts[0], _IR_SEP, parts[1], _IR_END)))
+                continue
+            if cmd == 'genfrac':
+                i = after
+                groups = []
+                while len(groups) < 6 and i < n and expr[i] == '{':
+                    grp, i = _read_group(expr, i)
+                    groups.append(grp)
+                groups += [''] * (6 - len(groups))
+                ld = _convert_math(groups[0], keep_spaces)
+                rd = _convert_math(groups[1], keep_spaces)
+                bar_flag = '0' if _thickness_is_zero(groups[2]) else '1'
+                num = _convert_math(groups[4], keep_spaces)
+                den = _convert_math(groups[5], keep_spaces)
+                out.append(''.join(
+                    (_IR_START, 'g', ld, _IR_SEP, rd, _IR_SEP,
+                     bar_flag, _IR_SEP, num, _IR_SEP, den, _IR_END)))
+                continue
+            if cmd in _SPACE_GROUP_COMMANDS:
+                i = after
+                if i < n and expr[i] == '{':
+                    _, i = _read_group(expr, i)   # 丢弃尺寸 / 占位内容
+                out.append(' ')
+                continue
+            if cmd in ('left', 'right'):
+                i = after
+                if i < n and expr[i] == '.':
+                    i += 1                        # \left. / \right. 隐形定界符
+                continue
+            if cmd in _SPACE_COMMANDS:
+                out.append(' ')
+                i = after
+                continue
+            if cmd in _FUNCTION_NAMES:
+                out.append(cmd)
+                i = after
+                continue
+            out.append(_MATHTEXT_SYMBOLS.get(cmd, ''))  # 普通符号，未知命令丢弃
+            i = after
+            continue
+        if ch in '^_':
+            # 上/下标作用于紧邻的前一个原子（out 的最后一项）；连续的
+            # ^ 与 _ 合并到同一 base，交给 Rust 二维排版为真正的上下标。
+            base = out.pop() if out else ''
+            sup = sub = ''
+            atom, i = _read_atom(expr, i + 1, keep_spaces)
+            if ch == '^':
+                sup = atom
+            else:
+                sub = atom
+            if i < n and expr[i] in '^_':
+                ch2 = expr[i]
+                atom2, i = _read_atom(expr, i + 1, keep_spaces)
+                if ch2 == '^':
+                    sup = atom2
+                else:
+                    sub = atom2
+            out.append(''.join(
+                (_IR_START, 's', base, _IR_SEP, sup, _IR_SEP, sub, _IR_END)))
+            continue
+        if ch == '{':
+            content, i = _read_group(expr, i)
+            out.append(_convert_math(content, keep_spaces))
+            continue
+        if ch == '}':
+            i += 1
+            continue
+        if ch == '~':
+            out.append(' ')                       # ~ 不折行空格
+            i += 1
+            continue
+        if ch == ' ' and not keep_spaces:
+            i += 1                                # 数学模式忽略字面空格
+            continue
+        out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
+def _split_dollar(s):
+    """按未转义的 '$' 把字符串切成 (is_math, text) 段序列。
+
+    '\\$' 视为字面 '$' 并入所在段。返回 (segments, balanced)；balanced 为
+    False 表示未转义 '$' 为奇数个（matplotlib 语义：整串按普通文本处理）。
+    """
+    segments, buf = [], []
+    is_math, count = False, 0
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == '\\' and i + 1 < n and s[i + 1] == '$':
+            buf.append('$')                       # 转义的字面美元符
+            i += 2
+            continue
+        if c == '$':
+            segments.append((is_math, ''.join(buf)))
+            buf, is_math, count = [], not is_math, count + 1
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    segments.append((is_math, ''.join(buf)))
+    return segments, count % 2 == 0
+
+
+def _render_mathtext(s):
+    """把 matplotlib 风格的 mathtext ($...$) 转换为 Unicode 文本。
+
+    成对 $...$ 之间按数学模式转换，之外保持字面；'\\$' 为字面美元符。
+    未转义 '$' 为奇数个时整串按普通文本处理（仅把 '\\$' 归一为 '$'）。
+    非字符串或不含 '$' 时快速返回原值。
+    """
+    if not isinstance(s, str) or '$' not in s:
+        return s
+    segments, balanced = _split_dollar(s)
+    if not balanced:
+        return s.replace('\\$', '$')
+    return ''.join(
+        _convert_math(seg) if is_math else seg for is_math, seg in segments)
+
+
 def _parse_fmt(fmt):
     """解析 matplotlib 风格的格式字符串 '[marker][line][color]'。
 
@@ -940,6 +1299,7 @@ def text(x, y, s, fontdict=None, **kwargs):
     family = kwargs.get('family', None)
     if not isinstance(s, str):
         s = str(s)
+    s = _render_mathtext(s)
 
     # family 处理：若用户显式指定了字体族名，解析为本地字体文件并注册到
     # plotters 的字体数据库，这样真正驱动文本渲染（而不是被忽略）。
@@ -1060,6 +1420,7 @@ def annotate(text, xy, xytext=None, fontsize=12.0, color='black', arrowprops=Non
                 arrowstyle = arrowprops['arrowstyle']
             if 'arrowsize' in arrowprops:
                 arrowsize = arrowprops['arrowsize']
+    text = _render_mathtext(text)
     ax = _get_axes()
     if ax is not None and hasattr(ax, 'annotate'):
         ax.annotate(text, xy, xytext, fontsize, color, arrowprops, arrowstyle, arrowsize)
@@ -1150,7 +1511,7 @@ def xlabel(text, fontdict=None, loc=None, **kwargs):
         plt.xlabel("x 轴", loc="left")
     """
     family, size, color = _font_props(fontdict, kwargs)
-    return _rsplotlib.xlabel(text, color, size, family, loc)
+    return _rsplotlib.xlabel(_render_mathtext(text), color, size, family, loc)
 
 
 def ylabel(text, fontdict=None, loc=None, **kwargs):
@@ -1166,7 +1527,7 @@ def ylabel(text, fontdict=None, loc=None, **kwargs):
         plt.ylabel("y 轴", loc="top")
     """
     family, size, color = _font_props(fontdict, kwargs)
-    return _rsplotlib.ylabel(text, color, size, family, loc)
+    return _rsplotlib.ylabel(_render_mathtext(text), color, size, family, loc)
 
 
 def title(label, fontdict=None, loc=None, **kwargs):
@@ -1188,7 +1549,7 @@ def title(label, fontdict=None, loc=None, **kwargs):
     """
     family, size, color = _font_props(fontdict, kwargs)
     # 字体族名的解析与注册由 Rust 层的 set_title 统一处理。
-    return _rsplotlib.title(label, color, size, family, loc)
+    return _rsplotlib.title(_render_mathtext(label), color, size, family, loc)
 
 
 def suptitle(t, **kwargs):
@@ -1200,7 +1561,7 @@ def suptitle(t, **kwargs):
     用法:
         plt.suptitle("总标题")
     """
-    return _rsplotlib.gcf().suptitle(str(t))
+    return _rsplotlib.gcf().suptitle(_render_mathtext(str(t)))
 
 
 def grid(visible=True, **kwargs):
@@ -1730,6 +2091,8 @@ def _patch_axes():
     _orig_plot = _rs.Axes.plot
 
     def _plot(self, *args, **kwargs):
+        if isinstance(kwargs.get('label'), str):
+            kwargs['label'] = _render_mathtext(kwargs['label'])
         if len(args) == 1:
             y = args[0]
             x = list(range(len(y) if hasattr(y, '__len__') else 0))
@@ -1801,6 +2164,45 @@ def _patch_axes():
 
     _rs.Axes.set_xlim = _set_xlim
     _rs.Axes.set_ylim = _set_ylim
+
+    # 文本类方法：把 matplotlib mathtext ($...$) 转成 Unicode 后再下沉到 Rust。
+    # OO API (ax.set_xlabel / ax.text ...) 不经过模块级 plt.* 函数，需在此单独接入。
+    _orig_set_xlabel = _rs.Axes.set_xlabel
+    _orig_set_ylabel = _rs.Axes.set_ylabel
+    _orig_set_title = _rs.Axes.set_title
+
+    def _set_xlabel(self, text, *args, **kwargs):
+        return _orig_set_xlabel(self, _render_mathtext(text), *args, **kwargs)
+
+    def _set_ylabel(self, text, *args, **kwargs):
+        return _orig_set_ylabel(self, _render_mathtext(text), *args, **kwargs)
+
+    def _set_title(self, text, *args, **kwargs):
+        return _orig_set_title(self, _render_mathtext(text), *args, **kwargs)
+
+    _rs.Axes.set_xlabel = _set_xlabel
+    _rs.Axes.set_ylabel = _set_ylabel
+    _rs.Axes.set_title = _set_title
+
+    _orig_text = _rs.Axes.text
+
+    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, **kwargs):
+        # va/ha/rotation 等后端未支持的对齐参数被 **kwargs 吸收后丢弃。
+        if not isinstance(s, str):
+            s = str(s)
+        return _orig_text(self, x, y, _render_mathtext(s),
+                          fontsize=fontsize, color=color, c=c, family=family)
+
+    _rs.Axes.text = _text
+
+    _orig_annotate = _rs.Axes.annotate
+
+    def _annotate(self, text, *args, **kwargs):
+        if isinstance(text, str):
+            text = _render_mathtext(text)
+        return _orig_annotate(self, text, *args, **kwargs)
+
+    _rs.Axes.annotate = _annotate
 
     # set(**kwargs): matplotlib 语义, 每个 key 映射到 set_<key>(value)
     def _ax_set(self, **kwargs):

@@ -29,8 +29,42 @@ static FONT_STACK: OnceLock<RwLock<Vec<FontEntry>>> = OnceLock::new();
 /// 字体栈当前大小（用于快速判断是否非空，避免获取读锁）
 static FONT_STACK_LEN: AtomicUsize = AtomicUsize::new(0);
 
+/// 默认 "sans-serif" 字体的解析后 face（由 lib.rs 在启动时注册）。
+/// 供 glyph 覆盖查询使用：降级为单行 Unicode 时，若默认字体缺失某上/下标字形，
+/// 则退回普通字符，避免渲染出「豆腐块」缺字形方框。
+static DEFAULT_FACE: OnceLock<Option<OwnedFace>> = OnceLock::new();
+
 fn stack() -> &'static RwLock<Vec<FontEntry>> {
     FONT_STACK.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// 记录默认 "sans-serif" 字体二进制，解析为 face 供 glyph 覆盖查询。
+/// 幂等：仅首次调用生效（`OnceLock`）。
+pub fn set_default_face(data: Vec<u8>) {
+    DEFAULT_FACE.get_or_init(|| OwnedFace::from_vec(data, 0).ok());
+}
+
+/// 判断字符能否被实际渲染字体绘制（用于降级路径避免缺字形方框）。
+///
+/// ASCII 一律视为可渲染。否则依次检查用户注册的字体栈与默认 sans-serif face；
+/// 任一覆盖即可。若默认 face 尚未注册（未知），保守假设可渲染，以保留 Unicode
+/// 上/下标外观（宁可偶发缺字形，也不过度降级）。
+pub fn char_supported(c: char) -> bool {
+    if c.is_ascii() {
+        return true;
+    }
+    {
+        let s = stack().read().unwrap();
+        if s.iter()
+            .any(|e| e.face.as_face_ref().glyph_index(c).is_some())
+        {
+            return true;
+        }
+    }
+    match DEFAULT_FACE.get() {
+        Some(Some(face)) => face.as_face_ref().glyph_index(c).is_some(),
+        _ => true,
+    }
 }
 
 /// 判断文本是否全为 ASCII 字符。

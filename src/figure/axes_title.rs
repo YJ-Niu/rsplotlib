@@ -14,6 +14,7 @@ use pyo3::prelude::*;
 use crate::core::colors::RgbColor;
 use crate::figure::axes::scale_font;
 use crate::utils::font_stack;
+use crate::utils::mathtext::{self, HAlign, VAlign};
 
 /// 渲染 axes 标题
 ///
@@ -48,14 +49,14 @@ where
         return Ok(());
     }
     // 根据 loc 选择水平锚点与对齐方式：left→左端左对齐，right→右端右对齐，其余居中。
-    let (title_x, h_pos) = match title_loc {
-        "left" => (x_min, HPos::Left),
-        "right" => (x_max, HPos::Right),
-        _ => ((x_min + x_max) / 2.0, HPos::Center),
+    let (title_x, h_align) = match title_loc {
+        "left" => (x_min, HAlign::Left),
+        "right" => (x_max, HAlign::Right),
+        _ => ((x_min + x_max) / 2.0, HAlign::Center),
     };
     // 标题位于数据范围上方的 margin_top 区域，使用数据坐标的微小偏移
     let y_range = y_max - y_min;
-    // 标题锚点在数据区顶部，使用 VPos::Bottom 让文字向上延伸
+    // 标题锚点在数据区顶部，使用 VAlign::Bottom 让文字向上延伸
     // 偏移量设为数据范围的极小比例，确保文字位于 margin_top 区域内
     let title_y = y_max + y_range * 0.01;
     // 使用用户指定的 fontsize；若未指定则取 matplotlib 默认 12pt
@@ -64,21 +65,18 @@ where
     } else {
         9.6
     };
-    // plotters 的 ab_glyph 字体可见字符高度约 0.94em，而 matplotlib DejaVu Sans 约 1.13em。
-    // 为匹配 matplotlib 视觉高度，乘以 1.25 补偿。
-    // 优先使用用户通过 fontdict{"family": ...} 指定的字体族，否则按文本自动选择。
-    let title_family = font_stack::resolve_font_family(title, title_family);
-    let font: FontDesc = (title_family.as_str(), scale_font(title_size, font_scale)).into();
     let rgb = RGBColor(title_color.0, title_color.1, title_color.2);
-    let colored_font = font.color(&rgb);
-    let text_style: TextStyle = colored_font.pos(Pos::new(h_pos, VPos::Bottom));
-    chart
-        .draw_series(std::iter::once(plotters::element::Text::new(
-            title.to_string(),
-            (title_x, title_y),
-            text_style,
-        )))
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw title: {}", e)))?;
+    mathtext::draw_math_chart(
+        chart,
+        title_x,
+        title_y,
+        title,
+        scale_font(title_size, font_scale),
+        rgb,
+        title_family,
+        h_align,
+        VAlign::Bottom,
+    )?;
     Ok(())
 }
 
@@ -117,26 +115,28 @@ where
     if text.is_empty() {
         return Ok(());
     }
-    let (anchor_x, h_pos) = match loc {
-        "left" => (data_left, HPos::Left),
-        "right" => (data_right, HPos::Right),
-        _ => ((data_left + data_right) / 2.0, HPos::Center),
+    let (anchor_x, h_align) = match loc {
+        "left" => (data_left, HAlign::Left),
+        "right" => (data_right, HAlign::Right),
+        _ => ((data_left + data_right) / 2.0, HAlign::Center),
     };
     let size = if fontsize > 0.0 {
         fontsize
     } else {
         default_size
     };
-    let fam = font_stack::resolve_font_family(text, family);
-    let font: FontDesc = (fam.as_str(), size).into();
     let rgb = RGBColor(color.0, color.1, color.2);
-    let style: TextStyle = font.color(&rgb).pos(Pos::new(h_pos, VPos::Bottom));
-    root.draw_text(
+    mathtext::draw_math_area(
+        root,
+        anchor_x,
+        anchor_y,
         text,
-        &style,
-        (anchor_x.round() as i32, anchor_y.round() as i32),
-    )
-    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw xlabel: {}", e)))?;
+        size,
+        rgb,
+        family,
+        h_align,
+        VAlign::Bottom,
+    )?;
     Ok(())
 }
 
@@ -183,9 +183,23 @@ where
     } else {
         default_size
     };
+    let rgb = RGBColor(color.0, color.1, color.2);
+    // 含数学 IR 时走旋转二维排版引擎（真实上/下标、分式线、根号盖线）；
+    // loc 映射为阅读方向对齐：top→Top（块向下延伸）、bottom→Bottom（块向上延伸）、
+    // 其余居中。
+    if mathtext::contains_ir(text) {
+        let valign = match loc {
+            "top" => VAlign::Top,
+            "bottom" => VAlign::Bottom,
+            _ => VAlign::Center,
+        };
+        return mathtext::draw_math_area_rotated(
+            root, anchor_x, anchor_y, text, size, rgb, family, valign,
+        );
+    }
+    // 纯文本快路径：沿用 plotters 的单行 Rotate270 绘制。
     let fam = font_stack::resolve_font_family(text, family);
     let font: FontDesc = (fam.as_str(), size).into();
-    let rgb = RGBColor(color.0, color.1, color.2);
     // VPos::Top 使旋转后文字向右（朝向坐标轴）延伸，贴近 y 标签区左缘。
     let style: TextStyle = font
         .color(&rgb)

@@ -2305,7 +2305,7 @@ impl Axes {
             let x_cat_fmt = move |v: &f64| -> String {
                 for (t, l) in &xtick_label_map {
                     if (t - *v).abs() < 1e-6 {
-                        return l.clone();
+                        return crate::utils::mathtext::to_plain(l);
                     }
                 }
                 crate::figure::axes_mesh::format_linear_tick(*v)
@@ -2322,7 +2322,7 @@ impl Axes {
             let y_cat_fmt = move |v: &f64| -> String {
                 for (t, l) in &ytick_label_map {
                     if (t - *v).abs() < 1e-6 {
-                        return l.clone();
+                        return crate::utils::mathtext::to_plain(l);
                     }
                 }
                 crate::figure::axes_mesh::format_linear_tick(*v)
@@ -2372,12 +2372,19 @@ impl Axes {
             // xlabel/ylabel 用 plotters 内置 x_desc/y_desc 自动定位，共用 axis_desc_style。
             // 但 plotters 只能居中；当 loc 非居中时，此处传空串禁用内置绘制，
             // 改由 figure.rs 在 root 上按绝对像素手动绘制（见 axes_title::draw_{x,y}label_manual）。
-            let x_desc_text = if self.xlabel_loc == "center" {
+            // 居中且**含数学 IR** 的标签同样传空串禁用内置绘制，改由 figure.rs 走二维排版引擎
+            // （xlabel 水平二维；ylabel 旋转二维），以真实呈现上/下标、分式、根号等。
+            // 仅「居中 + 纯文本」才由 plotters 内置绘制。
+            let x_desc_text = if self.xlabel_loc == "center"
+                && !crate::utils::mathtext::contains_ir(&self.xlabel)
+            {
                 self.xlabel.clone()
             } else {
                 String::new()
             };
-            let y_desc_text = if self.ylabel_loc == "center" {
+            let y_desc_text = if self.ylabel_loc == "center"
+                && !crate::utils::mathtext::contains_ir(&self.ylabel)
+            {
                 self.ylabel.clone()
             } else {
                 String::new()

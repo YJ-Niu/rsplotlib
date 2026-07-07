@@ -507,7 +507,9 @@ impl Figure {
         let _ncols = self.ncols;
 
         if !self.suptitle.is_empty() {
-            let sup_family = font_stack::select_family(&self.suptitle);
+            // plotters 的 titled() 无法承载二维排版，把可能含 IR 的文本降级为单行近似。
+            let sup_plain = crate::utils::mathtext::to_plain(&self.suptitle);
+            let sup_family = font_stack::select_family(&sup_plain);
             let sup_size = 12.0 * font_scale;
             // plotters 的 titled() 会把标题带贴着画布顶边（起始 y=0），显得太靠上。
             // 先给顶部留一段内边距（约半个字号），使总标题下移，接近 matplotlib
@@ -516,7 +518,7 @@ impl Figure {
             let sup_top_pad = (sup_size * 0.5).round() as i32;
             let _ = root
                 .margin(sup_top_pad, 0, 0, 0)
-                .titled(&self.suptitle, (sup_family.as_str(), sup_size));
+                .titled(&sup_plain, (sup_family.as_str(), sup_size));
         }
 
         let total_w = actual_w as f64;
@@ -738,12 +740,17 @@ impl Figure {
                 Some(&fig_subplot_info),
             )?;
 
-            // 非居中的 xlabel/ylabel：plotters 的 x_desc/y_desc 只能居中，
-            // Axes::render 已在 loc 非居中时禁用内置 desc，这里用绝对像素在 root 上手动绘制。
+            // 非居中的 xlabel/ylabel，或居中但含数学 IR 的标签：plotters 的 x_desc/y_desc
+            // 只能居中且无法承载二维排版，Axes::render 已在这些情形禁用内置 desc，
+            // 这里用绝对像素在 root 上手动绘制（含二维排版）。
             // 数据区四边的绝对像素坐标（与 plotters 布局一致）：
             //   data_left = chart_x0 + y_label_area, data_right = chart_x0 + chart_w
             //   data_top  = chart_y0 + margin_top,   data_bottom = chart_y0 + chart_h - x_label_area
-            if !ax.xlabel.is_empty() && ax.xlabel_loc != "center" {
+            let x_manual = !ax.xlabel.is_empty()
+                && (ax.xlabel_loc != "center" || crate::utils::mathtext::contains_ir(&ax.xlabel));
+            let y_manual = !ax.ylabel.is_empty()
+                && (ax.ylabel_loc != "center" || crate::utils::mathtext::contains_ir(&ax.ylabel));
+            if x_manual {
                 let tick_px = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
                 let data_left = chart_x0 + y_label_actual as f64;
                 let data_right = chart_x0 + chart_w;
@@ -765,7 +772,7 @@ impl Figure {
                     chart_y0 + chart_h,
                 )?;
             }
-            if !ax.ylabel.is_empty() && ax.ylabel_loc != "center" {
+            if y_manual {
                 let tick_px = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
                 let data_top = chart_y0 + margin_top as f64;
                 let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
@@ -885,7 +892,12 @@ fn measure_max_text_width(labels: &[String], font_size: f64) -> u32 {
     labels
         .iter()
         .filter(|s| !s.is_empty())
-        .filter_map(|s| font.box_size(s).ok().map(|(w, _)| w))
+        // 刻度标签渲染时含 IR 会被降级为单行 Unicode，测量也用降级后的文本
+        // 以保证预留宽度与实际渲染一致。
+        .filter_map(|s| {
+            let plain = crate::utils::mathtext::to_plain(s);
+            font.box_size(&plain).ok().map(|(w, _)| w)
+        })
         .max()
         .unwrap_or(0)
 }

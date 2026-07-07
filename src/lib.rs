@@ -11,6 +11,20 @@ use crate::figure::axes::Axes;
 use crate::figure::axis::{Axis, Patch, Spine, SpineDict};
 use crate::figure::figure::Figure;
 
+/// 把一份字体二进制注册为 plotters 的 "sans-serif" family，
+/// 并同时记录其 face 供降级路径的 glyph 覆盖查询（见 `font_stack::char_supported`）。
+/// 返回是否注册成功。
+fn install_default_sans(font_data: Vec<u8>) -> bool {
+    let face_copy = font_data.clone();
+    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+    if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+        crate::utils::font_stack::set_default_face(face_copy);
+        true
+    } else {
+        false
+    }
+}
+
 #[pymodule]
 fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 字体注册策略说明：
@@ -45,13 +59,11 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         ];
         let mut registered = false;
         for path in &font_candidates {
-            if let Ok(font_data) = std::fs::read(path) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
-                {
-                    registered = true;
-                    break; // 找到第一个能用的就停，保证只用单一字体
-                }
+            if let Ok(font_data) = std::fs::read(path)
+                && install_default_sans(font_data)
+            {
+                registered = true;
+                break; // 找到第一个能用的就停，保证只用单一字体
             }
         }
         if !registered {
@@ -72,9 +84,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
                     "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
                 );
                 if let Ok(font_data) = std::fs::read(&p) {
-                    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                    let _ =
-                        register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    install_default_sans(font_data);
                     break;
                 }
             }
@@ -95,13 +105,11 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         ];
         let mut registered = false;
         for path in &font_candidates {
-            if let Ok(font_data) = std::fs::read(path) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
-                {
-                    registered = true;
-                    break;
-                }
+            if let Ok(font_data) = std::fs::read(path)
+                && install_default_sans(font_data)
+            {
+                registered = true;
+                break;
             }
         }
         if !registered {
@@ -122,9 +130,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
                     "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
                 );
                 if let Ok(font_data) = std::fs::read(&p) {
-                    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                    let _ =
-                        register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    install_default_sans(font_data);
                     break;
                 }
             }
@@ -140,21 +146,18 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         ];
         let mut registered = false;
         for path in &font_candidates {
-            if let Ok(font_data) = std::fs::read(path) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
-                {
-                    registered = true;
-                    break;
-                }
+            if let Ok(font_data) = std::fs::read(path)
+                && install_default_sans(font_data)
+            {
+                registered = true;
+                break;
             }
         }
         if !registered {
             // 退回 Arial
             let p = "C:/Windows/Fonts/arial.ttf".to_string();
             if let Ok(font_data) = std::fs::read(&p) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                install_default_sans(font_data);
             }
         }
     }
