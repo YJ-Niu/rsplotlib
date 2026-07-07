@@ -34,6 +34,15 @@ static FONT_STACK_LEN: AtomicUsize = AtomicUsize::new(0);
 /// 则退回普通字符，避免渲染出「豆腐块」缺字形方框。
 static DEFAULT_FACE: OnceLock<Option<OwnedFace>> = OnceLock::new();
 
+/// 数学字母回退字体（family 名 + 解析后 face），由 lib.rs 在启动时注册。
+///
+/// 默认 sans（macOS 上为 Arial Unicode MS）只覆盖 BMP，缺 SMP 的
+/// 「Mathematical Alphanumeric Symbols」块（U+1D400–1D7FF），因此
+/// `\mathcal{A}`(𝒜)、`\mathbb{Z}`(ℤ) 等花体/黑板体字母无字形。这里额外挂一个
+/// STIX 类字体作为**最后回退**：仅当字体栈与默认字体都无法覆盖文本时才选它，
+/// 从而让这些数学字母真正渲染出来，且不影响普通文本的字体选择。
+static MATH_FACE: OnceLock<Option<(String, OwnedFace)>> = OnceLock::new();
+
 fn stack() -> &'static RwLock<Vec<FontEntry>> {
     FONT_STACK.get_or_init(|| RwLock::new(Vec::new()))
 }
@@ -42,6 +51,17 @@ fn stack() -> &'static RwLock<Vec<FontEntry>> {
 /// 幂等：仅首次调用生效（`OnceLock`）。
 pub fn set_default_face(data: Vec<u8>) {
     DEFAULT_FACE.get_or_init(|| OwnedFace::from_vec(data, 0).ok());
+}
+
+/// 记录数学字母回退字体（family 名 + 二进制），解析为 face 供覆盖查询与选择。
+/// 调用方须保证该 family 已用相同名称 `register_font` 到 plotters，方能被绘制。
+/// 幂等：仅首次调用生效（`OnceLock`）。
+pub fn set_math_face(family: String, data: Vec<u8>) {
+    MATH_FACE.get_or_init(|| OwnedFace::from_vec(data, 0).ok().map(|f| (family, f)));
+}
+
+fn math_face() -> Option<&'static (String, OwnedFace)> {
+    MATH_FACE.get().and_then(|o| o.as_ref())
 }
 
 /// 判断字符能否被实际渲染字体绘制（用于降级路径避免缺字形方框）。
@@ -60,6 +80,13 @@ pub fn char_supported(c: char) -> bool {
         {
             return true;
         }
+    }
+    // 数学字母回退字体（STIX 类）覆盖 SMP 数学字母块，让 \mathcal/\mathbb 等
+    // 字母不被降级为普通 ASCII。
+    if let Some((_, face)) = math_face()
+        && face.as_face_ref().glyph_index(c).is_some()
+    {
+        return true;
     }
     match DEFAULT_FACE.get() {
         Some(Some(face)) => face.as_face_ref().glyph_index(c).is_some(),
@@ -146,27 +173,37 @@ pub fn clear_font_stack() {
 /// 如果没有任何字体能完全覆盖，返回 `"sans-serif"` 作为降级。
 pub fn select_family(text: &str) -> String {
     let len = FONT_STACK_LEN.load(Ordering::Relaxed);
-    if len == 0 {
-        return "sans-serif".to_string();
-    }
 
     // 快速路径：纯 ASCII 文本直接使用第一个字体
     // （第一个字体通常是西文字体，必然能覆盖所有 ASCII 字符）
     if is_ascii_text(text) {
-        let s = stack().read().unwrap();
-        if let Some(first) = s.first() {
-            return first.family.clone();
+        if len > 0 {
+            let s = stack().read().unwrap();
+            if let Some(first) = s.first() {
+                return first.family.clone();
+            }
         }
         return "sans-serif".to_string();
     }
 
     // 慢路径：遍历所有字体，找第一个能覆盖全部字符的
-    let s = stack().read().unwrap();
-    for entry in s.iter() {
-        if can_render_text(&entry.face, text) {
-            return entry.family.clone();
+    if len > 0 {
+        let s = stack().read().unwrap();
+        for entry in s.iter() {
+            if can_render_text(&entry.face, text) {
+                return entry.family.clone();
+            }
         }
     }
+
+    // 数学字母回退：栈内无字体能覆盖（通常因文本含 SMP 数学字母，如 \mathcal/
+    // \mathbb），若 STIX 类数学字体能覆盖全部字符则用它，让花体/黑板体字母真正显示。
+    if let Some((fam, face)) = math_face()
+        && can_render_text(face, text)
+    {
+        return fam.clone();
+    }
+
     "sans-serif".to_string()
 }
 

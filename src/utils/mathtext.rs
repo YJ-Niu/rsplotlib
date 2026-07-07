@@ -772,11 +772,11 @@ fn layout_sqrt(index: Option<&Node>, body: &Node, size: f64, family: &str) -> La
     let vth = (0.05 * size).max(1.0);
     let body_h = b.up + b.down;
     // 根号字形放大以贴近内容高度。
-    let rad_size = (body_h / 0.72).max(size);
+    let rad_size = body_h.max(size);
     let rad_w = text_width("√", family, rad_size);
     // 盖线与内容的间距随根号字形大小缩放：√ 越大其顶端越高，盖线也应相应上移，
     // 才能与放大的根号符号顶端衔接（用 size 会使大根号的盖线偏低、贴住内容）。
-    let gap = SQRT_GAP * rad_size * 0.77;
+    let gap = SQRT_GAP * rad_size * 0.43;
 
     // n 次根：先布局指数，为其在根号左侧预留宽度（指数与根号斜线部分重叠，
     // 因此只预留其大部分宽度，而非全宽）。
@@ -818,8 +818,8 @@ fn layout_sqrt(index: Option<&Node>, body: &Node, size: f64, family: &str) -> La
     }
     let vin_y = -(b.up + gap);
     rules.push(Rule {
-        x0: bx * 1.1,
-        x1: bx + b.width * 1.1,
+        x0: bx * 1.08,
+        x1: bx + b.width * 1.08,
         y: vin_y,
         thick: vth,
     });

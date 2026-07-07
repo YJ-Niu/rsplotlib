@@ -530,17 +530,25 @@ where
                 )?;
             }
 
+            // 图例文字相对线条/marker 略微上移以视觉居中：普通文字上移 20%，
+            // 含数学排版（上/下标、分式、根号等）的文字块更高，上移 45%。
+            let label_fs = scale_font(11.0, font_scale);
+            let text_nudge = if mathtext::contains_ir(label) {
+                -0.45 * label_fs
+            } else {
+                -0.2 * label_fs
+            };
             mathtext::draw_math_chart(
                 chart,
                 x_text,
                 y_pos,
                 label,
-                scale_font(11.0, font_scale),
+                label_fs,
                 BLACK,
                 None,
                 HAlign::Left,
                 VAlign::Top,
-                -0.4 * scale_font(11.0, font_scale),
+                text_nudge,
             )?;
         }
     }
