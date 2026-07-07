@@ -508,7 +508,7 @@ impl Figure {
 
         if !self.suptitle.is_empty() {
             let sup_family = font_stack::select_family(&self.suptitle);
-            let sup_size = 21.0 * 1.30 * font_scale;
+            let sup_size = 12.0 * font_scale;
             // plotters 的 titled() 会把标题带贴着画布顶边（起始 y=0），显得太靠上。
             // 先给顶部留一段内边距（约半个字号），使总标题下移，接近 matplotlib
             // suptitle 默认 y≈0.98 的观感。返回的子区域丢弃，子图仍绘制在原 root 上，

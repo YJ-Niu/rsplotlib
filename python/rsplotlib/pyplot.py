@@ -75,6 +75,18 @@ def _replace_from_data(value, data):
     return value
 
 
+def _categorical(vals):
+    """分类坐标支持：若 vals 是含字符串的序列，返回 (等距整数位置, 标签列表)；
+    否则原样返回 (vals, None)。与 matplotlib 一致——字符串映射到 0,1,2,... 位置，
+    字符串本身作为该轴刻度标签。
+    """
+    seq = _to_list(vals)
+    if isinstance(seq, (list, tuple)) and any(isinstance(v, str) for v in seq):
+        labels = [str(v) for v in seq]
+        return list(range(len(seq))), labels
+    return vals, None
+
+
 def _is_scatter_sequence(obj):
     """判断是否为序列（含 rsnumpy 数组），但排除字符串标量。"""
     if obj is None or isinstance(obj, str):
@@ -188,6 +200,14 @@ def _get_figure():
         return _rsplotlib.gcf()
     except Exception:
         return None
+
+
+def _apply_axes_label(ax, label):
+    """将 label 应用到子图（若后端支持 set_label）；否则静默忽略。"""
+    if label is not None:
+        setter = getattr(ax, 'set_label', None)
+        if setter is not None:
+            setter(label)
 
 
 def _route_to_ax(ax_method_name, module_method, *args, **kwargs):
@@ -386,7 +406,14 @@ def plot(*args, **kwargs):
             # fmt 解析出的样式作为默认值, 不覆盖用户显式传入的关键字参数
             for key, value in _parse_fmt(fmt).items():
                 call_kwargs.setdefault(key, value)
+        # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
+        x, x_tick_labels = _categorical(x)
+        y, y_tick_labels = _categorical(y)
         result = _route_to_ax('plot', _call, x, y, **call_kwargs)
+        if x_tick_labels is not None:
+            xticks(list(range(len(x_tick_labels))), x_tick_labels)
+        if y_tick_labels is not None:
+            yticks(list(range(len(y_tick_labels))), y_tick_labels)
     return result
 
 
@@ -428,11 +455,18 @@ def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
     kwargs['vmax'] = vmax
     a = 1.0 if alpha is None else alpha
     label = kwargs.pop('label', None)
+    # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
+    x, x_tick_labels = _categorical(x)
+    y, y_tick_labels = _categorical(y)
     use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label=label, alpha=a, kwargs=kwargs)
     if use_multi:
         result = _route_to_ax('scatter_multi', _rsplotlib.scatter_multi, *args)
     else:
         result = _route_to_ax('scatter', _rsplotlib.scatter, *args)
+    if x_tick_labels is not None:
+        xticks(list(range(len(x_tick_labels))), x_tick_labels)
+    if y_tick_labels is not None:
+        yticks(list(range(len(y_tick_labels))), y_tick_labels)
     if mappable is not None:
         ax = _get_axes()
         if ax is not None and hasattr(ax, 'set_mappable'):
@@ -1316,9 +1350,76 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     return fig, _AxesArray(flat, (nrows, ncols))
 
 
-def subplot(nrows, ncols, index, **kwargs):
-    """创建单个子图。"""
-    return _rsplotlib.subplot(nrows, ncols, index)
+def subplot(*args, **kwargs):
+    """在当前 figure 中添加一个子图 (Axes)，兼容 matplotlib 的调用签名。
+
+    调用签名:
+        subplot(nrows, ncols, index, **kwargs)
+        subplot(pos, **kwargs)   # pos 为三位整数, 如 subplot(131) 等价于 subplot(1, 3, 1)
+        subplot(**kwargs)        # 无位置参数, 默认为 (1, 1, 1)
+
+    *args 描述子图位置, 可为下列之一:
+        - 三个整数 (nrows, ncols, index): 子图占据 nrows 行 ncols 列网格中的 index
+          位置, index 从左上角的 1 开始向右递增。index 也可为二元组 (first, last)
+          (基于 1, 含 last), 表示子图跨越 first 到 last 的格子, 例如
+          subplot(3, 1, (1, 2)) 创建一个跨越上部 2/3 的子图。
+        - 一个三位整数 (如 131 等价于 1, 3, 1), 仅在子图数不超过 9 时可用。
+        - 一个 SubplotSpec。
+
+    关键字参数:
+        projection: 投影类型。当前后端仅支持默认的直角坐标 (rectilinear),
+                    其他值被接受但不生效。
+        polar (bool): 为 True 时等价于 projection='polar' (当前后端不支持, 接受但不生效)。
+        sharex, sharey: 与之共享 x / y 轴的 Axes (当前接受但不生效)。
+        label (str): 返回 Axes 的标签。
+
+    Returns:
+        Axes: 新建或已存在的子图。
+    """
+    polar = kwargs.pop('polar', False)
+    projection = kwargs.pop('projection', None)
+    kwargs.pop('sharex', None)
+    kwargs.pop('sharey', None)
+    label = kwargs.pop('label', None)
+    if polar and projection is None:
+        projection = 'polar'
+
+    if len(args) == 0:
+        nrows, ncols, index = 1, 1, 1
+    elif len(args) == 1:
+        pos = args[0]
+        if hasattr(pos, 'rowStart'):  # SubplotSpec
+            nrows, ncols, index = _spec_to_grid(pos)
+        elif isinstance(pos, int) and not isinstance(pos, bool):
+            if not 100 <= pos <= 999:
+                raise ValueError(f"整数子图参数必须是三位数 (如 131)，收到 {pos}")
+            nrows, ncols, index = pos // 100, (pos // 10) % 10, pos % 10
+        else:
+            raise TypeError("subplot() 单参数形式仅支持三位整数 (如 131) 或 SubplotSpec")
+    elif len(args) == 3:
+        nrows, ncols, index = args
+    else:
+        raise TypeError(
+            f"subplot() 需要 0 个、1 个 (三位整数 / SubplotSpec) 或 3 个位置参数，收到 {len(args)}"
+        )
+
+    # index 既可为整数（单格子）也可为 (first, last) 二元组（跨格子），原生 subplot 均支持。
+    ax = _rsplotlib.subplot(nrows, ncols, index)[1]
+    _apply_axes_label(ax, label)
+    return ax
+
+
+def _spec_to_grid(spec):
+    """将 SubplotSpec 转换为 (nrows, ncols, (first, last))，供原生 subplot 使用。
+
+    SubplotSpec 用 0 基、rowStop/colStop 为开区间上界的方式描述网格跨度；
+    这里换算为基于 1、含端点的线性 (first, last) 索引。
+    """
+    nrows = int(spec.numRows)
+    ncols = int(spec.numCols)
+    first = int(spec.rowStart) * ncols + int(spec.colStart) + 1
+    last = (int(spec.rowStop) - 1) * ncols + (int(spec.colStop) - 1) + 1
+    return nrows, ncols, (first, last)
 
 
 def tight_layout(**kwargs):
