@@ -49,6 +49,19 @@ def _to_list_recursive(obj):
     return obj
 
 
+def _to_seq(obj):
+    """一维数值参数的透传辅助：暴露 __array_interface__ 的数组原样返回，
+    交由 Rust 层零拷贝读取原始缓冲区（避免 .tolist() 生成大量 Python 对象）；
+    其余对象（Python list/tuple、标量）走 _to_list 保持原行为。
+
+    仅用于纯数值、直接下沉给 Rust 的坐标/长度参数，不用于需在 Python 侧
+    做类别检测或逐元素判断的参数。
+    """
+    if obj is not None and hasattr(obj, '__array_interface__'):
+        return obj
+    return _to_list(obj)
+
+
 def _is_scatter_sequence(obj):
     """判断是否为序列（含 rsnumpy 数组），但排除字符串标量。"""
     if obj is None or isinstance(obj, str):
@@ -97,8 +110,8 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
     - mappable: None 或 (cmap名, vmin, vmax)，当 c 为数值数组经 colormap 映射时给出，
       供随后的 plt.colorbar() 绘制颜色条。
     """
-    x = _to_list(x)
-    y = _to_list(y)
+    x = _to_seq(x)
+    y = _to_seq(y)
     n = len(x) if hasattr(x, '__len__') else 0
     marker = marker or 'o'
     if c is None:
@@ -416,7 +429,7 @@ def bar(x, height, width=0.8, color=None, label=None):
         plt.bar(["A", "B", "C"], [1, 2, 3])  # 字符串 x 作为类别标签
     """
     x = _to_list(x)
-    height = _to_list(height)
+    height = _to_seq(height)
     # 类别型 x：x 为字符串序列时，柱子落在 0,1,2,... 位置，字符串作为 x 轴刻度标签。
     tick_labels = None
     if isinstance(x, (list, tuple)) and any(isinstance(v, str) for v in x):
@@ -439,7 +452,7 @@ def barh(y, width, height=0.8, color=None, label=None):
         label: 图例标签
     """
     y = _to_list(y)
-    width = _to_list(width)
+    width = _to_seq(width)
     # 类别型 y：y 为字符串序列时，柱子落在 0,1,2,... 位置，字符串作为 y 轴刻度标签。
     tick_labels = None
     if isinstance(y, (list, tuple)) and any(isinstance(v, str) for v in y):
@@ -605,9 +618,9 @@ def fill_between(x, y1, y2=0.0, color=None, alpha=0.3, label=None, **kwargs):
         alpha: 透明度 (0.0-1.0, 默认 0.3)
         label: 图例标签
     """
-    x = _to_list(x)
-    y1 = _to_list(y1)
-    y2 = _to_list(y2)
+    x = _to_seq(x)
+    y1 = _to_seq(y1)
+    y2 = _to_seq(y2)
     return _route_to_ax('fill_between', _rsplotlib.fill_between, x, y1, y2, color, alpha, label)
 
 
@@ -627,10 +640,10 @@ def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsiz
         label: 图例标签
         capsize: 误差棒末端横线长度 (默认 3.0)
     """
-    x = _to_list(x)
-    y = _to_list(y)
-    yerr = _to_list(yerr)
-    xerr = _to_list(xerr)
+    x = _to_seq(x)
+    y = _to_seq(y)
+    yerr = _to_seq(yerr)
+    xerr = _to_seq(xerr)
     return _route_to_ax('errorbar', _rsplotlib.errorbar, x, y, yerr, xerr, fmt, color, label, capsize)
 
 
@@ -644,8 +657,8 @@ def stem(x, y, linefmt=None, markerfmt=None, label=None, **kwargs):
         markerfmt: 标记样式
         label: 图例标签
     """
-    x = _to_list(x)
-    y = _to_list(y)
+    x = _to_seq(x)
+    y = _to_seq(y)
     return _route_to_ax('stem', _rsplotlib.stem, x, y, linefmt or '-', markerfmt or 'o', label)
 
 
@@ -661,8 +674,8 @@ def step(x, y, where='pre', label=None, color=None, linestyle='-', linewidth=1.5
         linestyle: 线型
         linewidth: 线宽
     """
-    x = _to_list(x)
-    y = _to_list(y)
+    x = _to_seq(x)
+    y = _to_seq(y)
     return _route_to_ax('step', _rsplotlib.step, x, y, where, label, color, linestyle, linewidth)
 
 
@@ -706,7 +719,11 @@ def imshow(x, cmap=None, norm=None, aspect=None, interpolation=None,
            颜色渐变、无硬分界线
         norm/extent 等: 接受但当前不生效
     """
-    x = _to_list_recursive(x)
+    # numpy 风格数组（暴露 __array_interface__）直接下沉给 Rust，由底层零拷贝式
+    # 读取原始缓冲区；仅对普通 list/tuple 等才在 Python 层递归转换。避免对大图像
+    # 调用 .tolist() 生成数百万 Python 浮点对象的开销。
+    if not hasattr(x, '__array_interface__'):
+        x = _to_list_recursive(x)
     cmap = 'viridis' if cmap is None else cmap
     aspect = 'equal' if aspect is None else aspect
     return _route_to_ax('imshow', _rsplotlib.imshow, x, cmap, aspect,
@@ -729,7 +746,9 @@ def imsave(fname, arr, **kwargs):
         format: 显式指定图片格式 ('png' / 'jpeg')，缺省按扩展名推断。
         dpi: 写入 PNG 的分辨率元数据 (默认 100)。
     """
-    arr = _to_list_recursive(arr)
+    # 同 imshow：numpy 风格数组直接下沉给 Rust，避免 .tolist() 开销。
+    if not hasattr(arr, '__array_interface__'):
+        arr = _to_list_recursive(arr)
     cmap = kwargs.pop('cmap', None) or 'viridis'
     vmin = kwargs.pop('vmin', None)
     vmax = kwargs.pop('vmax', None)
@@ -758,22 +777,22 @@ def imread(fname, format=None):
 
 def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
     """绘制 x 轴对数刻度图。"""
-    x = _to_list(x)
-    y = _to_list(y)
+    x = _to_seq(x)
+    y = _to_seq(y)
     return _rsplotlib.semilogx(x, y, label, color, linestyle, marker, linewidth)
 
 
 def semilogy(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
     """绘制 y 轴对数刻度图。"""
-    x = _to_list(x)
-    y = _to_list(y)
+    x = _to_seq(x)
+    y = _to_seq(y)
     return _rsplotlib.semilogy(x, y, label, color, linestyle, marker, linewidth)
 
 
 def loglog(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
     """绘制双对数刻度图。"""
-    x = _to_list(x)
-    y = _to_list(y)
+    x = _to_seq(x)
+    y = _to_seq(y)
     return _rsplotlib.loglog(x, y, label, color, linestyle, marker, linewidth)
 
 

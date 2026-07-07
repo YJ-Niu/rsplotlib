@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyList, PyTuple};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyTuple};
 
 use plotters::style::{FontStyle, register_font};
 
@@ -639,51 +639,64 @@ pub fn imread<'py>(
         .import("rsnumpy")
         .map_err(|e| PyRuntimeError::new_err(format!("imread: cannot import rsnumpy: {}", e)))?;
 
-    // 构造嵌套数据并交由 rsnumpy.array 生成 ndarray：灰度 -> 2D，彩色 -> 3D。
-    // PNG 归一化为 [0,1] 浮点；其余格式保留 [0,255] 整数，与 matplotlib 一致。
-    if is_png {
-        if channels == 1 {
-            let data: Vec<Vec<f64>> = (0..height)
-                .map(|r| {
-                    (0..width)
-                        .map(|c| samples[r * stride + c] as f64 / 255.0)
-                        .collect()
-                })
-                .collect();
-            np.call_method1("array", (data,))
-        } else {
-            let data: Vec<Vec<Vec<f64>>> = (0..height)
-                .map(|r| {
-                    (0..width)
-                        .map(|c| {
-                            (0..channels)
-                                .map(|k| samples[r * stride + c * channels + k] as f64 / 255.0)
-                                .collect()
-                        })
-                        .collect()
-                })
-                .collect();
-            np.call_method1("array", (data,))
-        }
-    } else if channels == 1 {
-        let data: Vec<Vec<i64>> = (0..height)
-            .map(|r| (0..width).map(|c| samples[r * stride + c] as i64).collect())
-            .collect();
-        np.call_method1("array", (data,))
+    // 构造 ndarray：灰度 -> 2D，彩色 -> 3D。PNG 归一化为 [0,1] 浮点；其余格式
+    // (JPEG 等) 保留 [0,255] 整数，与 matplotlib 一致。通过 rsnumpy 的
+    // `_core.from_buffer_typed` 从紧凑字节缓冲区直接构造，避免嵌套 Python 列表
+    // 产生的百万级对象开销（大图 imread 的主要瓶颈）。
+    let shape = if channels == 1 {
+        vec![height, width]
     } else {
-        let data: Vec<Vec<Vec<i64>>> = (0..height)
-            .map(|r| {
-                (0..width)
-                    .map(|c| {
-                        (0..channels)
-                            .map(|k| samples[r * stride + c * channels + k] as i64)
-                            .collect()
-                    })
-                    .collect()
-            })
-            .collect();
-        np.call_method1("array", (data,))
+        vec![height, width, channels]
+    };
+    let row_bytes = width * channels; // 无行填充的紧凑行字节数
+    if is_png {
+        // PNG -> float64 [0,1]：直接构造 f64 小端字节缓冲区。
+        let mut buf = Vec::with_capacity(height * row_bytes * 8);
+        for r in 0..height {
+            for &b in &samples[r * stride..r * stride + row_bytes] {
+                buf.extend_from_slice(&(b as f64 / 255.0).to_le_bytes());
+            }
+        }
+        ndarray_from_bytes(py, &np, &buf, "<f8", "float64", shape)
+    } else if stride == row_bytes {
+        // JPEG 缓冲区已紧凑：以 u8 直读（值 0..255），dtype 标为 int64 与旧行为一致。
+        ndarray_from_bytes(
+            py,
+            &np,
+            &samples[..height * row_bytes],
+            "|u1",
+            "int64",
+            shape,
+        )
+    } else {
+        let mut buf = Vec::with_capacity(height * row_bytes);
+        for r in 0..height {
+            buf.extend_from_slice(&samples[r * stride..r * stride + row_bytes]);
+        }
+        ndarray_from_bytes(py, &np, &buf, "|u1", "int64", shape)
     }
+}
+
+/// 用 rsnumpy 的 `_core.from_buffer_typed` + `ndarray._wrap`，从一段紧凑（C 序）
+/// 原始字节缓冲区直接构造 ndarray，避免嵌套 Python 列表产生的百万级对象开销。
+///
+/// - `typestr`: numpy 风格类型串（如 `<f8`、`|u1`），描述 `data` 中每个元素的编码；
+/// - `dtype`: 结果 ndarray 对外呈现的 dtype 名称（如 `float64`、`int64`）。
+fn ndarray_from_bytes<'py>(
+    py: Python<'py>,
+    np: &Bound<'py, PyModule>,
+    data: &[u8],
+    typestr: &str,
+    dtype: &str,
+    shape: Vec<usize>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let core = np.getattr("_core")?;
+    let bytes = PyBytes::new(py, data);
+    let raw = core.call_method1("from_buffer_typed", (bytes, typestr, shape))?;
+    let ndarray_cls = np.getattr("ndarray")?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("_dtype", dtype)?;
+    ndarray_cls.call_method("_wrap", (raw,), Some(&kwargs))
 }
 
 #[pyfunction]
