@@ -25,6 +25,8 @@ pub enum PlotElement {
         label: Option<String>,
         alpha: f64,
         color_idx: usize,
+        edgecolor: Option<String>,
+        linewidth: Option<f64>,
     },
     ScatterMulti {
         x: Vec<f64>,
@@ -35,6 +37,8 @@ pub enum PlotElement {
         label: Option<String>,
         alpha: f64,
         color_idx: usize,
+        edgecolor: Option<String>,
+        linewidth: Option<f64>,
     },
     Bar {
         x: Vec<f64>,

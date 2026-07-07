@@ -221,7 +221,8 @@ pub fn ylim(py: Python, bottom: Option<f64>, top: Option<f64>) -> PyResult<()> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0))]
+#[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
+#[allow(clippy::too_many_arguments)]
 pub fn scatter<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -231,14 +232,16 @@ pub fn scatter<'a>(
     marker: &'a str,
     label: Option<String>,
     alpha: f64,
+    edgecolor: Option<String>,
+    linewidths: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.scatter(py, x, y, s, c, marker, label, alpha)?;
+        ax.scatter(py, x, y, s, c, marker, label, alpha, edgecolor, linewidths)?;
     })
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0))]
+#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn scatter_multi<'a>(
     py: Python<'a>,
@@ -249,9 +252,11 @@ pub fn scatter_multi<'a>(
     marker: &'a str,
     label: Option<String>,
     alpha: f64,
+    edgecolor: Option<String>,
+    linewidths: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
+        ax.scatter_multi(py, x, y, s, c, marker, label, alpha, edgecolor, linewidths)?;
     })
 }
 

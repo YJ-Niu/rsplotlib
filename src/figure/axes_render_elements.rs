@@ -38,6 +38,36 @@ pub fn clear_svg_dash_injects() {
     SVG_DASH_INJECTS.with(|c| c.borrow_mut().clear());
 }
 
+/// 解析 scatter 的 edgecolors / linewidths 到 (描边色, 描边宽度像素)。
+///
+/// - `edgecolor` 为 None / "" / "face" / "none"：返回 `(face, 0.0)`，即不额外描边——沿用填充色，
+///   `draw_marker` 中 face==edge 时不画轮廓（'x' / '+' 纯描线 marker 则用历史 2px）。
+/// - 其他颜色：解析该颜色为描边色，宽度 = `(linewidth 或 1.5 points) * marker_scale`
+///   （matplotlib linewidths 单位为 points，此处换算为像素）。
+fn resolve_marker_edge(
+    edgecolor: &Option<String>,
+    linewidth: Option<f64>,
+    face: RGBColor,
+    marker_scale: f64,
+    color_idx: usize,
+) -> (RGBColor, f64) {
+    match edgecolor.as_deref() {
+        None => (face, 0.0),
+        Some(s) => {
+            let key = s.trim().to_ascii_lowercase();
+            if key.is_empty() || key == "face" || key == "none" {
+                (face, 0.0)
+            } else {
+                let e = parse_color(s, color_idx)
+                    .map(to_plotters_color)
+                    .unwrap_or(face);
+                let lw_pt = linewidth.unwrap_or(1.5);
+                (e, (lw_pt * marker_scale).max(1.0))
+            }
+        }
+    }
+}
+
 /// 取出并清空 SVG 虚线注入表（SVG 渲染完成后调用）。
 pub fn take_svg_dash_injects() -> Vec<(String, i32, i32, String)> {
     SVG_DASH_INJECTS.with(|c| std::mem::take(&mut *c.borrow_mut()))
@@ -982,6 +1012,7 @@ where
                                     face_rgb,
                                     edge_rgb,
                                     1.0,
+                                    0.0,
                                 )
                                 .map_err(|e| {
                                     PyRuntimeError::new_err(format!("Failed to draw marker: {}", e))
@@ -999,10 +1030,14 @@ where
                 marker,
                 alpha,
                 color_idx,
+                edgecolor,
+                linewidth,
                 ..
             } => {
                 let col = parse_color(c, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
+                let (edge_rgb, edge_w) =
+                    resolve_marker_edge(edgecolor, *linewidth, rgb, marker_scale, *color_idx);
                 // matplotlib: s 是 marker 面积 (points²)，故直径 = sqrt(s) points，
                 // 像素直径 = sqrt(s) * marker_scale；draw_marker 的 size 是半径。
                 let size = (s.sqrt() * marker_scale / 2.0).max(1.0);
@@ -1010,9 +1045,10 @@ where
                     let txv = tx(xv);
                     let tyv = ty(yv);
                     if txv.is_finite() && tyv.is_finite() {
-                        draw_marker(chart, marker, txv, tyv, size, rgb, rgb, *alpha).map_err(
-                            |e| PyRuntimeError::new_err(format!("Failed to draw scatter: {}", e)),
-                        )?;
+                        draw_marker(chart, marker, txv, tyv, size, rgb, edge_rgb, *alpha, edge_w)
+                            .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw scatter: {}", e))
+                        })?;
                     }
                 }
             }
@@ -1024,6 +1060,8 @@ where
                 marker,
                 alpha,
                 color_idx,
+                edgecolor,
+                linewidth,
                 ..
             } => {
                 if x.is_empty() || y.is_empty() {
@@ -1045,6 +1083,8 @@ where
                         parse_color(&c_str, *color_idx + i).unwrap_or(default_color(*color_idx + i))
                     };
                     let rgb = to_plotters_color(col);
+                    let (edge_rgb, edge_w) =
+                        resolve_marker_edge(edgecolor, *linewidth, rgb, marker_scale, *color_idx);
                     let size = (s_list
                         .as_ref()
                         .and_then(|s| s.get(i).cloned())
@@ -1053,9 +1093,10 @@ where
                         * marker_scale
                         / 2.0)
                         .max(1.0);
-                    draw_marker(chart, marker, txv, tyv, size, rgb, rgb, *alpha).map_err(|e| {
-                        PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e))
-                    })?;
+                    draw_marker(chart, marker, txv, tyv, size, rgb, edge_rgb, *alpha, edge_w)
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw scatter_multi: {}", e))
+                        })?;
                 }
             }
             PlotElement::Bar {
@@ -1715,9 +1756,10 @@ where
                     }
                     if !fmt.is_empty() {
                         let marker_name = fmt;
-                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb, 1.0).map_err(
-                            |e| PyRuntimeError::new_err(format!("ErrorBar marker: {}", e)),
-                        )?;
+                        draw_marker(chart, marker_name, txv, tyv, 3.0, rgb, rgb, 1.0, 0.0)
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("ErrorBar marker: {}", e))
+                            })?;
                     }
                 }
             }
@@ -1763,7 +1805,7 @@ where
                     if !txv.is_finite() || !tyv.is_finite() {
                         continue;
                     }
-                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb, 1.0)
+                    draw_marker(chart, markerfmt, txv, tyv, 5.0, rgb, rgb, 1.0, 0.0)
                         .map_err(|e| PyRuntimeError::new_err(format!("Stem marker: {}", e)))?;
                 }
             }

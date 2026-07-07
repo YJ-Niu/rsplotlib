@@ -126,12 +126,12 @@ def _resolve_scatter_colors(c_vals, cmap, vmin, vmax):
     return colors, (name, lo, hi)
 
 
-def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
+def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, kwargs):
     """将 matplotlib 风格的 scatter 参数规整为对 Rust 层的调用参数。
 
     返回 (use_multi, args, mappable):
-    - use_multi=False: args = (x, y, s:float, c:str|None, marker, label, alpha)
-    - use_multi=True:  args = (x, y, s:list|None, c:list|None, marker, label, alpha)
+    - use_multi=False: args = (x, y, s:float, c:str|None, marker, label, alpha, edgecolor, linewidth)
+    - use_multi=True:  args = (x, y, s:list|None, c:list|None, marker, label, alpha, edgecolor, linewidth)
     - mappable: None 或 (cmap名, vmin, vmax)，当 c 为数值数组经 colormap 映射时给出，
       供随后的 plt.colorbar() 绘制颜色条。
     """
@@ -144,7 +144,7 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
     cmap = kwargs.pop('cmap', None)
     vmin = kwargs.pop('vmin', None)
     vmax = kwargs.pop('vmax', None)
-    # linewidths / edgecolors / norm / plotnonfinite / data 等参数当前接受但不生效
+    # norm / colorizer / plotnonfinite / data 等参数当前接受但不生效
 
     s_is_seq = _is_scatter_sequence(s)
     c_is_seq = _is_scatter_sequence(c)
@@ -168,7 +168,9 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
     use_multi = s_is_seq or (c_list is not None)
     if not use_multi:
         s_val = 100.0 if s is None else float(s)
-        return False, (x, y, s_val, c_single, marker, label, alpha), mappable
+        return (False,
+                (x, y, s_val, c_single, marker, label, alpha, edgecolor, linewidth),
+                mappable)
 
     if s_is_seq:
         s_arg = [float(v) for v in _to_list(s)]
@@ -183,7 +185,54 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
         c_arg = [c_single] * n
     else:
         c_arg = None
-    return True, (x, y, s_arg, c_arg, marker, label, alpha), mappable
+    return (True,
+            (x, y, s_arg, c_arg, marker, label, alpha, edgecolor, linewidth),
+            mappable)
+
+
+def _coerce_edgecolor(edgecolors):
+    """把 matplotlib 的 edgecolors 归一化为单个颜色字符串 (后端仅支持统一描边色)。
+
+    - 标量颜色字符串 (如 'black' / 'none' / 'face') 原样返回；
+    - 单个 RGB(A) 数值序列转为 '#rrggbb'；
+    - 逐点颜色序列取首个元素作为整体描边色；
+    - 其他情况返回 None (不描边)。
+    """
+    if edgecolors is None:
+        return None
+    if isinstance(edgecolors, str):
+        return edgecolors
+    seq = _to_list(edgecolors)
+    if isinstance(seq, (list, tuple)) and len(seq) > 0:
+        if len(seq) in (3, 4) and all(
+                not isinstance(v, str) and not _is_scatter_sequence(v) for v in seq):
+            return _rgba_to_hex(seq)
+        first = seq[0]
+        if isinstance(first, str):
+            return first
+        if _is_scatter_sequence(first):
+            return _rgba_to_hex(first)
+    return None
+
+
+def _coerce_linewidth(linewidths):
+    """把 matplotlib 的 linewidths 归一化为单个浮点数 (后端仅支持统一线宽)。
+
+    标量数值原样转 float；序列取首个元素；无法解析时返回 None (用默认 1.5)。
+    """
+    if linewidths is None:
+        return None
+    if isinstance(linewidths, bool):
+        return None
+    if isinstance(linewidths, (int, float)):
+        return float(linewidths)
+    seq = _to_list(linewidths)
+    if isinstance(seq, (list, tuple)) and len(seq) > 0:
+        try:
+            return float(seq[0])
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _get_axes():
@@ -419,26 +468,31 @@ def plot(*args, **kwargs):
 
 def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
             vmin=None, vmax=None, alpha=None, linewidths=None,
-            edgecolors=None, plotnonfinite=False, data=None, **kwargs):
+            edgecolors=None, colorizer=None, plotnonfinite=False,
+            data=None, **kwargs):
     """绘制散点图，兼容 matplotlib.pyplot.scatter 的参数签名。
 
     用法:
-        plt.scatter(x, y)                              # 默认大小 20、默认蓝色
+        plt.scatter(x, y)                              # 默认大小 100、默认蓝色
         plt.scatter(x, y, s=50, c='red')               # 统一大小和颜色
         plt.scatter(x, y, s=[10, 20, 30], c=['r','g','b'])   # 逐点大小/颜色
         plt.scatter(x, y, c=values, cmap='viridis')    # 数值经 colormap 映射
         plt.scatter(x, y, c=[[1,0,0],[0,1,0]])         # RGB(A) 二维行数组
+        plt.scatter(x, y, edgecolors='black', linewidths=1.5)  # 黑色描边
 
     Args:
         x, y: 长度相同的数据点坐标 (list / tuple / rsnumpy array)
-        s: 点大小, 默认 20; 可为标量或与点数等长的数组
+        s: 点大小, 默认 100; 可为标量或与点数等长的数组
         c: 颜色; 默认蓝色; 可为颜色字符串、颜色字符串数组、数值数组
            (配合 cmap) 或 RGB(A) 二维行数组
         marker: 标记形状, 默认 'o'
         cmap: 当 c 为数值数组时使用的 colormap 名称 (如 'viridis')
         vmin, vmax: colormap 归一化范围
         alpha: 透明度 (0.0 - 1.0)
-        norm / linewidths / edgecolors / plotnonfinite: 接受但当前不生效
+        linewidths: 标记边缘线宽 (points); 后端取统一线宽, 序列取首个元素
+        edgecolors: 标记边缘颜色; 'face'/'none' 表示不额外描边, 其他颜色启用描边
+            (后端仅支持统一描边色, 逐点颜色取首个元素)。也接受单数别名 edgecolor。
+        norm / colorizer / plotnonfinite: 接受但当前不生效
         data: 若提供 (如 dict / DataFrame)，x/y/s/c 等字符串参数将按键在 data 中查找取值
         **kwargs: 额外关键字参数 (color 将作为 c 的别名)
     """
@@ -450,6 +504,17 @@ def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
         c = _replace_from_data(c, data)
         if 'color' in kwargs:
             kwargs['color'] = _replace_from_data(kwargs['color'], data)
+    # 单数形式 edgecolor / linewidth 作为别名 (matplotlib 主用复数名)。
+    if edgecolors is None:
+        edgecolors = kwargs.pop('edgecolor', None)
+    else:
+        kwargs.pop('edgecolor', None)
+    if linewidths is None:
+        linewidths = kwargs.pop('linewidth', None)
+    else:
+        kwargs.pop('linewidth', None)
+    edgecolor = _coerce_edgecolor(edgecolors)
+    linewidth = _coerce_linewidth(linewidths)
     kwargs['cmap'] = cmap
     kwargs['vmin'] = vmin
     kwargs['vmax'] = vmax
@@ -458,7 +523,9 @@ def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
     # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
     x, x_tick_labels = _categorical(x)
     y, y_tick_labels = _categorical(y)
-    use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label=label, alpha=a, kwargs=kwargs)
+    use_multi, args, mappable = _normalize_scatter(
+        x, y, s, c, marker, label=label, alpha=a,
+        edgecolor=edgecolor, linewidth=linewidth, kwargs=kwargs)
     if use_multi:
         result = _route_to_ax('scatter_multi', _rsplotlib.scatter_multi, *args)
     else:
@@ -1689,8 +1756,25 @@ def _patch_axes():
     # scatter: 支持 c/s 为数组、数值 c + cmap、RGB(A) 二维行数组
     _orig_scatter = _rs.Axes.scatter
 
-    def _scatter(self, x, y, s=None, c=None, marker=None, label=None, alpha=1.0, **kwargs):
-        use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs)
+    def _scatter(self, x, y, s=None, c=None, marker=None, label=None, alpha=1.0,
+                 edgecolor=None, linewidth=None, **kwargs):
+        # 复数名 edgecolors/linewidths 为 matplotlib 主用形式（OO API 以关键字传入），
+        # 单数名 edgecolor/linewidth 既是别名、也是模块级 scatter() 路由过来的位置参数。
+        edgecolors = kwargs.pop('edgecolors', None)
+        linewidths = kwargs.pop('linewidths', None)
+        if edgecolor is None:
+            edgecolor = kwargs.pop('edgecolor', None)
+        else:
+            kwargs.pop('edgecolor', None)
+        if linewidth is None:
+            linewidth = kwargs.pop('linewidth', None)
+        else:
+            kwargs.pop('linewidth', None)
+        edgecolor = _coerce_edgecolor(edgecolors if edgecolors is not None else edgecolor)
+        linewidth = _coerce_linewidth(linewidths if linewidths is not None else linewidth)
+        use_multi, args, mappable = _normalize_scatter(
+            x, y, s, c, marker, label=label, alpha=alpha,
+            edgecolor=edgecolor, linewidth=linewidth, kwargs=kwargs)
         if mappable is not None:
             self.set_mappable(*mappable)
         if use_multi:

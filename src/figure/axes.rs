@@ -765,7 +765,7 @@ impl Axes {
         Ok(())
     }
 
-    #[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0))]
+    #[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn scatter(
         &mut self,
@@ -777,6 +777,8 @@ impl Axes {
         marker: &str,
         label: Option<String>,
         alpha: f64,
+        edgecolor: Option<String>,
+        linewidths: Option<f64>,
     ) -> PyResult<()> {
         let x_vec = py_to_vec_f64(&x)?;
         let y_vec = py_to_vec_f64(&y)?;
@@ -793,6 +795,8 @@ impl Axes {
             label: label.clone(),
             alpha,
             color_idx: idx,
+            edgecolor,
+            linewidth: linewidths,
         });
         if let Some(lbl) = label {
             let col =
@@ -1880,7 +1884,7 @@ impl Axes {
     }
 
     #[doc = "散点图 (支持每个点独立颜色和大小, Rust 层批量实现)\n\n参数:\n    x: x 坐标列表\n    y: y 坐标列表\n    s: 每个点的大小 (列表), 或 None 用默认\n    c: 每个点的颜色 (列表), 或 None 用默认\n    marker: 标记形状 ('o', 's', '^', 'D', '*', 'x', '+', 'v', '<', '>')\n    label: 图例标签\n    alpha: 透明度 (0.0-1.0)"]
-    #[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0))]
+    #[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn scatter_multi(
         &mut self,
@@ -1892,6 +1896,8 @@ impl Axes {
         marker: &str,
         label: Option<String>,
         alpha: f64,
+        edgecolor: Option<String>,
+        linewidths: Option<f64>,
     ) -> PyResult<()> {
         let x_vec = py_to_vec_f64(&x)?;
         let y_vec = py_to_vec_f64(&y)?;
@@ -1924,6 +1930,8 @@ impl Axes {
             label,
             alpha,
             color_idx: idx,
+            edgecolor,
+            linewidth: linewidths,
         });
         Ok(())
     }
