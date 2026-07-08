@@ -33,6 +33,95 @@ fn fmt_tick(v: f64) -> String {
     }
 }
 
+/// 对数刻度值：[vmin, vmax] 内的 10 的整数幂（如 [0.01,100] -> 0.01,0.1,1,10,100）。
+/// 值域非正或无整幂落入时退回线性 `nice_ticks`。
+fn log_decade_ticks(vmin: f64, vmax: f64) -> Vec<f64> {
+    let (lo, hi) = (vmin.min(vmax), vmin.max(vmax));
+    if lo <= 0.0 || hi <= 0.0 {
+        return nice_ticks(vmin, vmax);
+    }
+    let e_lo = lo.log10().floor() as i32;
+    let e_hi = hi.log10().ceil() as i32;
+    let mut out = Vec::new();
+    for e in e_lo..=e_hi {
+        let v = 10f64.powi(e);
+        if v >= lo * (1.0 - 1e-9) && v <= hi * (1.0 + 1e-9) {
+            out.push(v);
+        }
+    }
+    if out.is_empty() {
+        nice_ticks(vmin, vmax)
+    } else {
+        out
+    }
+}
+
+/// 对数刻度标签：10 的整数幂用简洁十进制（0.01 / 0.1 / 1 / 10 / 100），
+/// |指数| 过大时用科学计数；非整幂退回通用简洁格式。
+fn fmt_log_tick(v: f64) -> String {
+    if v <= 0.0 {
+        return fmt_tick(v);
+    }
+    let e = v.log10().round() as i32;
+    if (10f64.powi(e) - v).abs() > v.abs() * 1e-6 {
+        return fmt_tick(v);
+    }
+    if (-4..=6).contains(&e) {
+        if e >= 0 {
+            format!("{}", 10f64.powi(e) as i64)
+        } else {
+            format!("{:.*}", (-e) as usize, v)
+        }
+    } else if e >= 0 {
+        format!("1e+{:02}", e)
+    } else {
+        format!("1e-{:02}", -e)
+    }
+}
+
+/// 值 v 在色带上的归一化位置 [0,1]。线性: (v-vmin)/span；对数: 按 ln 插值。
+fn bar_frac(v: f64, vmin: f64, vmax: f64, is_log: bool) -> f64 {
+    if is_log && vmin > 0.0 && vmax > 0.0 {
+        let d = vmax.ln() - vmin.ln();
+        if d.abs() < 1e-12 {
+            0.0
+        } else {
+            (v.ln() - vmin.ln()) / d
+        }
+    } else {
+        let span = vmax - vmin;
+        if span.abs() < 1e-12 {
+            0.0
+        } else {
+            (v - vmin) / span
+        }
+    }
+}
+
+/// 颜色条刻度值与其显示标签：对数模式取 10 的幂并用对数标签，否则线性 nice_ticks。
+/// 用户显式 ticks / format 优先。
+fn colorbar_ticks_labels(spec: &ColorbarSpec) -> Vec<(f64, String)> {
+    let is_log = spec.is_log();
+    let ticks = spec.ticks.clone().unwrap_or_else(|| {
+        if is_log {
+            log_decade_ticks(spec.vmin, spec.vmax)
+        } else {
+            nice_ticks(spec.vmin, spec.vmax)
+        }
+    });
+    ticks
+        .into_iter()
+        .map(|v| {
+            let label = if is_log && spec.format.is_none() {
+                fmt_log_tick(v)
+            } else {
+                fmt_colorbar_tick(v, spec.format.as_deref())
+            };
+            (v, label)
+        })
+        .collect()
+}
+
 /// 按 matplotlib `format` 参数格式化刻度值。
 ///
 /// 支持 None（缺省简洁格式）、C 风格 `%[.prec][efgEFG]`（如 `%4.2e`、`%.3f`）与
@@ -148,7 +237,6 @@ where
     let tick_len = colorbar_tick_len(ss);
     let cmap = spec.cmap.as_str();
     let (vmin, vmax) = (spec.vmin, spec.vmax);
-    let span = vmax - vmin;
     let extend_min = matches!(spec.extend.as_str(), "both" | "min");
     let extend_max = matches!(spec.extend.as_str(), "both" | "max");
     let on_left = spec.location == "left";
@@ -222,18 +310,16 @@ where
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar border: {}", e)))?;
 
     // 刻度 + 刻度值（色带外侧）
-    let ticks = spec.ticks.clone().unwrap_or_else(|| nice_ticks(vmin, vmax));
+    let ticks = colorbar_ticks_labels(spec);
+    let is_log = spec.is_log();
     let (lo, hi) = (vmin.min(vmax), vmin.max(vmax));
     let mut tick_label_w = 0.0f64;
-    for &v in &ticks {
+    for (v, label) in &ticks {
+        let v = *v;
         if v < lo - 1e-9 || v > hi + 1e-9 {
             continue;
         }
-        let frac = if span.abs() < 1e-12 {
-            0.0
-        } else {
-            (v - vmin) / span
-        };
+        let frac = bar_frac(v, vmin, vmax, is_log);
         let y = bar_bottom - bar_len * frac;
         let (tick_x0, tick_x1, label_x, hpos) = if on_left {
             (
@@ -259,16 +345,15 @@ where
         ))
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar tick: {}", e)))?;
 
-        let label = fmt_colorbar_tick(v, spec.format.as_deref());
-        let fam = font_stack::select_family(&label);
-        if let Ok((w, _)) = (fam.as_str(), font_size).into_font().box_size(&label) {
+        let fam = font_stack::select_family(label);
+        if let Ok((w, _)) = (fam.as_str(), font_size).into_font().box_size(label) {
             tick_label_w = tick_label_w.max(w as f64);
         }
         let style: TextStyle = (fam.as_str(), font_size)
             .into_font()
             .color(&text_color)
             .pos(Pos::new(hpos, VPos::Center));
-        root.draw_text(&label, &style, (label_x.round() as i32, y.round() as i32))
+        root.draw_text(label, &style, (label_x.round() as i32, y.round() as i32))
             .map_err(|e| {
                 PyRuntimeError::new_err(format!("Failed to draw colorbar tick label: {}", e))
             })?;
@@ -322,7 +407,6 @@ where
     let tick_len = colorbar_tick_len(ss);
     let cmap = spec.cmap.as_str();
     let (vmin, vmax) = (spec.vmin, spec.vmax);
-    let span = vmax - vmin;
     let extend_min = matches!(spec.extend.as_str(), "both" | "min");
     let extend_max = matches!(spec.extend.as_str(), "both" | "max");
     let on_top = spec.location == "top";
@@ -396,17 +480,15 @@ where
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar border: {}", e)))?;
 
     // 刻度 + 刻度值（色带外侧）
-    let ticks = spec.ticks.clone().unwrap_or_else(|| nice_ticks(vmin, vmax));
+    let ticks = colorbar_ticks_labels(spec);
+    let is_log = spec.is_log();
     let (lo, hi) = (vmin.min(vmax), vmin.max(vmax));
-    for &v in &ticks {
+    for (v, label) in &ticks {
+        let v = *v;
         if v < lo - 1e-9 || v > hi + 1e-9 {
             continue;
         }
-        let frac = if span.abs() < 1e-12 {
-            0.0
-        } else {
-            (v - vmin) / span
-        };
+        let frac = bar_frac(v, vmin, vmax, is_log);
         let x = bar_left + bar_len * frac;
         let (ty0, ty1, label_y, vpos) = if on_top {
             (
@@ -432,13 +514,12 @@ where
         ))
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar tick: {}", e)))?;
 
-        let label = fmt_colorbar_tick(v, spec.format.as_deref());
-        let fam = font_stack::select_family(&label);
+        let fam = font_stack::select_family(label);
         let style: TextStyle = (fam.as_str(), font_size)
             .into_font()
             .color(&text_color)
             .pos(Pos::new(HPos::Center, vpos));
-        root.draw_text(&label, &style, (x.round() as i32, label_y.round() as i32))
+        root.draw_text(label, &style, (x.round() as i32, label_y.round() as i32))
             .map_err(|e| {
                 PyRuntimeError::new_err(format!("Failed to draw colorbar tick label: {}", e))
             })?;

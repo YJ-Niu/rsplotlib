@@ -445,7 +445,7 @@ pub fn step<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None))]
+#[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None, norm=None))]
 pub fn imshow<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -456,9 +456,20 @@ pub fn imshow<'a>(
     alpha: Option<f64>,
     origin: Option<&'a str>,
     interpolation: Option<&'a str>,
+    norm: Option<&'a str>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.imshow(&x, cmap, aspect, vmin, vmax, alpha, origin, interpolation)?;
+        ax.imshow(
+            &x,
+            cmap,
+            aspect,
+            vmin,
+            vmax,
+            alpha,
+            origin,
+            interpolation,
+            norm,
+        )?;
     })
 }
 

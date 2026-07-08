@@ -1300,7 +1300,8 @@ def imshow(x, cmap=None, norm=None, aspect=None, interpolation=None,
         interpolation: 插值方法，控制平滑程度。'nearest'/'none'/'antialiased'(默认)
            为块状显示、有明显分界线；'bilinear'/'bicubic' 等对像素做平滑上采样，
            颜色渐变、无硬分界线
-        norm/extent 等: 接受但当前不生效
+        norm: matplotlib Normalize/LogNorm 或 'linear'/'log'。LogNorm 时按对数刻度
+           归一化上色，颜色条刻度呈 10 的幂；extent 等: 接受但当前不生效
     """
     # numpy 风格数组（暴露 __array_interface__）直接下沉给 Rust，由底层零拷贝式
     # 读取原始缓冲区；仅对普通 list/tuple 等才在 Python 层递归转换。避免对大图像
@@ -1309,8 +1310,14 @@ def imshow(x, cmap=None, norm=None, aspect=None, interpolation=None,
         x = _to_list_recursive(x)
     cmap = 'viridis' if cmap is None else cmap
     aspect = 'equal' if aspect is None else aspect
-    return _route_to_ax('imshow', _rsplotlib.imshow, x, cmap, aspect,
-                        vmin, vmax, alpha, origin, interpolation)
+    vmin, vmax = _norm_vminmax(norm, vmin, vmax)
+    ax = _get_axes()
+    if ax is not None and hasattr(ax, 'imshow'):
+        ax.imshow(x, cmap=cmap, aspect=aspect, vmin=vmin, vmax=vmax,
+                  alpha=alpha, origin=origin, interpolation=interpolation, norm=norm)
+        return _get_figure()
+    return _rsplotlib.imshow(x, cmap, aspect, vmin, vmax, alpha, origin,
+                             interpolation, _norm_kind(norm))
 
 
 def imsave(fname, arr, **kwargs):
@@ -2386,6 +2393,20 @@ def _norm_vminmax(norm, vmin, vmax):
     return vmin, vmax
 
 
+def _norm_kind(norm):
+    """返回归一化类型标记 'linear' / 'log'，供 Rust 侧选择上色与颜色条刻度方式。
+
+    识别 rsplotlib.colors.Normalize/LogNorm（带 _norm_kind 属性）以及字符串
+    'log' / 'linear'；其余（含 None）默认线性。
+    """
+    if norm is None:
+        return 'linear'
+    if isinstance(norm, str):
+        return 'log' if norm.strip().lower() == 'log' else 'linear'
+    kind = getattr(norm, '_norm_kind', None)
+    return kind if kind in ('linear', 'log') else 'linear'
+
+
 def _seq_minmax(a):
     """序列/数组的 (min, max)，无法解析时返回 (None, None)。"""
     if a is None:
@@ -2518,8 +2539,8 @@ def _patch_axes():
 
     _rs.Axes.scatter = _scatter
 
-    # imshow: 吸收 matplotlib 的 norm 参数（从 Normalize/LogNorm 取 vmin/vmax），
-    # 并返回可映射句柄供 fig.colorbar 使用。Rust imshow 本身不接受 norm。
+    # imshow: 吸收 matplotlib 的 norm 参数（从 Normalize/LogNorm 取 vmin/vmax 与
+    # 归一化类型），并返回可映射句柄供 fig.colorbar 使用。
     _orig_imshow = _rs.Axes.imshow
 
     def _imshow(self, x, cmap='viridis', aspect='equal', vmin=None, vmax=None,
@@ -2528,7 +2549,8 @@ def _patch_axes():
         cmap = cmap or 'viridis'
         aspect = aspect or 'equal'
         _orig_imshow(self, x, cmap=cmap, aspect=aspect, vmin=vmin, vmax=vmax,
-                     alpha=alpha, origin=origin, interpolation=interpolation)
+                     alpha=alpha, origin=origin, interpolation=interpolation,
+                     norm=_norm_kind(norm))
         return _ScalarMappable(self)
 
     _rs.Axes.imshow = _imshow
@@ -2539,23 +2561,27 @@ def _patch_axes():
         cmap = kwargs.pop('cmap', None) or 'viridis'
         vmin = kwargs.pop('vmin', None)
         vmax = kwargs.pop('vmax', None)
-        vmin, vmax = _norm_vminmax(kwargs.pop('norm', None), vmin, vmax)
+        norm = kwargs.pop('norm', None)
+        vmin, vmax = _norm_vminmax(norm, vmin, vmax)
         z = args[2] if len(args) >= 3 else args[0]
-        self.imshow(z, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax, origin='lower')
+        self.imshow(z, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax,
+                    origin='lower', norm=norm)
         return _ScalarMappable(self)
 
     def _contourf(self, *args, **kwargs):
         cmap = kwargs.pop('cmap', None) or 'viridis'
         vmin = kwargs.pop('vmin', None)
         vmax = kwargs.pop('vmax', None)
-        vmin, vmax = _norm_vminmax(kwargs.pop('norm', None), vmin, vmax)
+        norm = kwargs.pop('norm', None)
+        vmin, vmax = _norm_vminmax(norm, vmin, vmax)
         levels = kwargs.pop('levels', None)
         if levels is not None:
             lo, hi = _seq_minmax(levels)
             vmin = lo if vmin is None else vmin
             vmax = hi if vmax is None else vmax
         z = args[2] if len(args) >= 3 else args[0]
-        self.imshow(z, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax, origin='lower')
+        self.imshow(z, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax,
+                    origin='lower', norm=norm)
         return _ScalarMappable(self)
 
     _rs.Axes.pcolormesh = _pcolormesh

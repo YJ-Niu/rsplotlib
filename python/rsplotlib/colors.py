@@ -15,6 +15,9 @@ class Normalize:
         clip: 是否将越界值裁剪到 [0, 1]。
     """
 
+    # 归一化类型标记：供 pyplot 把归一化方式（线性/对数）下沉给 Rust 上色与颜色条。
+    _norm_kind = 'linear'
+
     def __init__(self, vmin=None, vmax=None, clip=False):
         self.vmin = vmin
         self.vmax = vmax
@@ -63,6 +66,17 @@ class LogNorm(Normalize):
 
     将数据按对数刻度映射到 [0, 1]；非正值被视为越界。
     """
+
+    _norm_kind = 'log'
+
+    def autoscale_None(self, values):
+        """当 vmin/vmax 未设置时，用数据的最小正值 / 最大值填充（对数刻度要求正值）。"""
+        seq = [v for v in _flatten(values) if v > 0]
+        if seq:
+            if self.vmin is None:
+                self.vmin = min(seq)
+            if self.vmax is None:
+                self.vmax = max(seq)
 
     def _normalize_scalar(self, value):
         vmin = self.vmin

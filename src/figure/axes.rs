@@ -649,11 +649,13 @@ pub struct ColorbarSpec {
     pub extend: String,
     pub ticks: Option<Vec<f64>>,
     pub format: Option<String>,
+    /// "linear" | "log"：对数时刻度取 10 的幂、按对数位置排布。
+    pub norm: String,
 }
 
 impl ColorbarSpec {
-    /// 由 (cmap, vmin, vmax) 构造默认竖直右置颜色条（其余参数取 matplotlib 缺省）。
-    pub fn from_mappable(cmap: String, vmin: f64, vmax: f64) -> Self {
+    /// 由 (cmap, vmin, vmax, norm) 构造默认竖直右置颜色条（其余参数取 matplotlib 缺省）。
+    pub fn from_mappable(cmap: String, vmin: f64, vmax: f64, norm: String) -> Self {
         ColorbarSpec {
             cmap,
             vmin,
@@ -668,7 +670,13 @@ impl ColorbarSpec {
             extend: "neither".to_string(),
             ticks: None,
             format: None,
+            norm,
         }
+    }
+
+    /// 是否对数刻度颜色条。
+    pub fn is_log(&self) -> bool {
+        self.norm.eq_ignore_ascii_case("log")
     }
 
     /// location 为 top/bottom 即水平方向，其余为竖直方向。
@@ -745,8 +753,9 @@ pub struct Axes {
     pub yaxis_major_formatter: Option<Py<PyAny>>,
     pub x_axis_inverted: bool,
     pub y_axis_inverted: bool,
-    /// 最近一次可映射绘制 (scatter 数值 c / imshow) 的 (cmap, vmin, vmax)，供 colorbar 使用
-    pub mappable: Option<(String, f64, f64)>,
+    /// 最近一次可映射绘制 (scatter 数值 c / imshow) 的 (cmap, vmin, vmax, norm)，
+    /// 供 colorbar 使用。norm 为 "linear" 或 "log"，决定颜色条刻度方式。
+    pub mappable: Option<(String, f64, f64, String)>,
     /// 若为 Some，则渲染时在数据区某侧绘制颜色条（含方向/尺寸/端点等完整配置）。
     pub colorbar: Option<ColorbarSpec>,
     /// 纵横比：None = 'auto'（数据区填满子图框）；Some(a) = 固定比例，a 为
@@ -1484,7 +1493,7 @@ impl Axes {
         Ok((n_obj, bin_edges, None))
     }
 
-    #[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None))]
+    #[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None, norm=None))]
     pub fn imshow(
         &mut self,
         x: &Bound<'_, PyAny>,
@@ -1495,6 +1504,7 @@ impl Axes {
         alpha: Option<f64>,
         origin: Option<&str>,
         interpolation: Option<&str>,
+        norm: Option<&str>,
     ) -> PyResult<()> {
         // imshow 默认 aspect='equal'：X/Y 轴单位长度相同（图像单元为正方形），与 matplotlib 一致。
         self.aspect = parse_aspect(aspect);
@@ -1537,31 +1547,55 @@ impl Axes {
 
         // 二维标量图像：按 vmin/vmax（缺省取数据范围）归一化后经 colormap 上色。
         let data = py_to_vec_vec_f64(x)?;
+        let is_log = matches!(norm, Some(n) if n.eq_ignore_ascii_case("log"));
         let (mut auto_lo, mut auto_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        // 对数刻度要求正值：自动缩放时取最小正值作为 vmin。
+        let mut auto_lo_pos = f64::INFINITY;
         for row in &data {
             for &v in row {
                 if v.is_finite() {
                     auto_lo = auto_lo.min(v);
                     auto_hi = auto_hi.max(v);
+                    if v > 0.0 {
+                        auto_lo_pos = auto_lo_pos.min(v);
+                    }
                 }
             }
         }
+        let auto_lo = if is_log && auto_lo_pos.is_finite() {
+            auto_lo_pos
+        } else {
+            auto_lo
+        };
         let lo = vmin.unwrap_or(auto_lo);
         let hi = vmax.unwrap_or(auto_hi);
         if lo.is_finite() && hi.is_finite() {
-            self.mappable = Some((cmap.to_string(), lo, hi));
+            let norm_kind = if is_log { "log" } else { "linear" };
+            self.mappable = Some((cmap.to_string(), lo, hi, norm_kind.to_string()));
         }
+        // 归一化到 [0,1]：对数模式用 (ln v - ln lo)/(ln hi - ln lo)，非正值/无效值映射为 0。
+        let use_log = is_log && lo > 0.0 && hi > 0.0 && (hi.ln() - lo.ln()).abs() > 1e-12;
         let range = if (hi - lo).abs() < 1e-12 {
             1.0
         } else {
             hi - lo
         };
+        let log_lo = lo.ln();
+        let log_range = hi.ln() - lo.ln();
         let mut pixels: Vec<Vec<(u8, u8, u8)>> = data
             .iter()
             .map(|row| {
                 row.iter()
                     .map(|&v| {
-                        let t = ((v - lo) / range).clamp(0.0, 1.0);
+                        let t = if use_log {
+                            if v > 0.0 {
+                                ((v.ln() - log_lo) / log_range).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            }
+                        } else {
+                            ((v - lo) / range).clamp(0.0, 1.0)
+                        };
                         let c = crate::core::colormap::colormap_color(cmap, t);
                         (c.0, c.1, c.2)
                     })
@@ -1579,18 +1613,21 @@ impl Axes {
         Ok(())
     }
 
-    /// 记录最近一次可映射绘制的 (cmap, vmin, vmax)，供随后的 colorbar() 使用。
-    pub fn set_mappable(&mut self, cmap: String, vmin: f64, vmax: f64) {
-        self.mappable = Some((cmap, vmin, vmax));
+    /// 记录最近一次可映射绘制的 (cmap, vmin, vmax[, norm])，供随后的 colorbar() 使用。
+    /// norm 缺省为 "linear"（scatter 数值上色恒为线性）。
+    #[pyo3(signature = (cmap, vmin, vmax, norm=None))]
+    pub fn set_mappable(&mut self, cmap: String, vmin: f64, vmax: f64, norm: Option<String>) {
+        let norm = norm.unwrap_or_else(|| "linear".to_string());
+        self.mappable = Some((cmap, vmin, vmax, norm));
     }
 
     /// 基于当前记录的 mappable 启用颜色条；无 mappable 时按 viridis / [0,1] 兜底。
     pub fn enable_colorbar(&mut self) {
-        let (cmap, vmin, vmax) = self
+        let (cmap, vmin, vmax, norm) = self
             .mappable
             .clone()
-            .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0));
-        self.colorbar = Some(ColorbarSpec::from_mappable(cmap, vmin, vmax));
+            .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0, "linear".to_string()));
+        self.colorbar = Some(ColorbarSpec::from_mappable(cmap, vmin, vmax, norm));
     }
 
     /// 启用颜色条并应用 matplotlib `Figure.colorbar` 的完整参数。
@@ -1613,11 +1650,11 @@ impl Axes {
         ticks: Option<Vec<f64>>,
         format: Option<String>,
     ) {
-        let (cmap, vmin, vmax) = self
+        let (cmap, vmin, vmax, norm) = self
             .mappable
             .clone()
-            .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0));
-        let mut spec = ColorbarSpec::from_mappable(cmap, vmin, vmax);
+            .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0, "linear".to_string()));
+        let mut spec = ColorbarSpec::from_mappable(cmap, vmin, vmax, norm);
 
         // location 优先决定方向；仅给 orientation 时据其推导 location。
         match location.as_deref().map(|s| s.to_ascii_lowercase()) {
