@@ -811,6 +811,14 @@ def _parse_fmt(fmt):
             if marker is not None:
                 raise ValueError(f"格式字符串 {fmt!r} 中出现了重复的标记")
             marker, i = ch, i + 1
+        elif ch == 'C' and i + 1 < n and fmt[i + 1].isdigit():
+            # matplotlib 'CN' 颜色循环记号 ('C0'..'C9')：C 后跟数字，交由后端解析。
+            if color is not None:
+                raise ValueError(f"格式字符串 {fmt!r} 中出现了重复的颜色")
+            j = i + 1
+            while j < n and fmt[j].isdigit():
+                j += 1
+            color, i = fmt[i:j], j
         elif ch in color_map:
             if color is not None:
                 raise ValueError(f"格式字符串 {fmt!r} 中出现了重复的颜色")
@@ -2464,26 +2472,36 @@ def _patch_axes():
     _rs.Axes.secondary_xaxis = _secondary_xaxis
     _rs.Axes.secondary_yaxis = _secondary_yaxis
 
-    # plot: 支持单参数 ax.plot(y)
+    # plot: 支持单参数 ax.plot(y)、格式字符串 ax.plot(y, 'o')/ax.plot(x, y, 'o:r')
+    # 以及一次多条线 ax.plot(x1, y1, fmt1, x2, y2, ...)。
     _orig_plot = _rs.Axes.plot
 
     def _plot(self, *args, **kwargs):
+        _map_aliases(kwargs)
         if isinstance(kwargs.get('label'), str):
             kwargs['label'] = _render_mathtext(kwargs['label'])
-        # 日期坐标：将 datetime/date 序列的 x 转为自 1970-01-01 起天数的 float，
-        # 交由 ConciseDateFormatter 反解为日期标签。
-        if len(args) >= 2:
-            xnum = _maybe_dates_to_num(args[0])
+        pairs, _ = _parse_plot_args(args, kwargs)
+        lines = []
+        for x, y, fmt in pairs:
+            call_kwargs = dict(kwargs)
+            if fmt:
+                # fmt 解析出的样式作为默认值，不覆盖用户显式传入的关键字参数。
+                for key, value in _parse_fmt(fmt).items():
+                    call_kwargs.setdefault(key, value)
+            # 日期坐标：datetime/date 序列的 x 转为自 1970-01-01 起天数的 float。
+            xnum = _maybe_dates_to_num(x)
             if xnum is not None:
-                args = (xnum,) + tuple(args[1:])
-        if len(args) == 1:
-            y = args[0]
-            x = list(range(len(y) if hasattr(y, '__len__') else 0))
-            line = _orig_plot(self, x, y, **kwargs)
-        else:
-            line = _orig_plot(self, *args, **kwargs)
+                x = xnum
+            # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
+            x, x_tick_labels = _categorical(x)
+            y, y_tick_labels = _categorical(y)
+            lines.append(_orig_plot(self, x, y, **call_kwargs))
+            if x_tick_labels is not None:
+                self.set_xticks(list(range(len(x_tick_labels))), x_tick_labels)
+            if y_tick_labels is not None:
+                self.set_yticks(list(range(len(y_tick_labels))), y_tick_labels)
         # matplotlib: plot() 返回 Line2D 列表, 支持 `l, = ax.plot(...)` 解包。
-        return [line]
+        return lines
 
     _rs.Axes.plot = _plot
 
