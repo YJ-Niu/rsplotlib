@@ -860,9 +860,11 @@ impl Figure {
             let cb_layout: Option<(bool, String, f64, f64, f64)> = if let Some(spec) = &ax.colorbar
             {
                 let horiz = spec.is_horizontal();
-                // 厚度取自「短轴」单元格尺寸 / aspect，夹在 [6, 40]*ss。
+                // 厚度取自「短轴」单元格尺寸 / aspect，再整体加宽 1 倍（×2），
+                // 夹在 [12, 80]*ss。
                 let short_ref = if horiz { sub_w } else { sub_h };
-                let thickness = (spec.shrink * short_ref / spec.aspect).clamp(6.0 * ss, 40.0 * ss);
+                let thickness =
+                    (spec.shrink * short_ref / spec.aspect * 2.0).clamp(12.0 * ss, 80.0 * ss);
                 // pad 以窃取方向的父区尺寸为基准。
                 let steal_dim = if horiz { sub_h } else { sub_w };
                 let pad_px = (spec.pad * steal_dim).max(2.0 * ss);

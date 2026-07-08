@@ -19,7 +19,7 @@ use crate::utils::font_stack;
 
 /// 颜色条刻度短线长度（超采样像素），与图形层预算计算保持一致。
 pub fn colorbar_tick_len(ss: f64) -> f64 {
-    (4.0 * ss).max(2.0)
+    (8.0 * ss).max(4.0)
 }
 
 /// 将刻度数值格式化为简洁字符串（整数不带小数，否则保留至多两位小数）。
@@ -299,16 +299,6 @@ where
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar extend: {}", e)))?;
     }
 
-    // 内色带边框
-    root.draw(&Rectangle::new(
-        [
-            (bar_left.round() as i32, bar_top.round() as i32),
-            (bar_right.round() as i32, bar_bottom.round() as i32),
-        ],
-        border.stroke_width(1),
-    ))
-    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar border: {}", e)))?;
-
     // 刻度 + 刻度值（色带外侧）
     let ticks = colorbar_ticks_labels(spec);
     let is_log = spec.is_log();
@@ -468,16 +458,6 @@ where
         ))
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar extend: {}", e)))?;
     }
-
-    // 内色带边框
-    root.draw(&Rectangle::new(
-        [
-            (bar_left.round() as i32, bar_top.round() as i32),
-            (bar_right.round() as i32, bar_bottom.round() as i32),
-        ],
-        border.stroke_width(1),
-    ))
-    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw colorbar border: {}", e)))?;
 
     // 刻度 + 刻度值（色带外侧）
     let ticks = colorbar_ticks_labels(spec);
