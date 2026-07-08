@@ -439,9 +439,11 @@ fn parse_arrowprops(
     let shrink_a = get_f64(&["shrinkA"]).unwrap_or(2.0);
     let shrink_b = get_f64(&["shrinkB"]).unwrap_or(2.0);
     let alpha = get_f64(&["alpha"]).unwrap_or(1.0);
-    let width = get_f64(&["width"]).unwrap_or(4.0);
-    let head_width = get_f64(&["headwidth"]).unwrap_or(12.0);
-    let head_length = get_f64(&["headlength"]).unwrap_or(15.0);
+    // 简单箭头默认尺寸：杆宽 / 头宽 / 头长。相较常见默认值整体收窄、缩短 30%，
+    // 使默认箭头更纤细（杆与头均窄 30%、头长短 30%）。用户显式传值时不受影响。
+    let width = get_f64(&["width"]).unwrap_or(2.8);
+    let head_width = get_f64(&["headwidth"]).unwrap_or(8.4);
+    let head_length = get_f64(&["headlength"]).unwrap_or(10.5);
 
     Some(ArrowSpec {
         style,

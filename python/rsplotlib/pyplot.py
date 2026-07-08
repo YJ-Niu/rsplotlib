@@ -1508,7 +1508,12 @@ def axline(xy1, xy2, **kwargs):
     )
 
 
-def annotate(text, xy, xytext=None, fontsize=12.0, color='black', arrowprops=None, **kwargs):
+# annotate 默认字号：基准 12.0 随其余默认字号一并放大 DEFAULT_FONT_SCALE(=2.0) 倍。
+# 与 axes.rs 中默认字号在调用点乘以 DEFAULT_FONT_SCALE 的约定保持一致。
+_DEFAULT_ANNOTATE_FONTSIZE = 12.0 * 2.0
+
+
+def annotate(text, xy, xytext=None, fontsize=None, color='black', arrowprops=None, **kwargs):
     """在指定坐标添加文本标注, 可选带箭头。
 
     用法:
@@ -1519,7 +1524,7 @@ def annotate(text, xy, xytext=None, fontsize=12.0, color='black', arrowprops=Non
         text: 标注文本内容
         xy: 被标注点的坐标 (数据坐标)
         xytext: 文本放置位置 (数据坐标)。默认与 xy 相同
-        fontsize: 字体大小 (默认 12.0)
+        fontsize: 字体大小 (默认 None, 采用放大后的默认字号 24.0)
         color: 文本颜色
         arrowprops: 箭头属性字典。None 表示不画箭头; 提供 (哪怕空 dict) 则从
             xytext 绘制箭头指向 xy。支持简单箭头 (width/headwidth/headlength/
@@ -2771,10 +2776,16 @@ def _patch_axes():
 
     _orig_annotate = _rs.Axes.annotate
 
-    def _annotate(self, text, *args, **kwargs):
+    def _annotate(self, text, xy, xytext=None, fontsize=None,
+                  color="black", arrowprops=None, **kwargs):
+        # va/ha/xycoords 等后端未支持的参数被 **kwargs 吸收后丢弃。
         if isinstance(text, str):
             text = _render_mathtext(text)
-        return _orig_annotate(self, text, *args, **kwargs)
+        # 未显式指定 fontsize 时，默认字号随其余默认字号一并放大 DEFAULT_FONT_SCALE 倍；
+        # 用户显式传入 fontsize 则保持原值不放大。
+        if fontsize is None:
+            fontsize = _DEFAULT_ANNOTATE_FONTSIZE
+        return _orig_annotate(self, text, xy, xytext, fontsize, color, arrowprops)
 
     _rs.Axes.annotate = _annotate
 
