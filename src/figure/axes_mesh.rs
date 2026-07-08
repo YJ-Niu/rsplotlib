@@ -11,12 +11,19 @@
 //! - `compute_grid_style()`: 解析主/副网格线颜色/线宽/样式
 //! - `format_linear_tick()`: 线性刻度文本格式化（整数去 .0，小数最多 2 位）
 
+use plotters::style::IntoFont;
 use pyo3::prelude::*;
 
 use crate::core::colors::{RgbColor, parse_color};
 
-/// matplotlib 兼容的"漂亮"主刻度算法
+/// matplotlib 兼容的"漂亮"主刻度算法（默认约 7 个区间）
 pub fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
+    nice_ticks_with_intervals(min, max, 7.0)
+}
+
+/// 按目标区间数生成"漂亮"主刻度。`target_intervals` 越小步长越大、刻度越少。
+/// 供 X 轴按可用像素宽度稀释刻度使用（见 `thin_x_ticks`）。
+fn nice_ticks_with_intervals(min: f64, max: f64, target_intervals: f64) -> Vec<f64> {
     if min >= max || !min.is_finite() || !max.is_finite() {
         return vec![min, max];
     }
@@ -25,7 +32,7 @@ pub fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
         return vec![min];
     }
     // 选择合适的步长（matplotlib 的 MaxNLocator 简化版）
-    let rough = range / 7.0;
+    let rough = range / target_intervals.max(1.0);
     let mag = 10f64.powf(rough.log10().floor());
     let norm = rough / mag;
     let step = if norm < 1.5 {
@@ -50,6 +57,72 @@ pub fn nice_ticks(min: f64, max: f64) -> Vec<f64> {
         ticks.push(min);
     }
     ticks
+}
+
+/// 生成"漂亮"主刻度并保证刻度数量不超过 `max_ticks`：逐步减少目标区间数（增大步长）
+/// 直到刻度数达标，用于在子图较窄、刻度值较长时稀释 X 轴刻度以避免标签水平重叠。
+fn nice_ticks_capped(min: f64, max: f64, max_ticks: usize) -> Vec<f64> {
+    let mut intervals = max_ticks.saturating_sub(1).max(1);
+    loop {
+        let ticks = nice_ticks_with_intervals(min, max, intervals as f64);
+        if ticks.len() <= max_ticks || intervals <= 1 {
+            return ticks;
+        }
+        intervals -= 1;
+    }
+}
+
+/// 用与刻度值渲染一致的字体（"sans-serif" + 指定字号）测量单个标签的像素宽度。
+/// 度量失败时按字符数粗略估算。字号 ≤ 0 或空串返回 0。
+fn measure_label_px(label: &str, font_size: f64) -> f64 {
+    if font_size <= 0.0 || label.is_empty() {
+        return 0.0;
+    }
+    let plain = crate::utils::mathtext::to_plain(label);
+    ("sans-serif", font_size)
+        .into_font()
+        .box_size(&plain)
+        .map(|(w, _)| w as f64)
+        .unwrap_or_else(|_| plain.chars().count() as f64 * font_size * 0.6)
+}
+
+/// 当 X 轴自动刻度的标签较长而绘图区较窄时，按「绘图区像素宽 / 单个标签所需间距」上限
+/// 减少刻度数量（增大间距），避免刻度值水平重叠。
+///
+/// `plot_px_w` 为绘图区像素宽，`font_size` 为刻度值渲染像素字号，`xlog` 决定标签格式
+/// （log 轴用科学计数 `{:.1e}`）。返回稀释后的刻度；无需稀释时原样返回。
+fn thin_x_ticks(
+    ticks: Vec<f64>,
+    x_min: f64,
+    x_max: f64,
+    plot_px_w: f64,
+    font_size: f64,
+    xlog: bool,
+) -> Vec<f64> {
+    if ticks.len() <= 2 || plot_px_w < 1.0 || font_size <= 0.0 {
+        return ticks;
+    }
+    let fmt = |v: f64| -> String {
+        if xlog {
+            format!("{:.1e}", 10f64.powf(v))
+        } else {
+            format_linear_tick(v)
+        }
+    };
+    let max_w = ticks
+        .iter()
+        .map(|&v| measure_label_px(&fmt(v), font_size))
+        .fold(0.0_f64, f64::max);
+    if max_w <= 0.0 {
+        return ticks;
+    }
+    // 相邻刻度值中心间距至少为「标签宽 + 约一个字符空隙」，保证水平不重叠。
+    let min_center = max_w + font_size * 0.6;
+    let max_labels = ((plot_px_w / min_center).floor() as usize).max(2);
+    if ticks.len() <= max_labels {
+        return ticks;
+    }
+    nice_ticks_capped(x_min, x_max, max_labels)
 }
 
 const MAX_MAJOR_TICKS_FOR_MINOR: usize = 30;
@@ -93,10 +166,15 @@ pub fn compute_ticks(
     minor_grid_x_visible: bool,
     minor_grid_y_visible: bool,
     minor_grid_visible: bool,
+    x_tick_font_size: f64,
+    xlog: bool,
 ) -> TicksInfo {
     // locator 优先于 xticks_val（与 matplotlib 行为一致）：
     // locator 是动态的（基于数据范围），xticks_val 是固定的。
     // 如果用户同时设置了二者，locator 应当生效。
+    // 自动刻度（无 locator 也无显式 xticks）在标签较长、子图较窄时按像素宽度稀释，
+    // 避免刻度值水平重叠；用户显式指定的刻度 / locator 保持原样。
+    let x_auto = xaxis_major_locator.is_none() && xticks_val.is_none();
     let xticks: Vec<f64> = xaxis_major_locator
         .as_ref()
         .and_then(|locator| {
@@ -108,6 +186,18 @@ pub fn compute_ticks(
         })
         .or_else(|| xticks_val.clone())
         .unwrap_or_else(|| nice_ticks(x_min, x_max));
+    let xticks = if x_auto {
+        thin_x_ticks(
+            xticks,
+            x_min,
+            x_max,
+            plot_pixel_width as f64,
+            x_tick_font_size,
+            xlog,
+        )
+    } else {
+        xticks
+    };
 
     let yticks: Vec<f64> = yaxis_major_locator
         .as_ref()

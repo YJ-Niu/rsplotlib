@@ -13,7 +13,7 @@ use crate::core::colors::{RgbColor, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
 use crate::figure::axes::scale_font;
-use crate::utils::font_stack;
+use crate::utils::mathtext::{self, HAlign, VAlign};
 
 /// 采样一个矩形填充区域内的代表点（3x3 网格），用于图例 "best" 位置的遮挡评估。
 fn push_rect(pts: &mut Vec<(f64, f64)>, x0: f64, x1: f64, y0: f64, y1: f64) {
@@ -525,24 +525,31 @@ where
                 && !mkr.is_empty()
             {
                 let mid_x = (x_line_start + x_line_end) / 2.0;
-                draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb, rgb, 1.0).map_err(
+                draw_marker(chart, mkr, mid_x, y_pos, x_range * 0.01, rgb, rgb, 1.0, 0.0).map_err(
                     |e| PyRuntimeError::new_err(format!("Failed to draw legend marker: {}", e)),
                 )?;
             }
 
-            let legend_family = font_stack::select_family(label);
-            let legend_font: TextStyle = (legend_family.as_str(), scale_font(11.0, font_scale))
-                .into_font()
-                .color(&BLACK);
-            chart
-                .draw_series(std::iter::once(plotters::element::Text::new(
-                    label.to_string(),
-                    (x_text, y_pos),
-                    legend_font,
-                )))
-                .map_err(|e| {
-                    PyRuntimeError::new_err(format!("Failed to draw legend text: {}", e))
-                })?;
+            // 图例文字相对线条/marker 略微上移以视觉居中：普通文字上移 20%，
+            // 含数学排版（上/下标、分式、根号等）的文字块更高，上移 45%。
+            let label_fs = scale_font(11.0, font_scale);
+            let text_nudge = if mathtext::contains_ir(label) {
+                -0.45 * label_fs
+            } else {
+                -0.2 * label_fs
+            };
+            mathtext::draw_math_chart(
+                chart,
+                x_text,
+                y_pos,
+                label,
+                label_fs,
+                BLACK,
+                None,
+                HAlign::Left,
+                VAlign::Top,
+                text_nudge,
+            )?;
         }
     }
     Ok(())

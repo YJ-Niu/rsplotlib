@@ -537,24 +537,6 @@ pub fn compute_bounds(
                     }
                 }
             }
-            PlotElement::Arrow { x1, y1, x2, y2, .. } => {
-                for (xv, yv) in [(*x1, *y1), (*x2, *y2)] {
-                    let tvx = tx(xv);
-                    let tvy = ty(yv);
-                    if tvx > f64::NEG_INFINITY && tvx < x_min {
-                        x_min = tvx;
-                    }
-                    if tvx > x_max {
-                        x_max = tvx;
-                    }
-                    if tvy > f64::NEG_INFINITY && tvy < y_min {
-                        y_min = tvy;
-                    }
-                    if tvy > y_max {
-                        y_max = tvy;
-                    }
-                }
-            }
         }
     }
 

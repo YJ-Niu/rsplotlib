@@ -221,7 +221,8 @@ pub fn ylim(py: Python, bottom: Option<f64>, top: Option<f64>) -> PyResult<()> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0))]
+#[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
+#[allow(clippy::too_many_arguments)]
 pub fn scatter<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -231,14 +232,16 @@ pub fn scatter<'a>(
     marker: &'a str,
     label: Option<String>,
     alpha: f64,
+    edgecolor: Option<String>,
+    linewidths: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.scatter(py, x, y, s, c, marker, label, alpha)?;
+        ax.scatter(py, x, y, s, c, marker, label, alpha, edgecolor, linewidths)?;
     })
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0))]
+#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn scatter_multi<'a>(
     py: Python<'a>,
@@ -249,9 +252,11 @@ pub fn scatter_multi<'a>(
     marker: &'a str,
     label: Option<String>,
     alpha: f64,
+    edgecolor: Option<String>,
+    linewidths: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.scatter_multi(py, x, y, s, c, marker, label, alpha)?;
+        ax.scatter_multi(py, x, y, s, c, marker, label, alpha, edgecolor, linewidths)?;
     })
 }
 
@@ -914,18 +919,71 @@ pub fn grid_position(
     (left, right, bottom, top)
 }
 
-#[pyfunction]
-#[pyo3(signature = (nrows=1, ncols=1, index=1))]
-pub fn subplot(
-    py: Python<'_>,
+/// 计算跨越多个格子的子图位置：从 (row_start, col_start) 到 (row_stop, col_stop)
+/// （均为 0 基、含端点）构成的矩形块的外接框 (left, right, bottom, top)。
+///
+/// 用于 matplotlib 风格的 `subplot(nrows, ncols, (first, last))` 跨格子子图：
+/// 取起始格的 left/top 与终止格的 right/bottom，间距语义与 `grid_position` 一致。
+pub fn grid_position_span(
+    row_start: usize,
+    row_stop: usize,
+    col_start: usize,
+    col_stop: usize,
     nrows: usize,
     ncols: usize,
-    index: usize,
-) -> PyResult<Bound<'_, PyTuple>> {
+    wspace: f64,
+    hspace: f64,
+) -> (f64, f64, f64, f64) {
+    let (left, _, _, top) = grid_position(row_start, col_start, nrows, ncols, wspace, hspace);
+    let (_, right, bottom, _) = grid_position(row_stop, col_stop, nrows, ncols, wspace, hspace);
+    (left, right, bottom, top)
+}
+
+#[pyfunction]
+#[pyo3(signature = (nrows=1, ncols=1, index=None))]
+pub fn subplot<'py>(
+    py: Python<'py>,
+    nrows: usize,
+    ncols: usize,
+    index: Option<Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyTuple>> {
+    // index 可为整数（单格子）或 (first, last) 二元组（跨格子, 基于 1、含端点）。
+    let (first, last) = match index {
+        None => (1usize, 1usize),
+        Some(obj) => {
+            if let Ok((a, b)) = obj.extract::<(usize, usize)>() {
+                (a, b)
+            } else if let Ok(i) = obj.extract::<usize>() {
+                (i, i)
+            } else {
+                return Err(PyValueError::new_err(
+                    "subplot index 必须是整数或 (first, last) 二元组",
+                ));
+            }
+        }
+    };
+
     let total = nrows * ncols;
-    if index == 0 || index > total {
+    if first == 0 || last == 0 || first > total || last > total || first > last {
         return Err(PyValueError::new_err("Index out of range"));
     }
+
+    // 由 (first, last) 两个格子的外接框确定跨格子子图的行列范围（0 基、含端点）。
+    let (f0, l0) = (first - 1, last - 1);
+    let (r0, c0) = (f0 / ncols, f0 % ncols);
+    let (r1, c1) = (l0 / ncols, l0 % ncols);
+    let (row_start, row_stop) = (r0.min(r1), r0.max(r1));
+    let (col_start, col_stop) = (c0.min(c1), c0.max(c1));
+    let pos = grid_position_span(
+        row_start,
+        row_stop,
+        col_start,
+        col_stop,
+        nrows,
+        ncols,
+        BASE_WSPACE,
+        BASE_HSPACE,
+    );
 
     // 复用当前 figure（保留用户已设置的 figsize / dpi 等）；没有则新建一个。
     let fig_bound = match get_current_figure(py) {
@@ -937,30 +995,41 @@ pub fn subplot(
         }
     };
 
-    // 若现有网格与请求的 nrows×ncols 不一致，则重建为一个空网格，
-    // 并为每个格子写入正确的分数坐标位置；一致时直接复用，仅切换选中项。
+    // matplotlib 语义的惰性子图管理：
+    // - 网格几何 (nrows×ncols) 改变时清空重来，避免不同网格的子图叠加；
+    // - 同一位置已存在则复用（不重复创建）；否则按需新建一个子图（不预建整格网格），
+    //   使规则子图与跨格子子图 (first, last) 可在同一 figure 中共存。
     {
         let mut fig_ref = fig_bound.borrow_mut();
-        let need_rebuild =
-            fig_ref.nrows != nrows || fig_ref.ncols != ncols || fig_ref.axes_list.len() != total;
-        if need_rebuild {
+        if fig_ref.nrows != nrows || fig_ref.ncols != ncols {
             fig_ref.axes_list.clear();
             fig_ref.axes_positions.clear();
             fig_ref.nrows = nrows;
             fig_ref.ncols = ncols;
-            for k in 0..total {
+        }
+        let existing = fig_ref.axes_positions.iter().position(|p| {
+            (p.0 - pos.0).abs() < 1e-9
+                && (p.1 - pos.1).abs() < 1e-9
+                && (p.2 - pos.2).abs() < 1e-9
+                && (p.3 - pos.3).abs() < 1e-9
+        });
+        let sel = match existing {
+            Some(i) => i,
+            None => {
                 let ax_py = Py::new(py, Axes::new())?;
                 init_axes_self_py(&ax_py, py);
-                let pos =
-                    grid_position(k / ncols, k % ncols, nrows, ncols, BASE_WSPACE, BASE_HSPACE);
                 fig_ref.axes_list.push(ax_py.clone_ref(py));
                 fig_ref.axes_positions.push(pos);
+                fig_ref.axes_list.len() - 1
             }
-        }
-        fig_ref.current_axes_index = index - 1;
+        };
+        fig_ref.current_axes_index = sel;
     }
 
-    let ax_py = fig_bound.borrow().axes_list[index - 1].clone_ref(py);
+    let ax_py = {
+        let fig_ref = fig_bound.borrow();
+        fig_ref.axes_list[fig_ref.current_axes_index].clone_ref(py)
+    };
     let fig_obj = fig_bound.as_any().clone();
     let ax_obj = ax_py.bind(py).as_any().clone();
     PyTuple::new(py, [fig_obj, ax_obj])

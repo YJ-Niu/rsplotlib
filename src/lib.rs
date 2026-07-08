@@ -11,6 +11,47 @@ use crate::figure::axes::Axes;
 use crate::figure::axis::{Axis, Patch, Spine, SpineDict};
 use crate::figure::figure::Figure;
 
+/// 把一份字体二进制注册为 plotters 的 "sans-serif" family，
+/// 并同时记录其 face 供降级路径的 glyph 覆盖查询（见 `font_stack::char_supported`）。
+/// 返回是否注册成功。
+fn install_default_sans(font_data: Vec<u8>) -> bool {
+    let face_copy = font_data.clone();
+    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+    if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+        crate::utils::font_stack::set_default_face(face_copy);
+        true
+    } else {
+        false
+    }
+}
+
+/// 注册数学字母回退字体（覆盖 SMP「Mathematical Alphanumeric Symbols」块），
+/// 供 `\mathcal`/`\mathbb`/`\mathfrak`/`\mathsf`/`\mathtt` 等花体/黑板体字母渲染。
+///
+/// 用字体自身的家族名注册到 plotters，并记录到 `font_stack::MATH_FACE` 作为**最后
+/// 回退**——仅当默认 sans（如 Arial Unicode MS，只覆盖 BMP）无法覆盖含 SMP 数学
+/// 字母的文本时才被选用，不影响普通文本的字体选择。
+/// 依次尝试候选路径，注册第一个可读取且能解析出家族名的字体。
+fn install_math_fallback(candidates: &[&str]) -> bool {
+    for path in candidates {
+        let Ok(font_data) = std::fs::read(path) else {
+            continue;
+        };
+        let Some(family) = crate::utils::font_stack::extract_family_name(&font_data) else {
+            continue;
+        };
+        let face_copy = font_data.clone();
+        let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+        // family 名需在两侧一致：plotters 绘制时按此名查表，选择器也返回此名。
+        let leaked_family: &'static str = Box::leak(family.clone().into_boxed_str());
+        if register_font(leaked_family, plotters::style::FontStyle::Normal, font_ref).is_ok() {
+            crate::utils::font_stack::set_math_face(family, face_copy);
+            return true;
+        }
+    }
+    false
+}
+
 #[pymodule]
 fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 字体注册策略说明：
@@ -45,13 +86,11 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         ];
         let mut registered = false;
         for path in &font_candidates {
-            if let Ok(font_data) = std::fs::read(path) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
-                {
-                    registered = true;
-                    break; // 找到第一个能用的就停，保证只用单一字体
-                }
+            if let Ok(font_data) = std::fs::read(path)
+                && install_default_sans(font_data)
+            {
+                registered = true;
+                break; // 找到第一个能用的就停，保证只用单一字体
             }
         }
         if !registered {
@@ -72,13 +111,18 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
                     "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
                 );
                 if let Ok(font_data) = std::fs::read(&p) {
-                    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                    let _ =
-                        register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    install_default_sans(font_data);
                     break;
                 }
             }
         }
+        // 数学字母回退：Arial Unicode MS 只覆盖 BMP，缺 SMP 数学字母块；挂 STIX 让
+        // \mathcal/\mathbb 等花体/黑板体字母能完整渲染 26 个字母。
+        install_math_fallback(&[
+            "/System/Library/Fonts/Supplemental/STIXTwoMath.otf",
+            "/System/Library/Fonts/Supplemental/STIXGeneral.otf",
+            "/Library/Fonts/STIXTwoMath.otf",
+        ]);
     }
 
     #[cfg(target_os = "linux")]
@@ -95,13 +139,11 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         ];
         let mut registered = false;
         for path in &font_candidates {
-            if let Ok(font_data) = std::fs::read(path) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
-                {
-                    registered = true;
-                    break;
-                }
+            if let Ok(font_data) = std::fs::read(path)
+                && install_default_sans(font_data)
+            {
+                registered = true;
+                break;
             }
         }
         if !registered {
@@ -122,13 +164,18 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
                     "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
                 );
                 if let Ok(font_data) = std::fs::read(&p) {
-                    let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                    let _ =
-                        register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                    install_default_sans(font_data);
                     break;
                 }
             }
         }
+        // 数学字母回退：STIX（多数发行版随 matplotlib/texlive 提供）覆盖 SMP 数学字母块。
+        install_math_fallback(&[
+            "/usr/share/fonts/truetype/stix-word/STIXMath-Regular.otf",
+            "/usr/share/fonts/opentype/stix/STIXTwoMath-Regular.otf",
+            "/usr/share/fonts/stix/STIXTwoMath-Regular.otf",
+            "/usr/share/fonts/OTF/STIXTwoMath-Regular.otf",
+        ]);
     }
 
     #[cfg(target_os = "windows")]
@@ -140,23 +187,25 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         ];
         let mut registered = false;
         for path in &font_candidates {
-            if let Ok(font_data) = std::fs::read(path) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok()
-                {
-                    registered = true;
-                    break;
-                }
+            if let Ok(font_data) = std::fs::read(path)
+                && install_default_sans(font_data)
+            {
+                registered = true;
+                break;
             }
         }
         if !registered {
             // 退回 Arial
             let p = "C:/Windows/Fonts/arial.ttf".to_string();
             if let Ok(font_data) = std::fs::read(&p) {
-                let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-                let _ = register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref);
+                install_default_sans(font_data);
             }
         }
+        // 数学字母回退：Cambria Math（Windows 自带）覆盖 SMP 数学字母块。
+        install_math_fallback(&[
+            "C:/Windows/Fonts/cambria.ttc",
+            "C:/Windows/Fonts/STIXTwoMath-Regular.otf",
+        ]);
     }
 
     m.add_class::<Figure>()?;
@@ -229,6 +278,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::clear_font_stack, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::font_stack::glyph_supported, m)?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::debug_font_stack, m)?)?;
     m.add_function(wrap_pyfunction!(utils::font_stack::debug_select_family, m)?)?;
     m.add_function(wrap_pyfunction!(figure::figure::get_default_figsize, m)?)?;

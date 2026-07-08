@@ -507,8 +507,10 @@ impl Figure {
         let _ncols = self.ncols;
 
         if !self.suptitle.is_empty() {
-            let sup_family = font_stack::select_family(&self.suptitle);
-            let sup_size = 21.0 * 1.30 * font_scale;
+            // plotters 的 titled() 无法承载二维排版，把可能含 IR 的文本降级为单行近似。
+            let sup_plain = crate::utils::mathtext::to_plain(&self.suptitle);
+            let sup_family = font_stack::select_family(&sup_plain);
+            let sup_size = 12.0 * font_scale;
             // plotters 的 titled() 会把标题带贴着画布顶边（起始 y=0），显得太靠上。
             // 先给顶部留一段内边距（约半个字号），使总标题下移，接近 matplotlib
             // suptitle 默认 y≈0.98 的观感。返回的子区域丢弃，子图仍绘制在原 root 上，
@@ -516,18 +518,92 @@ impl Figure {
             let sup_top_pad = (sup_size * 0.5).round() as i32;
             let _ = root
                 .margin(sup_top_pad, 0, 0, 0)
-                .titled(&self.suptitle, (sup_family.as_str(), sup_size));
+                .titled(&sup_plain, (sup_family.as_str(), sup_size));
         }
 
         let total_w = actual_w as f64;
         let total_h = actual_h as f64;
 
+        // 规则网格：由 subplot/subplots 创建（格子数 == nrows×ncols 且多于 1 个）。
+        // 仅此类网格在渲染阶段按坐标轴标签/刻度值宽度动态调整间距；add_subplot/gridspec
+        // 等自定义布局（nrows×ncols 与格子数不符）保持原位置不变。
+        let is_regular_grid =
+            self.axes_list.len() == self.nrows * self.ncols && self.axes_list.len() > 1;
+
+        // 自适应列间距：预扫描各子图，测量右列（col>0）子图 y 刻度值 + y 轴标签向左占用的
+        // 像素宽度，以及有右邻居的子图最右端 x 刻度值向右溢出的半宽；据此反解所需的 wspace，
+        // 使右列 y 刻度值与左列绘图区/x 刻度值之间留有足够间隙。刻度值越长，列间距越大。
+        let auto_wspace = if is_regular_grid && self.ncols > 1 {
+            let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
+            let label_dist = tick_px * 2;
+            let mut max_left_ext = 0u32; // 右列子图向左延伸像素（y 刻度值 + y 标签）
+            let mut max_x_half = 0u32; // 有右邻居的子图最右 x 刻度值半宽像素
+            for (i, ax_py) in self.axes_list.iter().enumerate() {
+                let ax = ax_py.borrow(py);
+                let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
+                let col = i % self.ncols;
+                let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
+                let tick_label_h = tick_font_size.ceil() as u32;
+                let y_shown = (ax.tick_left || ax.tick_right)
+                    && (ax.spine_left || ax.spine_right)
+                    && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+                if col > 0 && y_shown {
+                    let labels = y_tick_label_strings(py, &ax, y_min, y_max);
+                    let y_tick_area = measure_max_text_width(&labels, tick_font_size) + label_dist;
+                    let ext = if ax.ylabel.is_empty() {
+                        y_tick_area + pad2
+                    } else {
+                        let base = pad6 + tick_label_h;
+                        let extra = if crate::utils::mathtext::has_script(&ax.ylabel) {
+                            (base as f64 * 1.4).round() as u32
+                        } else {
+                            base
+                        };
+                        y_tick_area + extra
+                    };
+                    max_left_ext = max_left_ext.max(ext);
+                }
+                let x_shown = (ax.tick_bottom || ax.tick_top)
+                    && (ax.spine_bottom || ax.spine_top)
+                    && !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
+                if col + 1 < self.ncols && x_shown {
+                    let xlabels: Vec<String> = crate::figure::axes_mesh::nice_ticks(x_min, x_max)
+                        .iter()
+                        .map(|&v| {
+                            if ax.xscale == "log" {
+                                format!("{:.1e}", 10f64.powf(v))
+                            } else {
+                                crate::figure::axes_mesh::format_linear_tick(v)
+                            }
+                        })
+                        .collect();
+                    max_x_half =
+                        max_x_half.max(measure_max_text_width(&xlabels, tick_font_size) / 2);
+                }
+            }
+            if max_left_ext == 0 {
+                0.0
+            } else {
+                // 反解 wspace：像素列间距 = U*wspace/(ncols + (ncols-1)*wspace) ≥ needed。
+                let needed = (max_left_ext + max_x_half + pad6) as f64;
+                let u_px = (self.subplot_right - self.subplot_left) * total_w;
+                let ncf = self.ncols as f64;
+                let denom = u_px - needed * (ncf - 1.0);
+                if denom > 1.0 {
+                    (needed * ncf / denom).clamp(0.0, 1.5)
+                } else {
+                    1.5
+                }
+            }
+        } else {
+            0.0
+        };
+
         // 规则网格（由 subplot/subplots 创建，格子数 == nrows×ncols 且多于 1 个）在渲染阶段
         // 依据坐标轴标签动态调整间距：只要有子图设置了 Y 轴标签，水平间距翻倍；只要有子图
         // 设置了 X 轴标签，垂直间距翻倍——为标签腾出空间，避免与相邻子图重叠。
+        // 水平间距再与 auto_wspace（按刻度值宽度反解）取较大者。
         // 通过 add_subplot/gridspec 等自定义布局（nrows×ncols 与格子数不符）保持原位置不变。
-        let is_regular_grid =
-            self.axes_list.len() == self.nrows * self.ncols && self.axes_list.len() > 1;
         let (grid_wspace, grid_hspace) = if is_regular_grid {
             let any_ylabel = self
                 .axes_list
@@ -542,6 +618,7 @@ impl Figure {
             } else {
                 BASE_WSPACE
             };
+            let w = w.max(auto_wspace);
             let h = if any_xlabel {
                 BASE_HSPACE * 2.0
             } else {
@@ -648,6 +725,15 @@ impl Figure {
             // plotters 把 y_desc 贴 y_label_area 左边缘、刻度值贴右边缘（近轴），故加宽 y_tick_area
             // 会自动把 ylabel 左移、远离刻度值；刻度值为空时 y_tick_area=0，ylabel 紧贴坐标轴。
             // 无标签也无刻度值时最小保留 pad2，确保 plotters 正确绘制边界 spine。
+            // 带上/下标的数学标签排版块比单行更高，离轴距离额外加 30%，避免上标/下标挤向刻度值。
+            let label_extra = |label: &str| -> u32 {
+                let base = pad6 + tick_label_size;
+                if crate::utils::mathtext::has_script(label) {
+                    (base as f64 * 1.4).round() as u32
+                } else {
+                    base
+                }
+            };
             let y_label_area = if ax.ylabel.is_empty() {
                 if y_ticklabels_shown {
                     y_tick_area + pad2
@@ -655,7 +741,7 @@ impl Figure {
                     pad2
                 }
             } else {
-                y_tick_area + pad6 + tick_label_size
+                y_tick_area + label_extra(&ax.ylabel)
             };
             let x_label_area = if ax.xlabel.is_empty() {
                 if x_ticklabels_shown {
@@ -664,7 +750,7 @@ impl Figure {
                     pad2
                 }
             } else {
-                x_tick_area + pad6 + tick_label_size
+                x_tick_area + label_extra(&ax.xlabel)
             };
 
             // 顶部边距：ax.title 是通过 chart.draw_series(Text) 渲染的，
@@ -738,12 +824,17 @@ impl Figure {
                 Some(&fig_subplot_info),
             )?;
 
-            // 非居中的 xlabel/ylabel：plotters 的 x_desc/y_desc 只能居中，
-            // Axes::render 已在 loc 非居中时禁用内置 desc，这里用绝对像素在 root 上手动绘制。
+            // 非居中的 xlabel/ylabel，或居中但含数学 IR 的标签：plotters 的 x_desc/y_desc
+            // 只能居中且无法承载二维排版，Axes::render 已在这些情形禁用内置 desc，
+            // 这里用绝对像素在 root 上手动绘制（含二维排版）。
             // 数据区四边的绝对像素坐标（与 plotters 布局一致）：
             //   data_left = chart_x0 + y_label_area, data_right = chart_x0 + chart_w
             //   data_top  = chart_y0 + margin_top,   data_bottom = chart_y0 + chart_h - x_label_area
-            if !ax.xlabel.is_empty() && ax.xlabel_loc != "center" {
+            let x_manual = !ax.xlabel.is_empty()
+                && (ax.xlabel_loc != "center" || crate::utils::mathtext::contains_ir(&ax.xlabel));
+            let y_manual = !ax.ylabel.is_empty()
+                && (ax.ylabel_loc != "center" || crate::utils::mathtext::contains_ir(&ax.ylabel));
+            if x_manual {
                 let tick_px = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
                 let data_left = chart_x0 + y_label_actual as f64;
                 let data_right = chart_x0 + chart_w;
@@ -765,7 +856,7 @@ impl Figure {
                     chart_y0 + chart_h,
                 )?;
             }
-            if !ax.ylabel.is_empty() && ax.ylabel_loc != "center" {
+            if y_manual {
                 let tick_px = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
                 let data_top = chart_y0 + margin_top as f64;
                 let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
@@ -885,7 +976,12 @@ fn measure_max_text_width(labels: &[String], font_size: f64) -> u32 {
     labels
         .iter()
         .filter(|s| !s.is_empty())
-        .filter_map(|s| font.box_size(s).ok().map(|(w, _)| w))
+        // 刻度标签渲染时含 IR 会被降级为单行 Unicode，测量也用降级后的文本
+        // 以保证预留宽度与实际渲染一致。
+        .filter_map(|s| {
+            let plain = crate::utils::mathtext::to_plain(s);
+            font.box_size(&plain).ok().map(|(w, _)| w)
+        })
         .max()
         .unwrap_or(0)
 }

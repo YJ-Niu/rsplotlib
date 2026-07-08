@@ -13,6 +13,9 @@ use pyo3::prelude::*;
 /// 只填充、不额外描边（与旧行为一致）；不同时先填充再用 edge 描出轮廓。'x' / '+' 为纯描线标记，
 /// 始终使用 edge 色。`alpha` 为透明度 (0.0-1.0)，混入填充与描边色（用于 scatter 的透明散点等）。
 ///
+/// `edge_width` 为描边/线宽（像素）。传入 `<= 0.0` 表示沿用历史默认：填充类 marker 轮廓 1px，
+/// 'x' / '+' 纯描线 marker 2px。scatter 的 edgecolors/linewidths 会传入换算好的正值以覆盖。
+///
 /// 关键：多边形 / 折线类 marker 必须在「像素空间」构造——plotters 的 `Polygon` / `Rectangle`
 /// / `PathElement` 会把坐标解释为**数据坐标**，直接用像素偏移量作数据坐标会让 marker 尺寸随坐标轴
 /// 量程变化（在小量程下甚至撑满整个绘图区）。这里统一用 `EmptyElement::at(数据点) + 形状(像素偏移)`：
@@ -28,11 +31,23 @@ pub fn draw_marker<DB: DrawingBackend>(
     face: RGBColor,
     edge: RGBColor,
     alpha: f64,
+    edge_width: f64,
 ) -> PyResult<()> {
     let s = size;
     let si = s.round() as i32;
     let fill: ShapeStyle = face.mix(alpha).filled();
-    let edge_style: ShapeStyle = edge.mix(alpha).stroke_width(1);
+    // edge_width <= 0.0 -> 历史默认；否则按传入像素宽度描边（至少 1px）。
+    let ew_fill: u32 = if edge_width <= 0.0 {
+        1
+    } else {
+        edge_width.round().max(1.0) as u32
+    };
+    let ew_line: u32 = if edge_width <= 0.0 {
+        2
+    } else {
+        edge_width.round().max(1.0) as u32
+    };
+    let edge_style: ShapeStyle = edge.mix(alpha).stroke_width(ew_fill);
     let need_edge = edge != face;
     let err = |e| PyRuntimeError::new_err(format!("Marker error: {}", e));
     match marker {
@@ -118,7 +133,7 @@ pub fn draw_marker<DB: DrawingBackend>(
         }
         "x" => {
             // 纯描线 marker：使用边框色
-            let line_style: ShapeStyle = edge.mix(alpha).stroke_width(2);
+            let line_style: ShapeStyle = edge.mix(alpha).stroke_width(ew_line);
             chart
                 .draw_series(std::iter::once(
                     EmptyElement::at((x, y))
@@ -128,7 +143,7 @@ pub fn draw_marker<DB: DrawingBackend>(
                 .map_err(err)?;
         }
         "+" => {
-            let line_style: ShapeStyle = edge.mix(alpha).stroke_width(2);
+            let line_style: ShapeStyle = edge.mix(alpha).stroke_width(ew_line);
             chart
                 .draw_series(std::iter::once(
                     EmptyElement::at((x, y))

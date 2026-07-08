@@ -62,6 +62,31 @@ def _to_seq(obj):
     return _to_list(obj)
 
 
+def _replace_from_data(value, data):
+    """matplotlib `data` 关键字支持：当 data 提供且 value 为字符串键时，
+    以 data[value] 替换。查找失败（非键 / data 不支持索引）时保持原值，
+    这样普通颜色字符串（如 c='red'）不会被误当作数据键。
+    """
+    if data is not None and isinstance(value, str):
+        try:
+            return data[value]
+        except (KeyError, TypeError, IndexError):
+            return value
+    return value
+
+
+def _categorical(vals):
+    """分类坐标支持：若 vals 是含字符串的序列，返回 (等距整数位置, 标签列表)；
+    否则原样返回 (vals, None)。与 matplotlib 一致——字符串映射到 0,1,2,... 位置，
+    字符串本身作为该轴刻度标签。
+    """
+    seq = _to_list(vals)
+    if isinstance(seq, (list, tuple)) and any(isinstance(v, str) for v in seq):
+        labels = [str(v) for v in seq]
+        return list(range(len(seq))), labels
+    return vals, None
+
+
 def _is_scatter_sequence(obj):
     """判断是否为序列（含 rsnumpy 数组），但排除字符串标量。"""
     if obj is None or isinstance(obj, str):
@@ -101,12 +126,12 @@ def _resolve_scatter_colors(c_vals, cmap, vmin, vmax):
     return colors, (name, lo, hi)
 
 
-def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
+def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, kwargs):
     """将 matplotlib 风格的 scatter 参数规整为对 Rust 层的调用参数。
 
     返回 (use_multi, args, mappable):
-    - use_multi=False: args = (x, y, s:float, c:str|None, marker, label, alpha)
-    - use_multi=True:  args = (x, y, s:list|None, c:list|None, marker, label, alpha)
+    - use_multi=False: args = (x, y, s:float, c:str|None, marker, label, alpha, edgecolor, linewidth)
+    - use_multi=True:  args = (x, y, s:list|None, c:list|None, marker, label, alpha, edgecolor, linewidth)
     - mappable: None 或 (cmap名, vmin, vmax)，当 c 为数值数组经 colormap 映射时给出，
       供随后的 plt.colorbar() 绘制颜色条。
     """
@@ -119,7 +144,7 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
     cmap = kwargs.pop('cmap', None)
     vmin = kwargs.pop('vmin', None)
     vmax = kwargs.pop('vmax', None)
-    # linewidths / edgecolors / norm / plotnonfinite / data 等参数当前接受但不生效
+    # norm / colorizer / plotnonfinite / data 等参数当前接受但不生效
 
     s_is_seq = _is_scatter_sequence(s)
     c_is_seq = _is_scatter_sequence(c)
@@ -143,7 +168,9 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
     use_multi = s_is_seq or (c_list is not None)
     if not use_multi:
         s_val = 100.0 if s is None else float(s)
-        return False, (x, y, s_val, c_single, marker, label, alpha), mappable
+        return (False,
+                (x, y, s_val, c_single, marker, label, alpha, edgecolor, linewidth),
+                mappable)
 
     if s_is_seq:
         s_arg = [float(v) for v in _to_list(s)]
@@ -158,7 +185,54 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs):
         c_arg = [c_single] * n
     else:
         c_arg = None
-    return True, (x, y, s_arg, c_arg, marker, label, alpha), mappable
+    return (True,
+            (x, y, s_arg, c_arg, marker, label, alpha, edgecolor, linewidth),
+            mappable)
+
+
+def _coerce_edgecolor(edgecolors):
+    """把 matplotlib 的 edgecolors 归一化为单个颜色字符串 (后端仅支持统一描边色)。
+
+    - 标量颜色字符串 (如 'black' / 'none' / 'face') 原样返回；
+    - 单个 RGB(A) 数值序列转为 '#rrggbb'；
+    - 逐点颜色序列取首个元素作为整体描边色；
+    - 其他情况返回 None (不描边)。
+    """
+    if edgecolors is None:
+        return None
+    if isinstance(edgecolors, str):
+        return edgecolors
+    seq = _to_list(edgecolors)
+    if isinstance(seq, (list, tuple)) and len(seq) > 0:
+        if len(seq) in (3, 4) and all(
+                not isinstance(v, str) and not _is_scatter_sequence(v) for v in seq):
+            return _rgba_to_hex(seq)
+        first = seq[0]
+        if isinstance(first, str):
+            return first
+        if _is_scatter_sequence(first):
+            return _rgba_to_hex(first)
+    return None
+
+
+def _coerce_linewidth(linewidths):
+    """把 matplotlib 的 linewidths 归一化为单个浮点数 (后端仅支持统一线宽)。
+
+    标量数值原样转 float；序列取首个元素；无法解析时返回 None (用默认 1.5)。
+    """
+    if linewidths is None:
+        return None
+    if isinstance(linewidths, bool):
+        return None
+    if isinstance(linewidths, (int, float)):
+        return float(linewidths)
+    seq = _to_list(linewidths)
+    if isinstance(seq, (list, tuple)) and len(seq) > 0:
+        try:
+            return float(seq[0])
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _get_axes():
@@ -175,6 +249,14 @@ def _get_figure():
         return _rsplotlib.gcf()
     except Exception:
         return None
+
+
+def _apply_axes_label(ax, label):
+    """将 label 应用到子图（若后端支持 set_label）；否则静默忽略。"""
+    if label is not None:
+        setter = getattr(ax, 'set_label', None)
+        if setter is not None:
+            setter(label)
 
 
 def _route_to_ax(ax_method_name, module_method, *args, **kwargs):
@@ -231,6 +313,437 @@ _LINESTYLE_ALIASES = {
 }
 
 
+# ==================== 轻量 mathtext (LaTeX -> Unicode) ====================
+
+# LaTeX 命令 -> Unicode。覆盖希腊字母（大小写）与常见数学符号，满足 matplotlib
+# mathtext 最常见的用法（如 r'$\mu=100,\ \sigma=15$' 渲染为 'μ=100, σ=15'）。
+# 完整的 LaTeX 数学排版（真正的上下标定位、分式、根号盒子）不在支持范围内。
+_MATHTEXT_SYMBOLS = {
+    'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'delta': 'δ', 'epsilon': 'ε',
+    'varepsilon': 'ε', 'zeta': 'ζ', 'eta': 'η', 'theta': 'θ', 'vartheta': 'ϑ',
+    'iota': 'ι', 'kappa': 'κ', 'lambda': 'λ', 'mu': 'μ', 'nu': 'ν', 'xi': 'ξ',
+    'omicron': 'ο', 'pi': 'π', 'varpi': 'ϖ', 'rho': 'ρ', 'varrho': 'ϱ',
+    'sigma': 'σ', 'varsigma': 'ς', 'tau': 'τ', 'upsilon': 'υ', 'phi': 'φ',
+    'varphi': 'φ', 'chi': 'χ', 'psi': 'ψ', 'omega': 'ω',
+    'Gamma': 'Γ', 'Delta': 'Δ', 'Theta': 'Θ', 'Lambda': 'Λ', 'Xi': 'Ξ',
+    'Pi': 'Π', 'Sigma': 'Σ', 'Upsilon': 'Υ', 'Phi': 'Φ', 'Psi': 'Ψ',
+    'Omega': 'Ω',
+    'times': '×', 'div': '÷', 'pm': '±', 'mp': '∓', 'cdot': '·',
+    'ast': '∗', 'star': '⋆', 'circ': '∘', 'bullet': '•',
+    'infty': '∞', 'partial': '∂', 'nabla': '∇', 'forall': '∀', 'exists': '∃',
+    'leq': '≤', 'le': '≤', 'geq': '≥', 'ge': '≥', 'neq': '≠', 'ne': '≠',
+    'approx': '≈', 'equiv': '≡', 'sim': '∼', 'propto': '∝', 'll': '≪',
+    'gg': '≫', 'in': '∈', 'notin': '∉', 'subset': '⊂', 'supset': '⊃',
+    'cup': '∪', 'cap': '∩', 'sum': '∑', 'prod': '∏', 'int': '∫',
+    'sqrt': '√', 'angle': '∠', 'degree': '°', 'prime': '′', 'ell': 'ℓ',
+    'hbar': 'ℏ', 'Re': 'ℜ', 'Im': 'ℑ', 'aleph': 'ℵ', 'emptyset': '∅',
+    'rightarrow': '→', 'to': '→', 'leftarrow': '←', 'gets': '←',
+    'Rightarrow': '⇒', 'Leftarrow': '⇐', 'leftrightarrow': '↔',
+    'Leftrightarrow': '⇔', 'uparrow': '↑', 'downarrow': '↓',
+    'langle': '⟨', 'rangle': '⟩', 'cdots': '⋯', 'ldots': '…', 'dots': '…',
+    'imath': 'ı', 'jmath': 'ȷ', 'wp': '℘', 'surd': '√', 'neg': '¬',
+    'perp': '⊥', 'parallel': '∥', 'therefore': '∴', 'because': '∵',
+    'oplus': '⊕', 'otimes': '⊗', 'wedge': '∧', 'vee': '∨', 'setminus': '∖',
+}
+
+# 变音符号命令 -> 组合用 Unicode 变音符（跟在基字符之后即叠加其上）。
+_ACCENTS = {
+    'hat': '\u0302', 'widehat': '\u0302', 'check': '\u030c',
+    'tilde': '\u0303', 'widetilde': '\u0303', 'acute': '\u0301',
+    'grave': '\u0300', 'bar': '\u0304', 'overline': '\u0305',
+    'breve': '\u0306', 'dot': '\u0307', 'ddot': '\u0308',
+    'dddot': '\u20db', 'ddddot': '\u20dc', 'vec': '\u20d7',
+    'overrightarrow': '\u20d7', 'mathring': '\u030a',
+}
+# 覆盖每个字符（而非仅首字符）的变音符命令。
+_ACCENTS_SPREAD = {'overline', 'widehat', 'widetilde', 'overrightarrow'}
+
+# 字体命令：仅剥离命令本身，递归转换其花括号内的内容。
+_FONT_COMMANDS = {
+    'mathrm', 'mathit', 'mathtt', 'mathcal', 'mathbb', 'mathfrak',
+    'mathsf', 'mathbf', 'mathbfit', 'mathdefault', 'mathregular',
+    'mathnormal', 'boldsymbol', 'text', 'textrm', 'textit', 'textbf',
+    'operatorname',
+}
+# \text 系列在数学模式里保留字面空格；其余字体命令与普通数学模式一致（忽略空格）。
+_TEXT_COMMANDS = {'text', 'textrm', 'textit', 'textbf'}
+
+# 数学字体命令 -> 样式键。映射到 Unicode 数学字母符号（Mathematical Alphanumeric
+# Symbols）。未列出的字体命令（mathrm/mathnormal/text/operatorname 等）视为默认
+# 罗马体，仅剥离命令、内容不改字形。
+_MATH_FONT_STYLES = {
+    'mathbf': 'bf', 'boldsymbol': 'bf', 'textbf': 'bf',
+    'mathit': 'it', 'textit': 'it',
+    'mathbfit': 'bfit',
+    'mathcal': 'cal',
+    'mathfrak': 'frak',
+    'mathbb': 'bb',
+    'mathsf': 'sf',
+    'mathtt': 'tt',
+}
+# 每种样式：(大写字母基址, 小写字母基址, 数字基址或 None, 例外洞表)。
+# 例外洞：部分字形在 SMP 数学字母块中留空，Unicode 把它们放到 BMP 的
+# Letterlike Symbols 区（如 \mathcal{R}=ℛ U+211B、\mathbb{R}=ℝ U+211D）。
+_MATH_ALPHA = {
+    'bf': (0x1D400, 0x1D41A, 0x1D7CE, {}),
+    'it': (0x1D434, 0x1D44E, None, {'h': 0x210E}),
+    'bfit': (0x1D468, 0x1D482, None, {}),
+    'cal': (0x1D49C, 0x1D4B6, None, {
+        'B': 0x212C, 'E': 0x2130, 'F': 0x2131, 'H': 0x210B, 'I': 0x2110,
+        'L': 0x2112, 'M': 0x2133, 'R': 0x211B, 'e': 0x212F, 'g': 0x210A,
+        'o': 0x2134}),
+    'frak': (0x1D504, 0x1D51E, None, {
+        'C': 0x212D, 'H': 0x210C, 'I': 0x2111, 'R': 0x211C, 'Z': 0x2128}),
+    'bb': (0x1D538, 0x1D552, 0x1D7D8, {
+        'C': 0x2102, 'H': 0x210D, 'N': 0x2115, 'P': 0x2119, 'Q': 0x211A,
+        'R': 0x211D, 'Z': 0x2124}),
+    'sf': (0x1D5A0, 0x1D5BA, 0x1D7E2, {}),
+    'tt': (0x1D670, 0x1D68A, 0x1D7F6, {}),
+}
+
+
+def _style_char(ch, style):
+    """把单个 ASCII 字母/数字映射为对应数学字体的 Unicode 字符。
+
+    非字母/数字、或该样式无对应字形（如斜体数字）时原样返回。若目标字形不被
+    实际渲染字体支持（如 macOS Arial Unicode 缺 SMP 数学字母块），回退为原字符，
+    避免渲染出缺字形方框。
+    """
+    if not style:
+        return ch
+    spec = _MATH_ALPHA.get(style)
+    if spec is None:
+        return ch
+    up, low, dig, holes = spec
+    if ch in holes:
+        cp = holes[ch]
+    elif 'A' <= ch <= 'Z':
+        cp = up + (ord(ch) - ord('A'))
+    elif 'a' <= ch <= 'z':
+        cp = low + (ord(ch) - ord('a'))
+    elif dig is not None and '0' <= ch <= '9':
+        cp = dig + (ord(ch) - ord('0'))
+    else:
+        return ch
+    mapped = chr(cp)
+    try:
+        if not _rsplotlib.glyph_supported(mapped):
+            return ch
+    except Exception:
+        pass
+    return mapped
+
+
+# 罗马体函数名：原样输出名称本身（如 \sin -> "sin"）。
+_FUNCTION_NAMES = {
+    'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'sinh', 'cosh', 'tanh',
+    'coth', 'arcsin', 'arccos', 'arctan', 'exp', 'log', 'ln', 'lg',
+    'det', 'dim', 'ker', 'deg', 'gcd', 'hom', 'lim', 'liminf', 'limsup',
+    'max', 'min', 'sup', 'inf', 'arg', 'Pr', 'sgn',
+}
+# 需要吞掉一个 {..} 尺寸参数、输出等宽空白的间距 / 占位命令。
+_SPACE_GROUP_COMMANDS = {
+    'hspace', 'mspace', 'kern', 'mkern', 'phantom', 'hphantom', 'vphantom',
+}
+# 无参数间距命令 -> 空格。
+_SPACE_COMMANDS = {
+    'quad', 'qquad', 'thinspace', 'medspace', 'thickspace', 'space',
+    'enspace', 'negthinspace',
+}
+# 反斜杠 + 单个非字母字符 -> 空格（TeX 显式间距）。
+_BACKSLASH_SPACE = set(' ,;:><./')
+
+# 结构化数学构造的中间表示（IR）控制字符，交给 Rust 二维排版引擎解析。
+# 必须与 src/utils/mathtext.rs 中的常量完全一致：
+#   script:  START 's' base SEP sup SEP sub END
+#   frac:    START 'f' num SEP den END           （带分数线）
+#   binom:   START 'b' num SEP den END            （括号，无线）
+#   genfrac: START 'g' ld SEP rd SEP bar SEP num SEP den END
+#   sqrt:    START 'r' index SEP body END          （index 为空表示平方根）
+_IR_START = '\u0002'
+_IR_SEP = '\u001f'
+_IR_END = '\u0003'
+
+
+def _read_group(expr, i):
+    """expr[i] 为 '{'，返回 (组内内容, 右括号之后的下标)。允许花括号嵌套。"""
+    depth, i, buf = 1, i + 1, []
+    n = len(expr)
+    while i < n and depth > 0:
+        c = expr[i]
+        if c == '{':
+            depth += 1
+            buf.append(c)
+        elif c == '}':
+            depth -= 1
+            if depth > 0:
+                buf.append(c)
+        else:
+            buf.append(c)
+        i += 1
+    return ''.join(buf), i
+
+
+def _read_command(expr, i):
+    """expr[i] 为 '\\'，返回 (命令名或单字符, 之后的下标)。
+
+    命令名是紧随的连续字母；若反斜杠后为非字母，则命令为该单个字符。
+    与 TeX 一致：字母命令名后的空白被忽略（这样 '\\hat i' 的重音作用于 i）。
+    """
+    n = len(expr)
+    j = i + 1
+    if j < n and expr[j].isalpha():
+        k = j
+        while k < n and expr[k].isalpha():
+            k += 1
+        cmd = expr[j:k]
+        while k < n and expr[k] == ' ':
+            k += 1
+        return cmd, k
+    if j < n:
+        return expr[j], j + 1
+    return '', j
+
+
+def _read_atom(expr, i, keep_spaces, font_style=None):
+    """读取上/下标作用的“原子”，返回 (已转换的 Unicode 串, 新下标)。
+
+    原子可为 {..} 组、\\命令、或单个字符。
+    """
+    n = len(expr)
+    if i >= n:
+        return '', i
+    ch = expr[i]
+    if ch == '{':
+        content, i = _read_group(expr, i)
+        return _convert_math(content, keep_spaces, font_style), i
+    if ch == '\\':
+        _, after = _read_command(expr, i)
+        return _convert_math(expr[i:after], keep_spaces, font_style), after
+    return _style_char(ch, font_style), i + 1
+
+
+def _thickness_is_zero(spec):
+    """genfrac 的分数线粗细参数是否表示“无线”（堆叠数字）。
+
+    空串表示默认线宽（有线）；数值 0（含 '0pt'/'0mm' 等单位）表示无线。
+    """
+    spec = spec.strip()
+    if not spec:
+        return False
+    for unit in ('pt', 'mm', 'cm', 'in', 'em', 'ex', 'px'):
+        if spec.endswith(unit):
+            spec = spec[:-len(unit)].strip()
+            break
+    try:
+        return float(spec) == 0.0
+    except ValueError:
+        return False
+
+
+def _convert_math(expr, keep_spaces=False, font_style=None):
+    """把一段数学模式文本（$...$ 内部）转换为可供渲染的字符串。
+
+    希腊字母/符号/字体命令/函数名/变音符号/间距等转换为 Unicode 文本；
+    结构化构造（^ / _ 上下标、\\frac/\\binom/\\genfrac、\\sqrt[n]{}）编码为
+    控制字符 IR（见 _IR_START 等），交给 Rust 二维排版引擎堆叠、画分数线/
+    根号盖线；无法承载二维排版的渲染站点会把 IR 降级为单行 Unicode 近似。
+    支持范围：希腊字母与常见符号命令；字体命令
+    (\\mathrm/\\mathcal/\\text ... 剥离保留内容)；函数名 (\\sin -> "sin")；
+    ^ / _ 上下标；\\frac/\\binom/\\genfrac；\\sqrt[n]{}；变音符号
+    (\\hat/\\bar/\\vec ... 组合字符)；间距命令 (\\hspace{}/\\,/\\;/\\quad ...)；
+    \\left/\\right（丢弃）。数学模式忽略字面空格（\\text{} 内保留）。
+    """
+    out = []
+    i, n = 0, len(expr)
+    while i < n:
+        ch = expr[i]
+        if ch == '\\':
+            cmd, after = _read_command(expr, i)
+            if cmd == '':
+                i = after
+                continue
+            if len(cmd) == 1 and not cmd.isalpha():
+                if cmd in _BACKSLASH_SPACE:
+                    out.append(' ')
+                elif cmd == '!':
+                    pass                       # \! 负间距 -> 忽略
+                elif cmd == '\\':
+                    out.append('\n')           # \\ -> 换行
+                else:
+                    out.append(cmd)            # \$ \% \# \& \_ \{ \} \| 等 -> 字面
+                i = after
+                continue
+            if cmd in _ACCENTS:
+                atom, i = _read_atom(expr, after, keep_spaces, font_style)
+                comb = _ACCENTS[cmd]
+                if cmd in _ACCENTS_SPREAD and atom:
+                    out.append(''.join(c + comb for c in atom))
+                elif atom:
+                    out.append(atom[0] + comb + atom[1:])
+                else:
+                    out.append(comb)
+                continue
+            if cmd in _FONT_COMMANDS:
+                # 字体命令：进入其花括号内容并切换字体样式。未列入 _MATH_FONT_STYLES
+                # 的命令（mathrm/text/… 罗马体）把样式重置为默认（None）。
+                new_style = _MATH_FONT_STYLES.get(cmd)
+                if after < n and expr[after] == '{':
+                    content, i = _read_group(expr, after)
+                    out.append(_convert_math(
+                        content, keep_spaces or cmd in _TEXT_COMMANDS,
+                        new_style))
+                else:
+                    i = after
+                continue
+            if cmd == 'sqrt':
+                i = after
+                root = ''
+                if i < n and expr[i] == '[':
+                    end = expr.find(']', i)
+                    if end != -1:
+                        root, i = expr[i + 1:end], end + 1
+                if i < n and expr[i] == '{':
+                    content, i = _read_group(expr, i)
+                    body = _convert_math(content, keep_spaces, font_style)
+                else:
+                    body = ''
+                index = (_convert_math(root, keep_spaces, font_style)
+                         if root else '')
+                out.append(_IR_START + 'r' + index + _IR_SEP + body + _IR_END)
+                continue
+            if cmd in ('frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'):
+                i = after
+                parts = []
+                for _ in range(2):
+                    if i < n and expr[i] == '{':
+                        grp, i = _read_group(expr, i)
+                        parts.append(_convert_math(grp, keep_spaces, font_style))
+                    else:
+                        parts.append('')
+                kind = 'b' if cmd.endswith('binom') else 'f'
+                out.append(''.join(
+                    (_IR_START, kind, parts[0], _IR_SEP, parts[1], _IR_END)))
+                continue
+            if cmd == 'genfrac':
+                i = after
+                groups = []
+                while len(groups) < 6 and i < n and expr[i] == '{':
+                    grp, i = _read_group(expr, i)
+                    groups.append(grp)
+                groups += [''] * (6 - len(groups))
+                ld = _convert_math(groups[0], keep_spaces, font_style)
+                rd = _convert_math(groups[1], keep_spaces, font_style)
+                bar_flag = '0' if _thickness_is_zero(groups[2]) else '1'
+                num = _convert_math(groups[4], keep_spaces, font_style)
+                den = _convert_math(groups[5], keep_spaces, font_style)
+                out.append(''.join(
+                    (_IR_START, 'g', ld, _IR_SEP, rd, _IR_SEP,
+                     bar_flag, _IR_SEP, num, _IR_SEP, den, _IR_END)))
+                continue
+            if cmd in _SPACE_GROUP_COMMANDS:
+                i = after
+                if i < n and expr[i] == '{':
+                    _, i = _read_group(expr, i)   # 丢弃尺寸 / 占位内容
+                out.append(' ')
+                continue
+            if cmd in ('left', 'right'):
+                i = after
+                if i < n and expr[i] == '.':
+                    i += 1                        # \left. / \right. 隐形定界符
+                continue
+            if cmd in _SPACE_COMMANDS:
+                out.append(' ')
+                i = after
+                continue
+            if cmd in _FUNCTION_NAMES:
+                out.append(cmd)
+                i = after
+                continue
+            out.append(_MATHTEXT_SYMBOLS.get(cmd, ''))  # 普通符号，未知命令丢弃
+            i = after
+            continue
+        if ch in '^_':
+            # 上/下标作用于紧邻的前一个原子（out 的最后一项）；连续的
+            # ^ 与 _ 合并到同一 base，交给 Rust 二维排版为真正的上下标。
+            base = out.pop() if out else ''
+            sup = sub = ''
+            atom, i = _read_atom(expr, i + 1, keep_spaces, font_style)
+            if ch == '^':
+                sup = atom
+            else:
+                sub = atom
+            if i < n and expr[i] in '^_':
+                ch2 = expr[i]
+                atom2, i = _read_atom(expr, i + 1, keep_spaces, font_style)
+                if ch2 == '^':
+                    sup = atom2
+                else:
+                    sub = atom2
+            out.append(''.join(
+                (_IR_START, 's', base, _IR_SEP, sup, _IR_SEP, sub, _IR_END)))
+            continue
+        if ch == '{':
+            content, i = _read_group(expr, i)
+            out.append(_convert_math(content, keep_spaces, font_style))
+            continue
+        if ch == '}':
+            i += 1
+            continue
+        if ch == '~':
+            out.append(' ')                       # ~ 不折行空格
+            i += 1
+            continue
+        if ch == ' ' and not keep_spaces:
+            i += 1                                # 数学模式忽略字面空格
+            continue
+        out.append(_style_char(ch, font_style))
+        i += 1
+    return ''.join(out)
+
+
+def _split_dollar(s):
+    """按未转义的 '$' 把字符串切成 (is_math, text) 段序列。
+
+    '\\$' 视为字面 '$' 并入所在段。返回 (segments, balanced)；balanced 为
+    False 表示未转义 '$' 为奇数个（matplotlib 语义：整串按普通文本处理）。
+    """
+    segments, buf = [], []
+    is_math, count = False, 0
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == '\\' and i + 1 < n and s[i + 1] == '$':
+            buf.append('$')                       # 转义的字面美元符
+            i += 2
+            continue
+        if c == '$':
+            segments.append((is_math, ''.join(buf)))
+            buf, is_math, count = [], not is_math, count + 1
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    segments.append((is_math, ''.join(buf)))
+    return segments, count % 2 == 0
+
+
+def _render_mathtext(s):
+    """把 matplotlib 风格的 mathtext ($...$) 转换为 Unicode 文本。
+
+    成对 $...$ 之间按数学模式转换，之外保持字面；'\\$' 为字面美元符。
+    未转义 '$' 为奇数个时整串按普通文本处理（仅把 '\\$' 归一为 '$'）。
+    非字符串或不含 '$' 时快速返回原值。
+    """
+    if not isinstance(s, str) or '$' not in s:
+        return s
+    segments, balanced = _split_dollar(s)
+    if not balanced:
+        return s.replace('\\$', '$')
+    return ''.join(
+        _convert_math(seg) if is_math else seg for is_math, seg in segments)
+
+
 def _parse_fmt(fmt):
     """解析 matplotlib 风格的格式字符串 '[marker][line][color]'。
 
@@ -285,6 +798,10 @@ def _parse_fmt(fmt):
         result['marker'] = marker
     if linestyle is not None:
         result['linestyle'] = linestyle
+    elif marker is not None:
+        # fmt 指定了 marker 但未指定线型：与 matplotlib 一致，只画标记不画线
+        # （' ' 为本库的"无线"表示，见 _map_aliases）。
+        result['linestyle'] = ' '
     if color is not None:
         result['color'] = color
     return result
@@ -369,44 +886,85 @@ def plot(*args, **kwargs):
             # fmt 解析出的样式作为默认值, 不覆盖用户显式传入的关键字参数
             for key, value in _parse_fmt(fmt).items():
                 call_kwargs.setdefault(key, value)
+        # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
+        x, x_tick_labels = _categorical(x)
+        y, y_tick_labels = _categorical(y)
         result = _route_to_ax('plot', _call, x, y, **call_kwargs)
+        if x_tick_labels is not None:
+            xticks(list(range(len(x_tick_labels))), x_tick_labels)
+        if y_tick_labels is not None:
+            yticks(list(range(len(y_tick_labels))), y_tick_labels)
     return result
 
 
 def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
             vmin=None, vmax=None, alpha=None, linewidths=None,
-            edgecolors=None, plotnonfinite=False, data=None, **kwargs):
+            edgecolors=None, colorizer=None, plotnonfinite=False,
+            data=None, **kwargs):
     """绘制散点图，兼容 matplotlib.pyplot.scatter 的参数签名。
 
     用法:
-        plt.scatter(x, y)                              # 默认大小 20、默认蓝色
+        plt.scatter(x, y)                              # 默认大小 100、默认蓝色
         plt.scatter(x, y, s=50, c='red')               # 统一大小和颜色
         plt.scatter(x, y, s=[10, 20, 30], c=['r','g','b'])   # 逐点大小/颜色
         plt.scatter(x, y, c=values, cmap='viridis')    # 数值经 colormap 映射
         plt.scatter(x, y, c=[[1,0,0],[0,1,0]])         # RGB(A) 二维行数组
+        plt.scatter(x, y, edgecolors='black', linewidths=1.5)  # 黑色描边
 
     Args:
         x, y: 长度相同的数据点坐标 (list / tuple / rsnumpy array)
-        s: 点大小, 默认 20; 可为标量或与点数等长的数组
+        s: 点大小, 默认 100; 可为标量或与点数等长的数组
         c: 颜色; 默认蓝色; 可为颜色字符串、颜色字符串数组、数值数组
            (配合 cmap) 或 RGB(A) 二维行数组
         marker: 标记形状, 默认 'o'
         cmap: 当 c 为数值数组时使用的 colormap 名称 (如 'viridis')
         vmin, vmax: colormap 归一化范围
         alpha: 透明度 (0.0 - 1.0)
-        norm / linewidths / edgecolors / plotnonfinite / data: 接受但当前不生效
+        linewidths: 标记边缘线宽 (points); 后端取统一线宽, 序列取首个元素
+        edgecolors: 标记边缘颜色; 'face'/'none' 表示不额外描边, 其他颜色启用描边
+            (后端仅支持统一描边色, 逐点颜色取首个元素)。也接受单数别名 edgecolor。
+        norm / colorizer / plotnonfinite: 接受但当前不生效
+        data: 若提供 (如 dict / DataFrame)，x/y/s/c 等字符串参数将按键在 data 中查找取值
         **kwargs: 额外关键字参数 (color 将作为 c 的别名)
     """
+    if data is not None:
+        # matplotlib 兼容：以字符串键索引 data 得到实际数据。
+        x = _replace_from_data(x, data)
+        y = _replace_from_data(y, data)
+        s = _replace_from_data(s, data)
+        c = _replace_from_data(c, data)
+        if 'color' in kwargs:
+            kwargs['color'] = _replace_from_data(kwargs['color'], data)
+    # 单数形式 edgecolor / linewidth 作为别名 (matplotlib 主用复数名)。
+    if edgecolors is None:
+        edgecolors = kwargs.pop('edgecolor', None)
+    else:
+        kwargs.pop('edgecolor', None)
+    if linewidths is None:
+        linewidths = kwargs.pop('linewidth', None)
+    else:
+        kwargs.pop('linewidth', None)
+    edgecolor = _coerce_edgecolor(edgecolors)
+    linewidth = _coerce_linewidth(linewidths)
     kwargs['cmap'] = cmap
     kwargs['vmin'] = vmin
     kwargs['vmax'] = vmax
     a = 1.0 if alpha is None else alpha
     label = kwargs.pop('label', None)
-    use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label=label, alpha=a, kwargs=kwargs)
+    # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
+    x, x_tick_labels = _categorical(x)
+    y, y_tick_labels = _categorical(y)
+    use_multi, args, mappable = _normalize_scatter(
+        x, y, s, c, marker, label=label, alpha=a,
+        edgecolor=edgecolor, linewidth=linewidth, kwargs=kwargs)
     if use_multi:
         result = _route_to_ax('scatter_multi', _rsplotlib.scatter_multi, *args)
     else:
         result = _route_to_ax('scatter', _rsplotlib.scatter, *args)
+    if x_tick_labels is not None:
+        xticks(list(range(len(x_tick_labels))), x_tick_labels)
+    if y_tick_labels is not None:
+        yticks(list(range(len(y_tick_labels))), y_tick_labels)
     if mappable is not None:
         ax = _get_axes()
         if ax is not None and hasattr(ax, 'set_mappable'):
@@ -813,6 +1371,7 @@ def text(x, y, s, fontdict=None, **kwargs):
     family = kwargs.get('family', None)
     if not isinstance(s, str):
         s = str(s)
+    s = _render_mathtext(s)
 
     # family 处理：若用户显式指定了字体族名，解析为本地字体文件并注册到
     # plotters 的字体数据库，这样真正驱动文本渲染（而不是被忽略）。
@@ -919,26 +1478,22 @@ def annotate(text, xy, xytext=None, fontsize=12.0, color='black', arrowprops=Non
     Args:
         text: 标注文本内容
         xy: 被标注点的坐标 (数据坐标)
-        xytext: 文本放置位置 (数据坐标)。若提供, 自动从该位置绘制箭头到 xy
+        xytext: 文本放置位置 (数据坐标)。默认与 xy 相同
         fontsize: 字体大小 (默认 12.0)
-        color: 文本和箭头颜色
-        arrowprops: 箭头属性字典 (支持 arrowstyle, arrowsize 等)
-        **kwargs: 其他关键字参数
+        color: 文本颜色
+        arrowprops: 箭头属性字典。None 表示不画箭头; 提供 (哪怕空 dict) 则从
+            xytext 绘制箭头指向 xy。支持简单箭头 (width/headwidth/headlength/
+            shrink) 与花式箭头 (arrowstyle/connectionstyle/mutation_scale/
+            shrinkA/shrinkB 等)。
+        **kwargs: 其他关键字参数 (如 xycoords/textcoords, 当前忽略)
     """
-    arrowstyle = None
-    arrowsize = 1.0
-    if arrowprops is not None:
-        if isinstance(arrowprops, dict):
-            if 'arrowstyle' in arrowprops:
-                arrowstyle = arrowprops['arrowstyle']
-            if 'arrowsize' in arrowprops:
-                arrowsize = arrowprops['arrowsize']
+    text = _render_mathtext(text)
     ax = _get_axes()
     if ax is not None and hasattr(ax, 'annotate'):
-        ax.annotate(text, xy, xytext, fontsize, color, arrowprops, arrowstyle, arrowsize)
+        ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
         return _get_figure()
     fig, ax = _rsplotlib.subplots()
-    ax.annotate(text, xy, xytext, fontsize, color, arrowprops, arrowstyle, arrowsize)
+    ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
     return fig, ax
 
 
@@ -1023,7 +1578,7 @@ def xlabel(text, fontdict=None, loc=None, **kwargs):
         plt.xlabel("x 轴", loc="left")
     """
     family, size, color = _font_props(fontdict, kwargs)
-    return _rsplotlib.xlabel(text, color, size, family, loc)
+    return _rsplotlib.xlabel(_render_mathtext(text), color, size, family, loc)
 
 
 def ylabel(text, fontdict=None, loc=None, **kwargs):
@@ -1039,7 +1594,7 @@ def ylabel(text, fontdict=None, loc=None, **kwargs):
         plt.ylabel("y 轴", loc="top")
     """
     family, size, color = _font_props(fontdict, kwargs)
-    return _rsplotlib.ylabel(text, color, size, family, loc)
+    return _rsplotlib.ylabel(_render_mathtext(text), color, size, family, loc)
 
 
 def title(label, fontdict=None, loc=None, **kwargs):
@@ -1061,7 +1616,7 @@ def title(label, fontdict=None, loc=None, **kwargs):
     """
     family, size, color = _font_props(fontdict, kwargs)
     # 字体族名的解析与注册由 Rust 层的 set_title 统一处理。
-    return _rsplotlib.title(label, color, size, family, loc)
+    return _rsplotlib.title(_render_mathtext(label), color, size, family, loc)
 
 
 def suptitle(t, **kwargs):
@@ -1073,7 +1628,7 @@ def suptitle(t, **kwargs):
     用法:
         plt.suptitle("总标题")
     """
-    return _rsplotlib.gcf().suptitle(str(t))
+    return _rsplotlib.gcf().suptitle(_render_mathtext(str(t)))
 
 
 def grid(visible=True, **kwargs):
@@ -1290,9 +1845,76 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     return fig, _AxesArray(flat, (nrows, ncols))
 
 
-def subplot(nrows, ncols, index, **kwargs):
-    """创建单个子图。"""
-    return _rsplotlib.subplot(nrows, ncols, index)
+def subplot(*args, **kwargs):
+    """在当前 figure 中添加一个子图 (Axes)，兼容 matplotlib 的调用签名。
+
+    调用签名:
+        subplot(nrows, ncols, index, **kwargs)
+        subplot(pos, **kwargs)   # pos 为三位整数, 如 subplot(131) 等价于 subplot(1, 3, 1)
+        subplot(**kwargs)        # 无位置参数, 默认为 (1, 1, 1)
+
+    *args 描述子图位置, 可为下列之一:
+        - 三个整数 (nrows, ncols, index): 子图占据 nrows 行 ncols 列网格中的 index
+          位置, index 从左上角的 1 开始向右递增。index 也可为二元组 (first, last)
+          (基于 1, 含 last), 表示子图跨越 first 到 last 的格子, 例如
+          subplot(3, 1, (1, 2)) 创建一个跨越上部 2/3 的子图。
+        - 一个三位整数 (如 131 等价于 1, 3, 1), 仅在子图数不超过 9 时可用。
+        - 一个 SubplotSpec。
+
+    关键字参数:
+        projection: 投影类型。当前后端仅支持默认的直角坐标 (rectilinear),
+                    其他值被接受但不生效。
+        polar (bool): 为 True 时等价于 projection='polar' (当前后端不支持, 接受但不生效)。
+        sharex, sharey: 与之共享 x / y 轴的 Axes (当前接受但不生效)。
+        label (str): 返回 Axes 的标签。
+
+    Returns:
+        Axes: 新建或已存在的子图。
+    """
+    polar = kwargs.pop('polar', False)
+    projection = kwargs.pop('projection', None)
+    kwargs.pop('sharex', None)
+    kwargs.pop('sharey', None)
+    label = kwargs.pop('label', None)
+    if polar and projection is None:
+        projection = 'polar'
+
+    if len(args) == 0:
+        nrows, ncols, index = 1, 1, 1
+    elif len(args) == 1:
+        pos = args[0]
+        if hasattr(pos, 'rowStart'):  # SubplotSpec
+            nrows, ncols, index = _spec_to_grid(pos)
+        elif isinstance(pos, int) and not isinstance(pos, bool):
+            if not 100 <= pos <= 999:
+                raise ValueError(f"整数子图参数必须是三位数 (如 131)，收到 {pos}")
+            nrows, ncols, index = pos // 100, (pos // 10) % 10, pos % 10
+        else:
+            raise TypeError("subplot() 单参数形式仅支持三位整数 (如 131) 或 SubplotSpec")
+    elif len(args) == 3:
+        nrows, ncols, index = args
+    else:
+        raise TypeError(
+            f"subplot() 需要 0 个、1 个 (三位整数 / SubplotSpec) 或 3 个位置参数，收到 {len(args)}"
+        )
+
+    # index 既可为整数（单格子）也可为 (first, last) 二元组（跨格子），原生 subplot 均支持。
+    ax = _rsplotlib.subplot(nrows, ncols, index)[1]
+    _apply_axes_label(ax, label)
+    return ax
+
+
+def _spec_to_grid(spec):
+    """将 SubplotSpec 转换为 (nrows, ncols, (first, last))，供原生 subplot 使用。
+
+    SubplotSpec 用 0 基、rowStop/colStop 为开区间上界的方式描述网格跨度；
+    这里换算为基于 1、含端点的线性 (first, last) 索引。
+    """
+    nrows = int(spec.numRows)
+    ncols = int(spec.numCols)
+    first = int(spec.rowStart) * ncols + int(spec.colStart) + 1
+    last = (int(spec.rowStop) - 1) * ncols + (int(spec.colStop) - 1) + 1
+    return nrows, ncols, (first, last)
 
 
 def tight_layout(**kwargs):
@@ -1346,6 +1968,22 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
         w, h = _get_rcparams().get('figure.figsize', list(DEFAULT_FIGSIZE))
         fig.set_size(round(w * d), round(h * d))
     return fig
+
+
+def axes(arg=None, **kwargs):
+    """向当前图形添加一个坐标区并返回它 (matplotlib plt.axes 兼容)。
+
+    arg 为 None 时在当前图形上创建一个全幅坐标区 (等价于 add_subplot())；
+    没有当前图形则新建一个。传入 rect [left, bottom, width, height] 的定位形式
+    当前不支持，按全幅处理。其余关键字作为坐标区属性 (如 xlabel/ylabel/title) 应用。
+    """
+    fig = _get_figure()
+    if fig is None:
+        fig = figure()
+    ax = fig.add_subplot()
+    if kwargs:
+        ax.set(**kwargs)
+    return ax
 
 
 def savefig(fname, **kwargs):
@@ -1419,14 +2057,59 @@ def close(fig=None):
 
 
 def axis(arg=None, **kwargs):
-    """坐标轴控制: axis('off') 隐藏, axis('equal') 等比例。"""
-    if arg == 'off':
+    """获取或设置坐标轴属性，兼容 matplotlib.pyplot.axis。
+
+    调用形式:
+        axis()                          -> 返回当前 (xmin, xmax, ymin, ymax)
+        axis((xmin, xmax, ymin, ymax))  -> 一次性设置四个轴限 (也接受 list)
+        axis('off')  / axis(False)      -> 隐藏坐标轴装饰
+        axis('on')   / axis(True)       -> 显示坐标轴装饰
+        axis('equal') / axis('scaled')  -> 等比例缩放
+        axis(xmin=.., xmax=.., ymin=.., ymax=..)  -> 关键字设置轴限
+
+    返回当前的 (xmin, xmax, ymin, ymax)（无法获取时返回 None）。
+    """
+    ax = _get_axes()
+    if isinstance(arg, (list, tuple)):
+        # 序列形式: [xmin, xmax, ymin, ymax]
+        if len(arg) != 4:
+            raise ValueError(
+                "axis(): 序列参数必须为 (xmin, xmax, ymin, ymax) 四个值"
+            )
+        xmin, xmax, ymin, ymax = arg
+        xlim(xmin, xmax)
+        ylim(ymin, ymax)
+    elif arg is False or arg == 'off':
+        if ax is not None:
+            try:
+                ax._axis_off()
+            except Exception:
+                pass
+    elif arg is True or arg == 'on':
+        if ax is not None and hasattr(ax, '_axis_on'):
+            ax._axis_on()
+    elif arg in ('equal', 'scaled', 'image', 'square'):
+        if ax is not None:
+            ax.set_aspect('equal')
+    # 'tight' / 'auto' 等自动缩放选项：数据本已填充绘图框，保持当前行为。
+
+    # 关键字形式: axis(xmin=.., xmax=.., ymin=.., ymax=..)
+    if kwargs:
+        xmn, xmx = kwargs.get('xmin'), kwargs.get('xmax')
+        ymn, ymx = kwargs.get('ymin'), kwargs.get('ymax')
+        if xmn is not None or xmx is not None:
+            xlim(xmn, xmx)
+        if ymn is not None or ymx is not None:
+            ylim(ymn, ymx)
+
+    # 返回当前范围 (xmin, xmax, ymin, ymax)
+    if ax is not None and hasattr(ax, 'get_xlim') and hasattr(ax, 'get_ylim'):
         try:
-            _rsplotlib.gca()._axis_off()
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            return (x0, x1, y0, y1)
         except Exception:
-            pass
-    elif arg in ('equal', 'scaled'):
-        gca().set_aspect('equal')
+            return None
     return None
 
 
@@ -1455,9 +2138,12 @@ def _patch_figure_add_subplot():
 
     _orig_add_subplot = _rs.Figure.add_subplot
 
-    def _add_subplot(self, *args):
+    def _add_subplot(self, *args, **kwargs):
+        if len(args) == 0:
+            # matplotlib: add_subplot() 等价于 add_subplot(1, 1, 1)
+            args = (1, 1, 1)
         if len(args) == 1:
-            return _orig_add_subplot(self, args[0])
+            ax = _orig_add_subplot(self, args[0])
         elif len(args) == 3:
             nrows, ncols, index = args
             if isinstance(index, tuple):
@@ -1474,11 +2160,15 @@ def _patch_figure_add_subplot():
                 col_end = col_start + 1
             from .layout.gridspec import SubplotSpec
             spec = SubplotSpec(None, row_start, row_end, col_start, col_end)
-            return _orig_add_subplot(self, spec)
+            ax = _orig_add_subplot(self, spec)
         else:
             raise TypeError(
                 f"add_subplot() takes 1 or 3 positional arguments but {len(args)} were given"
             )
+        # matplotlib: 余下关键字作为 Axes 属性，经 ax.set(**kwargs) 应用
+        if kwargs:
+            ax.set(**kwargs)
+        return ax
 
     _rs.Figure.add_subplot = _add_subplot
 
@@ -1491,6 +2181,8 @@ def _patch_axes():
     _orig_plot = _rs.Axes.plot
 
     def _plot(self, *args, **kwargs):
+        if isinstance(kwargs.get('label'), str):
+            kwargs['label'] = _render_mathtext(kwargs['label'])
         if len(args) == 1:
             y = args[0]
             x = list(range(len(y) if hasattr(y, '__len__') else 0))
@@ -1517,8 +2209,25 @@ def _patch_axes():
     # scatter: 支持 c/s 为数组、数值 c + cmap、RGB(A) 二维行数组
     _orig_scatter = _rs.Axes.scatter
 
-    def _scatter(self, x, y, s=None, c=None, marker=None, label=None, alpha=1.0, **kwargs):
-        use_multi, args, mappable = _normalize_scatter(x, y, s, c, marker, label, alpha, kwargs)
+    def _scatter(self, x, y, s=None, c=None, marker=None, label=None, alpha=1.0,
+                 edgecolor=None, linewidth=None, **kwargs):
+        # 复数名 edgecolors/linewidths 为 matplotlib 主用形式（OO API 以关键字传入），
+        # 单数名 edgecolor/linewidth 既是别名、也是模块级 scatter() 路由过来的位置参数。
+        edgecolors = kwargs.pop('edgecolors', None)
+        linewidths = kwargs.pop('linewidths', None)
+        if edgecolor is None:
+            edgecolor = kwargs.pop('edgecolor', None)
+        else:
+            kwargs.pop('edgecolor', None)
+        if linewidth is None:
+            linewidth = kwargs.pop('linewidth', None)
+        else:
+            kwargs.pop('linewidth', None)
+        edgecolor = _coerce_edgecolor(edgecolors if edgecolors is not None else edgecolor)
+        linewidth = _coerce_linewidth(linewidths if linewidths is not None else linewidth)
+        use_multi, args, mappable = _normalize_scatter(
+            x, y, s, c, marker, label=label, alpha=alpha,
+            edgecolor=edgecolor, linewidth=linewidth, kwargs=kwargs)
         if mappable is not None:
             self.set_mappable(*mappable)
         if use_multi:
@@ -1545,6 +2254,45 @@ def _patch_axes():
 
     _rs.Axes.set_xlim = _set_xlim
     _rs.Axes.set_ylim = _set_ylim
+
+    # 文本类方法：把 matplotlib mathtext ($...$) 转成 Unicode 后再下沉到 Rust。
+    # OO API (ax.set_xlabel / ax.text ...) 不经过模块级 plt.* 函数，需在此单独接入。
+    _orig_set_xlabel = _rs.Axes.set_xlabel
+    _orig_set_ylabel = _rs.Axes.set_ylabel
+    _orig_set_title = _rs.Axes.set_title
+
+    def _set_xlabel(self, text, *args, **kwargs):
+        return _orig_set_xlabel(self, _render_mathtext(text), *args, **kwargs)
+
+    def _set_ylabel(self, text, *args, **kwargs):
+        return _orig_set_ylabel(self, _render_mathtext(text), *args, **kwargs)
+
+    def _set_title(self, text, *args, **kwargs):
+        return _orig_set_title(self, _render_mathtext(text), *args, **kwargs)
+
+    _rs.Axes.set_xlabel = _set_xlabel
+    _rs.Axes.set_ylabel = _set_ylabel
+    _rs.Axes.set_title = _set_title
+
+    _orig_text = _rs.Axes.text
+
+    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, **kwargs):
+        # va/ha/rotation 等后端未支持的对齐参数被 **kwargs 吸收后丢弃。
+        if not isinstance(s, str):
+            s = str(s)
+        return _orig_text(self, x, y, _render_mathtext(s),
+                          fontsize=fontsize, color=color, c=c, family=family)
+
+    _rs.Axes.text = _text
+
+    _orig_annotate = _rs.Axes.annotate
+
+    def _annotate(self, text, *args, **kwargs):
+        if isinstance(text, str):
+            text = _render_mathtext(text)
+        return _orig_annotate(self, text, *args, **kwargs)
+
+    _rs.Axes.annotate = _annotate
 
     # set(**kwargs): matplotlib 语义, 每个 key 映射到 set_<key>(value)
     def _ax_set(self, **kwargs):
