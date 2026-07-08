@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rsplotlib"
-version = "0.2.3"
+version = "0.2.4"
 description = "A high-performance matplotlib-compatible plotting library powered by Rust"
 readme = "README_zh.md"
 license = { text = "MIT" }

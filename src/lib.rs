@@ -7,7 +7,7 @@ pub mod utils;
 use plotters::style::register_font;
 use pyo3::prelude::*;
 
-use crate::figure::axes::Axes;
+use crate::figure::axes::{Axes, Line2D};
 use crate::figure::axis::{Axis, Patch, Spine, SpineDict};
 use crate::figure::figure::Figure;
 
@@ -210,6 +210,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_class::<Figure>()?;
     m.add_class::<Axes>()?;
+    m.add_class::<Line2D>()?;
     m.add_class::<Axis>()?;
     m.add_class::<Patch>()?;
     m.add_class::<SpineDict>()?;

@@ -1100,9 +1100,6 @@ where
             } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
-                // 折线线宽增加 50%
-                let lw_scaled = *linewidth * 1.5;
-                let linewidth = &lw_scaled;
                 // plotters 的坐标映射对屏幕像素取 floor，会让点整体偏高约 0.5 像素。
                 // 向下偏移半个像素，等效为四舍五入，使线/marker 的中心落在坐标点上。
                 let y_half_px = {
@@ -1158,8 +1155,8 @@ where
                             } else {
                                 1.0
                             };
-                            // 撤销前面 1.5x 线宽膨胀，dash 图案按 matplotlib 名义线宽缩放；font_scale = dpi/72
-                            let lw_nominal = (*linewidth / 1.5).max(0.1);
+                            // dash 图案按 matplotlib 名义线宽缩放；font_scale = dpi/72
+                            let lw_nominal = (*linewidth).max(0.1);
                             let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
                             let width_px = (lw_px as i32 - 1).max(1) as f64;
                             // matplotlib 默认 dash 图案 (rcParams)，None 表示实线

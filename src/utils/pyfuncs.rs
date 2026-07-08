@@ -850,18 +850,14 @@ pub fn close(_py: Python) -> PyResult<()> {
 #[pyfunction]
 pub fn twinx(py: Python) -> PyResult<Py<Axes>> {
     let ax = get_current_axes(py)?;
-    let twin = ax.borrow_mut(py).twinx();
-    let twin_py = Py::new(py, twin)?;
-    init_axes_self_py(&twin_py, py);
+    let twin_py = ax.borrow_mut(py).twinx(py)?;
     Ok(twin_py)
 }
 
 #[pyfunction]
 pub fn twiny(py: Python) -> PyResult<Py<Axes>> {
     let ax = get_current_axes(py)?;
-    let twin = ax.borrow_mut(py).twiny();
-    let twin_py = Py::new(py, twin)?;
-    init_axes_self_py(&twin_py, py);
+    let twin_py = ax.borrow_mut(py).twiny(py)?;
     Ok(twin_py)
 }
 

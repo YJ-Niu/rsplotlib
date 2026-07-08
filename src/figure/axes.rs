@@ -359,11 +359,32 @@ fn parse_aspect(s: &str) -> Option<f64> {
     }
 }
 
+thread_local! {
+    /// 字体尺寸随 figsize 缩放的因子：以默认 figsize 为基准 1.0，小图 <1、大图 >1。
+    /// 渲染开始前由 `Figure::render_to_backend` 依据当前 figsize 设置，仅经 `scale_font`
+    /// 作用于字体（及由字体驱动的布局测量），不影响线宽/marker/dash（它们直接用 font_scale/
+    /// marker_scale）。渲染在 GIL 下单线程顺序执行，且每次渲染入口都会重设此值，故无需复位。
+    static FONT_SIZE_FACTOR: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
+}
+
+/// 设置字体随 figsize 缩放的因子（见 [`FONT_SIZE_FACTOR`]）。非正/非有限值回退为 1.0。
+pub fn set_font_size_factor(factor: f64) {
+    let f = if factor.is_finite() && factor > 0.0 {
+        factor
+    } else {
+        1.0
+    };
+    FONT_SIZE_FACTOR.with(|c| c.set(f));
+}
+
 /// 字体大小缩放并四舍五入到1位小数
 /// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
-/// 通过 * 14.5 将字号放大到与 matplotlib 一致。
+/// 并整体放大 20%（`FONT_SIZE_BOOST`）使默认字体更醒目。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
-    (size * font_scale * 14.5).round() / 10.0
+    /// 默认字体整体放大系数（+20%）。
+    const FONT_SIZE_BOOST: f64 = 2.0;
+    let figsize_factor = FONT_SIZE_FACTOR.with(|c| c.get());
+    (size * font_scale * figsize_factor * FONT_SIZE_BOOST).round()
 }
 
 /// 解析 matplotlib `arrowprops` dict 为 [`ArrowSpec`]。
@@ -458,6 +479,150 @@ fn resolve_and_register_family(py: Python<'_>, family: Option<String>) -> Option
     })
 }
 
+/// matplotlib linestyle 归一化：空串 / 'None' / 'none' 表示不画线（统一为单空格）。
+fn normalize_linestyle(ls: &str) -> String {
+    if ls.is_empty() || ls.eq_ignore_ascii_case("none") || ls.eq_ignore_ascii_case("null") {
+        " ".to_string()
+    } else {
+        ls.to_string()
+    }
+}
+
+/// matplotlib Line2D 兼容句柄：引用父 Axes 中某条折线元素，支持事后修改样式
+/// （如 `l.set_linestyle(':')`）。修改直接作用于父 Axes 存储的绘图元素。
+#[pyclass]
+pub struct Line2D {
+    pub parent: Option<Py<PyAny>>,
+    pub index: usize,
+}
+
+impl Line2D {
+    fn with_line<F: FnOnce(&mut PlotElement)>(&self, py: Python<'_>, f: F) {
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            if let Some(elem) = ax.elements.get_mut(self.index) {
+                f(elem);
+            }
+        }
+    }
+
+    fn read_line<F: FnOnce(&PlotElement)>(&self, py: Python<'_>, f: F) {
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let ax = ax_bound.borrow();
+            if let Some(elem) = ax.elements.get(self.index) {
+                f(elem);
+            }
+        }
+    }
+}
+
+#[pymethods]
+impl Line2D {
+    fn set_linestyle(&self, py: Python<'_>, ls: &str) {
+        self.with_line(py, |elem| {
+            if let PlotElement::Line { linestyle, .. } = elem {
+                *linestyle = normalize_linestyle(ls);
+            }
+        });
+    }
+
+    fn set_color(&self, py: Python<'_>, color: &str) {
+        self.with_line(py, |elem| {
+            if let PlotElement::Line { color: c, .. } = elem {
+                *c = color.to_string();
+            }
+        });
+    }
+
+    fn set_linewidth(&self, py: Python<'_>, lw: f64) {
+        self.with_line(py, |elem| {
+            if let PlotElement::Line { linewidth, .. } = elem {
+                *linewidth = lw;
+            }
+        });
+    }
+
+    fn set_label(&self, py: Python<'_>, label: &str) {
+        self.with_line(py, |elem| {
+            if let PlotElement::Line { label: l, .. } = elem {
+                *l = Some(label.to_string());
+            }
+        });
+    }
+
+    /// 返回已解析的线条颜色（'#rrggbb'）：与图例取色一致，空色回退到 color_idx 默认色。
+    fn get_color(&self, py: Python<'_>) -> Option<String> {
+        let mut out = None;
+        self.read_line(py, |elem| {
+            if let PlotElement::Line {
+                color, color_idx, ..
+            } = elem
+            {
+                let rgb =
+                    parse_color(color, *color_idx).unwrap_or_else(|_| default_color(*color_idx));
+                out = Some(format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2));
+            }
+        });
+        out
+    }
+
+    fn get_linestyle(&self, py: Python<'_>) -> Option<String> {
+        let mut out = None;
+        self.read_line(py, |elem| {
+            if let PlotElement::Line { linestyle, .. } = elem {
+                out = Some(linestyle.clone());
+            }
+        });
+        out
+    }
+
+    fn get_linewidth(&self, py: Python<'_>) -> Option<f64> {
+        let mut out = None;
+        self.read_line(py, |elem| {
+            if let PlotElement::Line { linewidth, .. } = elem {
+                out = Some(*linewidth);
+            }
+        });
+        out
+    }
+
+    fn get_marker(&self, py: Python<'_>) -> Option<String> {
+        let mut out = None;
+        self.read_line(py, |elem| {
+            if let PlotElement::Line { marker, .. } = elem {
+                out = marker.clone();
+            }
+        });
+        out
+    }
+
+    fn get_label(&self, py: Python<'_>) -> Option<String> {
+        let mut out = None;
+        self.read_line(py, |elem| {
+            if let PlotElement::Line { label, .. } = elem {
+                out = label.clone();
+            }
+        });
+        out
+    }
+}
+
+/// 二级坐标轴（secondary_xaxis / secondary_yaxis）的配置。
+///
+/// 不新建坐标系，只在主坐标轴对侧（x 顶部 / y 右侧）按 `forward` 变换后的刻度值
+/// 画刻度线和刻度值。`forward` 把主轴数据坐标映射到二级刻度值，`inverse`（可选）
+/// 把二级刻度值反解回主轴数据坐标以精确定位刻度（缺省时假设线性、按比例插值）。
+pub struct SecondaryAxisSpec {
+    pub forward: Py<PyAny>,
+    pub inverse: Option<Py<PyAny>>,
+    pub location: String,
+    pub label: String,
+}
+
 #[pyclass(skip_from_py_object)]
 pub struct Axes {
     pub elements: Vec<PlotElement>,
@@ -490,7 +655,7 @@ pub struct Axes {
     pub ytick_labels: Option<Vec<String>>,
     pub is_twin_x: bool,
     pub is_twin_y: bool,
-    pub twin_axes: Vec<Axes>,
+    pub twin_axes: Vec<Py<Axes>>,
     pub facecolor: String,
     pub spine_top: bool,
     pub spine_bottom: bool,
@@ -519,6 +684,10 @@ pub struct Axes {
     pub xaxis_minor_locator: Option<Py<PyAny>>,
     pub yaxis_major_locator: Option<Py<PyAny>>,
     pub yaxis_minor_locator: Option<Py<PyAny>>,
+    /// set_major_formatter 传入的 Python formatter 对象（如 ConciseDateFormatter），
+    /// 渲染 x/y 刻度标签时调用其 format_ticks 生成标签文本
+    pub xaxis_major_formatter: Option<Py<PyAny>>,
+    pub yaxis_major_formatter: Option<Py<PyAny>>,
     pub x_axis_inverted: bool,
     pub y_axis_inverted: bool,
     /// 最近一次可映射绘制 (scatter 数值 c / imshow) 的 (cmap, vmin, vmax)，供 colorbar 使用
@@ -529,6 +698,10 @@ pub struct Axes {
     /// 「一个 y 数据单位的显示长度 / 一个 x 数据单位的显示长度」，'equal' 即 Some(1.0)，
     /// 使 X/Y 轴单位长度相同（imshow 默认）。
     pub aspect: Option<f64>,
+    /// 二级 x 轴（secondary_xaxis）：在主轴对侧画变换后的刻度，不影响数据坐标系。
+    pub secondary_x: Option<SecondaryAxisSpec>,
+    /// 二级 y 轴（secondary_yaxis）。
+    pub secondary_y: Option<SecondaryAxisSpec>,
 }
 
 impl Clone for Axes {
@@ -564,7 +737,7 @@ impl Clone for Axes {
             ytick_labels: self.ytick_labels.clone(),
             is_twin_x: self.is_twin_x,
             is_twin_y: self.is_twin_y,
-            twin_axes: self.twin_axes.clone(),
+            twin_axes: Vec::new(),
             facecolor: self.facecolor.clone(),
             spine_top: self.spine_top,
             spine_bottom: self.spine_bottom,
@@ -593,11 +766,15 @@ impl Clone for Axes {
             xaxis_minor_locator: None,
             yaxis_major_locator: None,
             yaxis_minor_locator: None,
+            xaxis_major_formatter: None,
+            yaxis_major_formatter: None,
             x_axis_inverted: self.x_axis_inverted,
             y_axis_inverted: self.y_axis_inverted,
             mappable: self.mappable.clone(),
             colorbar: self.colorbar.clone(),
             aspect: self.aspect,
+            secondary_x: None,
+            secondary_y: None,
         }
     }
 }
@@ -635,6 +812,19 @@ fn parse_fmt_string(fmt: &str) -> Option<(Option<String>, Option<String>, Option
             }
         }
         let ch = chars[i];
+        // matplotlib 'CN' 颜色循环记号：大写 C 后跟一或多位数字，作为完整颜色出现。
+        if ch == 'C' && i + 1 < n && chars[i + 1].is_ascii_digit() {
+            if found_color.is_some() {
+                return None;
+            }
+            let mut j = i + 1;
+            while j < n && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+            found_color = Some(chars[i..j].iter().collect());
+            i = j;
+            continue;
+        }
         if ch == '-' || ch == ':' {
             if found_ls.is_some() {
                 return None;
@@ -735,11 +925,15 @@ impl Axes {
             xaxis_minor_locator: None,
             yaxis_major_locator: None,
             yaxis_minor_locator: None,
+            xaxis_major_formatter: None,
+            yaxis_major_formatter: None,
             x_axis_inverted: false,
             y_axis_inverted: false,
             mappable: None,
             colorbar: None,
             aspect: None,
+            secondary_x: None,
+            secondary_y: None,
         }
     }
 
@@ -747,7 +941,7 @@ impl Axes {
     #[allow(clippy::too_many_arguments)]
     pub fn plot(
         &mut self,
-        _py: Python<'_>,
+        py: Python<'_>,
         x: Bound<'_, PyAny>,
         y: Bound<'_, PyAny>,
         fmt: Option<String>,
@@ -764,7 +958,7 @@ impl Axes {
         markerfacecolor: Option<String>,
         markeredgecolor: Option<String>,
         solid_capstyle: Option<String>,
-    ) -> PyResult<()> {
+    ) -> PyResult<Py<Line2D>> {
         // matplotlib 兼容：fmt 是独立的位置参数（第 3 位），从中提取 marker/linestyle/color。
         // label 始终作为图例标签，绝不会被当作格式字符串解析，因此 label="cos" 之类不再丢失。
         let actual_label = label;
@@ -811,6 +1005,7 @@ impl Axes {
         } else {
             linestyle_val.clone()
         };
+        let elem_index = self.elements.len();
         self.elements.push(PlotElement::Line {
             x: x_vec,
             y: y_vec,
@@ -831,7 +1026,11 @@ impl Axes {
             self.legend_labels
                 .push((lbl, c, linestyle_val, None, linewidth));
         }
-        Ok(())
+        let line = Line2D {
+            parent: self.self_py.as_ref().map(|p| p.clone_ref(py)),
+            index: elem_index,
+        };
+        Py::new(py, line)
     }
 
     #[pyo3(signature = (x, y, s=100.0, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
@@ -1412,6 +1611,24 @@ impl Axes {
 
     #[pyo3(signature = (loc="best"))]
     pub fn legend(&mut self, loc: &str) {
+        self.legend_loc = Some(loc.to_string());
+    }
+
+    /// 用显式的 (label, color, linestyle, marker, linewidth) 条目替换图例内容并显示。
+    /// 供 Python 端 `ax.legend(handles, labels)` 使用：从 handles 取样式、labels 取文本。
+    #[pyo3(signature = (entries, loc="best"))]
+    pub fn set_legend_entries(
+        &mut self,
+        entries: Vec<(String, String, String, Option<String>, f64)>,
+        loc: &str,
+    ) {
+        self.legend_labels = entries
+            .into_iter()
+            .map(|(label, color, linestyle, marker, linewidth)| {
+                let rgb = parse_color(&color, 0).unwrap_or(RgbColor(0, 0, 0));
+                (label, rgb, linestyle, marker, linewidth)
+            })
+            .collect();
         self.legend_loc = Some(loc.to_string());
     }
 
@@ -2064,20 +2281,60 @@ impl Axes {
         self.ytick_labels = labels;
     }
 
-    pub fn twinx(&mut self) -> Axes {
+    pub fn twinx(&mut self, py: Python) -> PyResult<Py<Axes>> {
         let mut twin = Axes::new();
         twin.xlim = self.xlim;
         twin.is_twin_x = true;
-        self.twin_axes.push(twin.clone());
-        twin
+        let twin_py = Py::new(py, twin)?;
+        crate::utils::pyfuncs::init_axes_self_py(&twin_py, py);
+        // 存活引用（与返回给 Python 的对象同一份），使后续在 twin 上的 plot/legend
+        // 能被渲染读取到——而非早期实现里存的空快照。
+        self.twin_axes.push(twin_py.clone_ref(py));
+        Ok(twin_py)
     }
 
-    pub fn twiny(&mut self) -> Axes {
+    pub fn twiny(&mut self, py: Python) -> PyResult<Py<Axes>> {
         let mut twin = Axes::new();
         twin.ylim = self.ylim;
         twin.is_twin_y = true;
-        self.twin_axes.push(twin.clone());
-        twin
+        let twin_py = Py::new(py, twin)?;
+        crate::utils::pyfuncs::init_axes_self_py(&twin_py, py);
+        self.twin_axes.push(twin_py.clone_ref(py));
+        Ok(twin_py)
+    }
+
+    /// 注册二级坐标轴（secondary_xaxis / secondary_yaxis）。
+    /// `which` 为 "x" 或 "y"；`forward` 把主轴数据映射到二级刻度值，`inverse` 可选。
+    #[pyo3(signature = (which, location, forward, inverse=None))]
+    pub fn register_secondary_axis(
+        &mut self,
+        which: &str,
+        location: &str,
+        forward: Py<PyAny>,
+        inverse: Option<Py<PyAny>>,
+    ) {
+        let spec = SecondaryAxisSpec {
+            forward,
+            inverse,
+            location: location.to_string(),
+            label: String::new(),
+        };
+        if which == "y" {
+            self.secondary_y = Some(spec);
+        } else {
+            self.secondary_x = Some(spec);
+        }
+    }
+
+    /// 设置二级坐标轴的轴标签（由 _SecondaryAxis.set_xlabel/set_ylabel 回写）。
+    pub fn set_secondary_label(&mut self, which: &str, label: &str) {
+        if which == "y" {
+            if let Some(spec) = &mut self.secondary_y {
+                spec.label = label.to_string();
+            }
+        } else if let Some(spec) = &mut self.secondary_x {
+            spec.label = label.to_string();
+        }
     }
 
     pub fn cla(&mut self) {
@@ -2514,22 +2771,45 @@ impl Axes {
             if do_manual_x {
                 drop(mesh_builder);
                 let (x_lo, x_hi) = (x_min.min(x_max), x_min.max(x_max));
+                // 若设置了主刻度 formatter（如 ConciseDateFormatter），一次性对落在数据区内
+                // 的刻度点调用 format_ticks 生成标签（其粒度依赖整体跨度），再按顺序取用。
+                let vis_points: Vec<f64> = x_key_points
+                    .iter()
+                    .cloned()
+                    .filter(|t| *t >= x_lo && *t <= x_hi)
+                    .collect();
+                let fmt_labels: Option<Vec<String>> =
+                    self.xaxis_major_formatter.as_ref().and_then(|fmt| {
+                        let pts = PyList::new(py, vis_points.iter().copied()).ok()?;
+                        fmt.bind(py)
+                            .call_method1("format_ticks", (pts,))
+                            .ok()?
+                            .extract::<Vec<String>>()
+                            .ok()
+                    });
                 let offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
                 let text_style: TextStyle = ("sans-serif", label_size)
                     .into_font()
                     .color(&BLACK)
                     .pos(Pos::new(HPos::Center, VPos::Top));
+                let mut vis_i = 0usize;
                 for &t in &x_key_points {
                     if t < x_lo || t > x_hi {
                         continue;
                     }
-                    let text = if xlog {
+                    let text = if let Some(labels) = &fmt_labels {
+                        labels
+                            .get(vis_i)
+                            .cloned()
+                            .unwrap_or_else(|| crate::figure::axes_mesh::format_linear_tick(t))
+                    } else if xlog {
                         format!("{:.1e}", 10.0f64.powf(t))
                     } else if has_xcat {
                         x_cat_fmt(&t)
                     } else {
                         crate::figure::axes_mesh::format_linear_tick(t)
                     };
+                    vis_i += 1;
                     chart
                         .draw_series(std::iter::once(
                             plotters::element::EmptyElement::at((t, y_min))

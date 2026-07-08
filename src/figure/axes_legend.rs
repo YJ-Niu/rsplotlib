@@ -264,8 +264,11 @@ where
         let entry_count = legend_labels.len();
         let x_range = (x_max - x_min).abs();
         let y_range = (y_max - y_min).abs();
-        let entry_height = y_range * 0.04;
-        let legend_height = entry_height * entry_count as f64 + y_range * 0.02;
+        // 字体整体放大后，图例每行需更多垂直空间：行高与上下留白较原先增大 50%，
+        // 使图例的上下总长度增加 50%，避免更大的字挤在一起。
+        const LEGEND_VSCALE: f64 = 1.5;
+        let entry_height = y_range * 0.04 * LEGEND_VSCALE;
+        let legend_height = entry_height * entry_count as f64 + y_range * 0.02 * LEGEND_VSCALE;
         let legend_width = x_range * 0.25;
 
         // 已知固定位置直接定位；其余（含 "best" 与未识别值）自动避让数据。

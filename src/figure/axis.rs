@@ -170,6 +170,38 @@ impl Axis {
         }
         None
     }
+
+    fn set_major_formatter(&mut self, py: Python<'_>, formatter: &Bound<'_, PyAny>) {
+        // 保存 formatter 引用（如 ConciseDateFormatter），渲染刻度标签时调用其
+        // format_ticks 生成文本。存到 parent Axes 上，供 render 读取。
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            if self.which == "x" {
+                ax.xaxis_major_formatter = Some(formatter.clone().unbind());
+            } else {
+                ax.yaxis_major_formatter = Some(formatter.clone().unbind());
+            }
+        }
+    }
+
+    fn get_major_formatter<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let ax = ax_bound.borrow();
+            let stored = if self.which == "x" {
+                ax.xaxis_major_formatter.as_ref()
+            } else {
+                ax.yaxis_major_formatter.as_ref()
+            };
+            if let Some(fmt) = stored {
+                return Some(fmt.bind(py).clone());
+            }
+        }
+        None
+    }
 }
 
 #[pyclass]

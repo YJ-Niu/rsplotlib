@@ -87,6 +87,31 @@ def _categorical(vals):
     return vals, None
 
 
+def _maybe_dates_to_num(seq):
+    """日期坐标支持：若 seq 为 datetime/date 序列 (含 numpy datetime64 数组，
+    经 .tolist() 得 datetime 对象)，转为自 1970-01-01 起天数的 float 列表；
+    否则返回 None。与 matplotlib 日期约定一致，供 ConciseDateFormatter 反解。
+    """
+    import datetime as _dt
+    if seq is None or isinstance(seq, (str, _dt.date, _dt.datetime)):
+        return None
+    lst = _to_list(seq)
+    if not isinstance(lst, (list, tuple)) or len(lst) == 0:
+        return None
+    if not isinstance(lst[0], (_dt.date, _dt.datetime)):
+        return None
+    epoch = _dt.datetime(1970, 1, 1)
+    out = []
+    for v in lst:
+        if isinstance(v, _dt.datetime):
+            out.append((v - epoch).total_seconds() / 86400.0)
+        elif isinstance(v, _dt.date):
+            out.append((_dt.datetime(v.year, v.month, v.day) - epoch).total_seconds() / 86400.0)
+        else:
+            return None
+    return out
+
+
 def _is_scatter_sequence(obj):
     """判断是否为序列（含 rsnumpy 数组），但排除字符串标量。"""
     if obj is None or isinstance(obj, str):
@@ -1803,6 +1828,23 @@ class _AxesArray:
         return f'AxesArray(shape={self.shape})'
 
 
+def _apply_layout(fig, kwargs):
+    """把 matplotlib 的 layout 关键字转成后端智能均匀边距开关。
+
+    layout='constrained'/'tight'/'compressed'（或已弃用的 constrained_layout=True /
+    tight_layout=True）时，启用 constrained 智能布局：渲染时按各边装饰范围反解四周
+    边距，使图四周留白均匀、适中（保持 figsize 不变）。其余取值不启用。
+    """
+    setter = getattr(fig, 'set_constrained_layout', None)
+    if setter is None:
+        return
+    layout = kwargs.get('layout')
+    if isinstance(layout, str) and layout.lower() in ('constrained', 'tight', 'compressed'):
+        setter(True)
+    elif kwargs.get('constrained_layout') or kwargs.get('tight_layout'):
+        setter(True)
+
+
 def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     """创建子图网格 (Figure + Axes)。
 
@@ -1828,6 +1870,18 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     result = _rsplotlib.subplots(nrows, ncols, figsize, dpi)
     fig = result[0]
 
+    # gridspec_kw={'wspace':.., 'hspace':..} 与 matplotlib 一致地控制子图间距，
+    # 复用 subplots_adjust 的存储路径（在渲染阶段覆盖默认/启发式间距）。
+    gridspec_kw = kwargs.get('gridspec_kw')
+    if gridspec_kw:
+        ws = gridspec_kw.get('wspace')
+        hs = gridspec_kw.get('hspace')
+        if ws is not None or hs is not None:
+            fig.subplots_adjust(wspace=ws, hspace=hs)
+
+    # layout='constrained'/'tight' 开启智能均匀边距（保持 figsize 不变）。
+    _apply_layout(fig, kwargs)
+
     if nrows == 1 and ncols == 1:
         single = result[1]
         if squeeze:
@@ -1843,6 +1897,48 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     if squeeze and ncols == 1:
         return fig, _AxesArray(flat, (nrows,))
     return fig, _AxesArray(flat, (nrows, ncols))
+
+
+def subplot_mosaic(mosaic, figsize=None, dpi=None, **kwargs):
+    """按标签网格创建命名子图 (matplotlib subplot_mosaic 兼容, 近似实现)。
+
+    mosaic 为二维标签列表 (或多行字符串)：相同标签在网格中的矩形包围盒合并为
+    一个跨格子图，'.' 或 None 表示空位。返回 (Figure, {label: Axes})。
+    layout 等布局关键字被接受但当前不生效。
+    """
+    from .layout.gridspec import SubplotSpec
+    if isinstance(mosaic, str):
+        rows = [list(line.strip()) for line in mosaic.strip().splitlines() if line.strip()]
+    else:
+        rows = [list(r) for r in mosaic]
+    nrows = len(rows)
+    ncols = max((len(r) for r in rows), default=0)
+    # 收集每个标签的矩形包围盒 (row_start, row_end, col_start, col_end)。
+    boxes = {}
+    order = []
+    for ri, row in enumerate(rows):
+        for ci, label in enumerate(row):
+            if label is None or label == '.':
+                continue
+            if label not in boxes:
+                boxes[label] = [ri, ri + 1, ci, ci + 1]
+                order.append(label)
+            else:
+                b = boxes[label]
+                b[0] = min(b[0], ri)
+                b[1] = max(b[1], ri + 1)
+                b[2] = min(b[2], ci)
+                b[3] = max(b[3], ci + 1)
+    fig = figure(figsize=figsize, dpi=dpi, **kwargs)
+    axd = {}
+    for label in order:
+        rs, re, cs, ce = boxes[label]
+        spec = SubplotSpec(None, rs, re, cs, ce)
+        # Rust add_subplot 依据 spec 的 numRows/numCols 定位，须为整体网格尺寸。
+        spec.numRows = nrows
+        spec.numCols = ncols
+        axd[label] = fig.add_subplot(spec)
+    return fig, axd
 
 
 def subplot(*args, **kwargs):
@@ -1967,6 +2063,8 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
     else:
         w, h = _get_rcparams().get('figure.figsize', list(DEFAULT_FIGSIZE))
         fig.set_size(round(w * d), round(h * d))
+    # layout='constrained'/'tight' 开启智能均匀边距（保持 figsize 不变）。
+    _apply_layout(fig, kwargs)
     return fig
 
 
@@ -2011,7 +2109,7 @@ def savefig(fname, **kwargs):
         if dpi is not None:
             fig.savefig(fname, dpi)
         else:
-            fig.savefig(fname, dpi=DEFAULT_DPI)
+            fig.savefig(fname)
         return
     # 无 Figure 时回退到模块级
     if dpi is not None:
@@ -2172,10 +2270,124 @@ def _patch_figure_add_subplot():
 
     _rs.Figure.add_subplot = _add_subplot
 
+    def _fig_colorbar(self, mappable=None, ax=None, **kwargs):
+        """在目标子图上启用颜色条（近似）。优先用显式 ax，其次用 mappable 记录的
+        Axes，最后回退到当前 Axes。extend / shrink / aspect 等参数被接受但不生效。"""
+        target = ax
+        if target is None and mappable is not None:
+            target = getattr(mappable, 'axes', None)
+        if target is None:
+            target = _get_axes()
+        if target is not None and hasattr(target, 'enable_colorbar'):
+            target.enable_colorbar()
+        return None
+
+    _rs.Figure.colorbar = _fig_colorbar
+
+
+class _SecondaryAxis:
+    """secondary_xaxis / secondary_yaxis 返回的副轴句柄。
+
+    副轴本身不新建坐标系，仅由 Rust 后端在主轴对侧按变换后的刻度绘制刻度线/刻度值。
+    此对象持有父 Axes 引用与轴向 ('x'/'y')，让 set_xlabel/set_ylabel 把轴标签回写到
+    Rust；其余未实现的链式调用（set_xticks / tick_params 等）由 __getattr__ 吸收为空操作。
+    """
+
+    def __init__(self, parent=None, which='x'):
+        self._parent = parent
+        self._which = which
+
+    def _set_label(self, label):
+        if self._parent is not None:
+            self._parent.set_secondary_label(self._which, _render_mathtext(str(label)))
+        return None
+
+    def set_xlabel(self, label, *args, **kwargs):
+        return self._set_label(label)
+
+    def set_ylabel(self, label, *args, **kwargs):
+        return self._set_label(label)
+
+    def __getattr__(self, name):
+        def _noop(*args, **kwargs):
+            return None
+        return _noop
+
+
+class _ScalarMappable:
+    """colorbar 所需的可映射句柄（近似）。持有绘制所在的 Axes 引用，
+    供 Figure.colorbar 在未显式传 ax 时定位目标子图。"""
+
+    def __init__(self, ax):
+        self.axes = ax
+
+
+def _norm_vminmax(norm, vmin, vmax):
+    """从 matplotlib Normalize/LogNorm 对象取 vmin/vmax（显式 vmin/vmax 优先）。"""
+    if norm is not None:
+        if vmin is None:
+            vmin = getattr(norm, 'vmin', None)
+        if vmax is None:
+            vmax = getattr(norm, 'vmax', None)
+    return vmin, vmax
+
+
+def _seq_minmax(a):
+    """序列/数组的 (min, max)，无法解析时返回 (None, None)。"""
+    if a is None:
+        return None, None
+    try:
+        if hasattr(a, 'min') and hasattr(a, 'max'):
+            return float(a.min()), float(a.max())
+    except (TypeError, ValueError):
+        pass
+    lst = _to_list(a)
+    if isinstance(lst, (list, tuple)) and lst:
+        try:
+            nums = [float(v) for v in lst]
+            return min(nums), max(nums)
+        except (TypeError, ValueError):
+            return None, None
+    return None, None
+
 
 def _patch_axes():
     """为 Rust Axes 类添加 Python 级别的 API 兼容补丁。"""
     from . import rsplotlib as _rs
+
+    # secondary_xaxis / secondary_yaxis: 在主轴对侧绘制变换后的刻度（见 _SecondaryAxis）。
+    # functions 为 (forward, inverse) 元组或单个可调用；forward 把主轴数据映射到副轴刻度值。
+    def _parse_secondary_functions(functions):
+        forward = None
+        inverse = None
+        if isinstance(functions, (tuple, list)):
+            if len(functions) >= 1:
+                forward = functions[0]
+            if len(functions) >= 2:
+                inverse = functions[1]
+        elif callable(functions):
+            forward = functions
+        if not callable(forward):
+            def forward(v):
+                return v
+        if not callable(inverse):
+            inverse = None
+        return forward, inverse
+
+    def _secondary_xaxis(self, location=None, functions=None, *args, **kwargs):
+        forward, inverse = _parse_secondary_functions(functions)
+        loc = location if isinstance(location, str) else 'top'
+        self.register_secondary_axis('x', loc, forward, inverse)
+        return _SecondaryAxis(self, 'x')
+
+    def _secondary_yaxis(self, location=None, functions=None, *args, **kwargs):
+        forward, inverse = _parse_secondary_functions(functions)
+        loc = location if isinstance(location, str) else 'right'
+        self.register_secondary_axis('y', loc, forward, inverse)
+        return _SecondaryAxis(self, 'y')
+
+    _rs.Axes.secondary_xaxis = _secondary_xaxis
+    _rs.Axes.secondary_yaxis = _secondary_yaxis
 
     # plot: 支持单参数 ax.plot(y)
     _orig_plot = _rs.Axes.plot
@@ -2183,11 +2395,20 @@ def _patch_axes():
     def _plot(self, *args, **kwargs):
         if isinstance(kwargs.get('label'), str):
             kwargs['label'] = _render_mathtext(kwargs['label'])
+        # 日期坐标：将 datetime/date 序列的 x 转为自 1970-01-01 起天数的 float，
+        # 交由 ConciseDateFormatter 反解为日期标签。
+        if len(args) >= 2:
+            xnum = _maybe_dates_to_num(args[0])
+            if xnum is not None:
+                args = (xnum,) + tuple(args[1:])
         if len(args) == 1:
             y = args[0]
             x = list(range(len(y) if hasattr(y, '__len__') else 0))
-            return _orig_plot(self, x, y, **kwargs)
-        return _orig_plot(self, *args, **kwargs)
+            line = _orig_plot(self, x, y, **kwargs)
+        else:
+            line = _orig_plot(self, *args, **kwargs)
+        # matplotlib: plot() 返回 Line2D 列表, 支持 `l, = ax.plot(...)` 解包。
+        return [line]
 
     _rs.Axes.plot = _plot
 
@@ -2211,6 +2432,13 @@ def _patch_axes():
 
     def _scatter(self, x, y, s=None, c=None, marker=None, label=None, alpha=1.0,
                  edgecolor=None, linewidth=None, **kwargs):
+        # matplotlib data= 关键字：x/y 位置参数与 c/s 若为字符串键，从 data 中取值。
+        data = kwargs.pop('data', None)
+        if data is not None:
+            x = _replace_from_data(x, data)
+            y = _replace_from_data(y, data)
+            c = _replace_from_data(c, data)
+            s = _replace_from_data(s, data)
         # 复数名 edgecolors/linewidths 为 matplotlib 主用形式（OO API 以关键字传入），
         # 单数名 edgecolor/linewidth 既是别名、也是模块级 scatter() 路由过来的位置参数。
         edgecolors = kwargs.pop('edgecolors', None)
@@ -2236,6 +2464,122 @@ def _patch_axes():
 
     _rs.Axes.scatter = _scatter
 
+    # imshow: 吸收 matplotlib 的 norm 参数（从 Normalize/LogNorm 取 vmin/vmax），
+    # 并返回可映射句柄供 fig.colorbar 使用。Rust imshow 本身不接受 norm。
+    _orig_imshow = _rs.Axes.imshow
+
+    def _imshow(self, x, cmap='viridis', aspect='equal', vmin=None, vmax=None,
+                alpha=None, origin=None, interpolation=None, norm=None, **kwargs):
+        vmin, vmax = _norm_vminmax(norm, vmin, vmax)
+        cmap = cmap or 'viridis'
+        aspect = aspect or 'equal'
+        _orig_imshow(self, x, cmap=cmap, aspect=aspect, vmin=vmin, vmax=vmax,
+                     alpha=alpha, origin=origin, interpolation=interpolation)
+        return _ScalarMappable(self)
+
+    _rs.Axes.imshow = _imshow
+
+    # pcolormesh / contourf: 后端未原生支持，近似为 imshow 上色
+    # (origin='lower', aspect='auto' 使色块填满子图框)。返回可映射句柄供 colorbar 使用。
+    def _pcolormesh(self, *args, **kwargs):
+        cmap = kwargs.pop('cmap', None) or 'viridis'
+        vmin = kwargs.pop('vmin', None)
+        vmax = kwargs.pop('vmax', None)
+        vmin, vmax = _norm_vminmax(kwargs.pop('norm', None), vmin, vmax)
+        z = args[2] if len(args) >= 3 else args[0]
+        self.imshow(z, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax, origin='lower')
+        return _ScalarMappable(self)
+
+    def _contourf(self, *args, **kwargs):
+        cmap = kwargs.pop('cmap', None) or 'viridis'
+        vmin = kwargs.pop('vmin', None)
+        vmax = kwargs.pop('vmax', None)
+        vmin, vmax = _norm_vminmax(kwargs.pop('norm', None), vmin, vmax)
+        levels = kwargs.pop('levels', None)
+        if levels is not None:
+            lo, hi = _seq_minmax(levels)
+            vmin = lo if vmin is None else vmin
+            vmax = hi if vmax is None else vmax
+        z = args[2] if len(args) >= 3 else args[0]
+        self.imshow(z, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax, origin='lower')
+        return _ScalarMappable(self)
+
+    _rs.Axes.pcolormesh = _pcolormesh
+    _rs.Axes.contourf = _contourf
+
+    # bar / barh: 支持类别坐标（字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签）。
+    _orig_bar = _rs.Axes.bar
+    _orig_barh = _rs.Axes.barh
+
+    def _bar(self, x, height, width=0.8, color=None, label=None, **kwargs):
+        x = _to_list(x)
+        tick_labels = None
+        if isinstance(x, (list, tuple)) and any(isinstance(v, str) for v in x):
+            tick_labels = [str(v) for v in x]
+            x = list(range(len(x)))
+        if isinstance(label, str):
+            label = _render_mathtext(label)
+        result = _orig_bar(self, x, height, width, color, label)
+        if tick_labels is not None:
+            self.set_xticks(list(range(len(tick_labels))), tick_labels)
+        return result
+
+    def _barh(self, y, width, height=0.8, color=None, label=None, **kwargs):
+        y = _to_list(y)
+        tick_labels = None
+        if isinstance(y, (list, tuple)) and any(isinstance(v, str) for v in y):
+            tick_labels = [str(v) for v in y]
+            y = list(range(len(y)))
+        if isinstance(label, str):
+            label = _render_mathtext(label)
+        result = _orig_barh(self, y, width, height, color, label)
+        if tick_labels is not None:
+            self.set_yticks(list(range(len(tick_labels))), tick_labels)
+        return result
+
+    _rs.Axes.bar = _bar
+    _rs.Axes.barh = _barh
+
+    # legend: 支持 legend()、legend(loc=...)、legend(handles, labels)。
+    # handles 为 Line2D 句柄时，从其 get_color/get_linestyle/... 取样式，labels 取文本，
+    # 组装为显式图例条目（替换自动收集的条目）。
+    _orig_legend = _rs.Axes.legend
+
+    def _legend(self, *args, **kwargs):
+        loc = kwargs.pop('loc', 'best')
+        handles = kwargs.pop('handles', None)
+        labels = kwargs.pop('labels', None)
+        if len(args) == 2:
+            handles, labels = args[0], args[1]
+        elif len(args) == 1:
+            if isinstance(args[0], str):
+                loc = args[0]
+            else:
+                labels = args[0]
+        if not isinstance(loc, str):
+            loc = 'best'
+        if handles is not None and labels is not None:
+            entries = []
+            for h, lbl in zip(handles, _to_list(labels)):
+                getc = getattr(h, 'get_color', None)
+                color = getc() if getc is not None else None
+                getls = getattr(h, 'get_linestyle', None)
+                ls = getls() if getls is not None else None
+                getlw = getattr(h, 'get_linewidth', None)
+                lw = getlw() if getlw is not None else None
+                getm = getattr(h, 'get_marker', None)
+                marker = getm() if getm is not None else None
+                color = color if isinstance(color, str) else 'C0'
+                ls = ls if (isinstance(ls, str) and ls.strip()) else '-'
+                lw = 1.5 if lw is None else float(lw)
+                if not (isinstance(marker, str) and marker.strip() not in ('', 'none')):
+                    marker = None
+                entries.append((_render_mathtext(str(lbl)), color, ls, marker, lw))
+            return self.set_legend_entries(entries, loc)
+        return _orig_legend(self, loc)
+
+    _rs.Axes.legend = _legend
+
     # set_xlim / set_ylim: 支持元组参数 (left, right)
     _orig_set_xlim = _rs.Axes.set_xlim
     _orig_set_ylim = _rs.Axes.set_ylim
@@ -2254,6 +2598,48 @@ def _patch_axes():
 
     _rs.Axes.set_xlim = _set_xlim
     _rs.Axes.set_ylim = _set_ylim
+
+    # set_xticks / set_yticks: 支持第二个位置参数 labels，且把 rsnumpy 数组归一为 list。
+    _orig_set_xticks = _rs.Axes.set_xticks
+    _orig_set_yticks = _rs.Axes.set_yticks
+
+    def _set_xticks(self, ticks=None, labels=None, **kwargs):
+        ticks = _to_list(ticks) if ticks is not None else None
+        labels = [str(x) for x in _to_list(labels)] if labels is not None else None
+        return _orig_set_xticks(self, ticks, labels)
+
+    def _set_yticks(self, ticks=None, labels=None, **kwargs):
+        ticks = _to_list(ticks) if ticks is not None else None
+        labels = [str(x) for x in _to_list(labels)] if labels is not None else None
+        return _orig_set_yticks(self, ticks, labels)
+
+    _rs.Axes.set_xticks = _set_xticks
+    _rs.Axes.set_yticks = _set_yticks
+
+    # axis: 支持序列 [xmin,xmax,ymin,ymax] 设定轴限，及 'off'/'on'/'equal' 等字符串。
+    _orig_axis = _rs.Axes.axis
+
+    def _axis(self, arg=None, **kwargs):
+        if isinstance(arg, (list, tuple)):
+            if len(arg) == 4:
+                xmin, xmax, ymin, ymax = arg
+                self.set_xlim(xmin, xmax)
+                self.set_ylim(ymin, ymax)
+            return None
+        if arg is False:
+            arg = 'off'
+        elif arg is True:
+            arg = 'on'
+        if isinstance(arg, str):
+            if arg in ('equal', 'scaled', 'image', 'square'):
+                setter = getattr(self, 'set_aspect', None)
+                if setter is not None:
+                    setter('equal')
+                return None
+            return _orig_axis(self, arg)
+        return _orig_axis(self, None)
+
+    _rs.Axes.axis = _axis
 
     # 文本类方法：把 matplotlib mathtext ($...$) 转成 Unicode 后再下沉到 Rust。
     # OO API (ax.set_xlabel / ax.text ...) 不经过模块级 plt.* 函数，需在此单独接入。
