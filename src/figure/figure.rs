@@ -1352,7 +1352,8 @@ impl Figure {
         let eff_right = if has_right_colorbar {
             self.subplot_right
         } else {
-            1.0 - (pad + right_ext) / total_w
+            // 右侧留白比其余三边多 50%（pad*1.5），使右缘不显局促。
+            1.0 - (pad * 1.5 + right_ext) / total_w
         };
 
         // 防御性夹取：极端装饰下仍保证绘图区每维至少约一半可用，不越界、不塌缩。
