@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use crate::core::colors::{RgbColor, default_color, median, parse_color, to_plotters_color};
 use crate::core::elements::{ArrowSpec, PlotElement};
 use crate::core::marker::draw_marker;
-use crate::figure::axes::scale_font;
+use crate::figure::axes::{DEFAULT_FONT_SCALE, scale_font};
 use crate::utils::font_stack;
 use crate::utils::mathtext::{self, HAlign, VAlign};
 
@@ -1740,10 +1740,12 @@ where
                         let ly = mid_angle.sin() * label_r * sy + oy;
                         // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
                         let pie_family = font_stack::select_family(l);
-                        let pie_label_style: TextStyle =
-                            FontDesc::from((pie_family.as_str(), scale_font(12.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        let pie_label_style: TextStyle = FontDesc::from((
+                            pie_family.as_str(),
+                            scale_font(12.0 * DEFAULT_FONT_SCALE, font_scale),
+                        ))
+                        .color(&BLACK)
+                        .pos(Pos::new(HPos::Center, VPos::Center));
                         chart
                             .draw_series(std::iter::once(plotters::element::Text::new(
                                 l.to_string(),
@@ -1767,10 +1769,12 @@ where
                         let tx = mid_angle.cos() * text_r * sx + ox;
                         let ty = mid_angle.sin() * text_r * sy + oy;
                         let autopct_family = font_stack::select_family(&text);
-                        let autopct_style: TextStyle =
-                            FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        let autopct_style: TextStyle = FontDesc::from((
+                            autopct_family.as_str(),
+                            scale_font(11.0 * DEFAULT_FONT_SCALE, font_scale),
+                        ))
+                        .color(&BLACK)
+                        .pos(Pos::new(HPos::Center, VPos::Center));
                         chart
                             .draw_series(std::iter::once(plotters::element::Text::new(
                                 text,
@@ -2206,10 +2210,12 @@ where
                         && let Some(l) = lbls.get(i)
                     {
                         let box_family = font_stack::select_family(l);
-                        let box_label_style: TextStyle =
-                            FontDesc::from((box_family.as_str(), scale_font(11.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        let box_label_style: TextStyle = FontDesc::from((
+                            box_family.as_str(),
+                            scale_font(11.0 * DEFAULT_FONT_SCALE, font_scale),
+                        ))
+                        .color(&BLACK)
+                        .pos(Pos::new(HPos::Center, VPos::Center));
                         chart
                             .draw_series(std::iter::once(plotters::element::Text::new(
                                 l.to_string(),

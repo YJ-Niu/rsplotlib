@@ -377,14 +377,17 @@ pub fn set_font_size_factor(factor: f64) {
     FONT_SIZE_FACTOR.with(|c| c.set(f));
 }
 
-/// 字体大小缩放并四舍五入到1位小数
-/// 补偿 plotters 内部对 font size 的换算（实测比预期小约 30%），
-/// 并整体放大 20%（`FONT_SIZE_BOOST`）使默认字体更醒目。
+/// 默认字体尺寸的整体放大倍数：仅用于各处**未被用户显式指定**的默认字号
+/// （刻度值、坐标轴标签、标题、图例、颜色条等），在传入 [`scale_font`] 之前先乘以
+/// 此系数，使默认文字更醒目。用户显式设置的字号不经此系数，按原值渲染。
+pub const DEFAULT_FONT_SCALE: f64 = 2.0;
+
+/// 字体大小缩放并四舍五入到整数像素：`size × font_scale(dpi/72) × figsize 因子`。
+/// 纯缩放，不含任何默认字号加成——默认字号的放大在调用点用 [`DEFAULT_FONT_SCALE`]
+/// 完成，以免波及用户显式指定的字号。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
-    /// 默认字体整体放大系数（+20%）。
-    const FONT_SIZE_BOOST: f64 = 2.0;
     let figsize_factor = FONT_SIZE_FACTOR.with(|c| c.get());
-    (size * font_scale * figsize_factor * FONT_SIZE_BOOST).round()
+    (size * font_scale * figsize_factor).round()
 }
 
 /// 解析 matplotlib `arrowprops` dict 为 [`ArrowSpec`]。
@@ -623,6 +626,58 @@ pub struct SecondaryAxisSpec {
     pub label: String,
 }
 
+/// 颜色条 (colorbar) 的完整配置，对应 matplotlib `Figure.colorbar` 的常用参数。
+///
+/// 颜色条渲染时从父子图数据区「窃取」一条空间：竖直（location right/left）占宽度，
+/// 水平（location top/bottom）占高度。`shrink` 缩放色带长度，`aspect` 决定长短比，
+/// `pad` 是色带与数据区的间隙（占父区比例），`extend` 控制越界三角端。
+#[derive(Clone)]
+pub struct ColorbarSpec {
+    pub cmap: String,
+    pub vmin: f64,
+    pub vmax: f64,
+    /// "vertical" | "horizontal"
+    pub orientation: String,
+    /// "right" | "left" | "top" | "bottom"
+    pub location: String,
+    pub shrink: f64,
+    pub aspect: f64,
+    pub pad: f64,
+    pub fraction: f64,
+    pub label: String,
+    /// "neither" | "both" | "min" | "max"
+    pub extend: String,
+    pub ticks: Option<Vec<f64>>,
+    pub format: Option<String>,
+}
+
+impl ColorbarSpec {
+    /// 由 (cmap, vmin, vmax) 构造默认竖直右置颜色条（其余参数取 matplotlib 缺省）。
+    pub fn from_mappable(cmap: String, vmin: f64, vmax: f64) -> Self {
+        ColorbarSpec {
+            cmap,
+            vmin,
+            vmax,
+            orientation: "vertical".to_string(),
+            location: "right".to_string(),
+            shrink: 1.0,
+            aspect: 20.0,
+            pad: 0.05,
+            fraction: 0.15,
+            label: String::new(),
+            extend: "neither".to_string(),
+            ticks: None,
+            format: None,
+        }
+    }
+
+    /// location 为 top/bottom 即水平方向，其余为竖直方向。
+    pub fn is_horizontal(&self) -> bool {
+        matches!(self.location.as_str(), "top" | "bottom")
+            || self.orientation.eq_ignore_ascii_case("horizontal")
+    }
+}
+
 #[pyclass(skip_from_py_object)]
 pub struct Axes {
     pub elements: Vec<PlotElement>,
@@ -692,8 +747,8 @@ pub struct Axes {
     pub y_axis_inverted: bool,
     /// 最近一次可映射绘制 (scatter 数值 c / imshow) 的 (cmap, vmin, vmax)，供 colorbar 使用
     pub mappable: Option<(String, f64, f64)>,
-    /// 若为 Some，则渲染时在数据区右侧绘制颜色条 (cmap, vmin, vmax)
-    pub colorbar: Option<(String, f64, f64)>,
+    /// 若为 Some，则渲染时在数据区某侧绘制颜色条（含方向/尺寸/端点等完整配置）。
+    pub colorbar: Option<ColorbarSpec>,
     /// 纵横比：None = 'auto'（数据区填满子图框）；Some(a) = 固定比例，a 为
     /// 「一个 y 数据单位的显示长度 / 一个 x 数据单位的显示长度」，'equal' 即 Some(1.0)，
     /// 使 X/Y 轴单位长度相同（imshow 默认）。
@@ -878,7 +933,7 @@ impl Axes {
             ylabel_family: None,
             ylabel_loc: "center".to_string(),
             title: String::new(),
-            title_fontsize: 9.6,
+            title_fontsize: 9.6 * DEFAULT_FONT_SCALE,
             title_color: RgbColor(0, 0, 0),
             title_family: None,
             title_loc: "center".to_string(),
@@ -918,7 +973,7 @@ impl Axes {
             tick_top: true,
             tick_left: true,
             tick_right: true,
-            tick_labelsize: 12.0,
+            tick_labelsize: 12.0 * DEFAULT_FONT_SCALE,
             axis_off: false,
             self_py: None,
             xaxis_major_locator: None,
@@ -1531,11 +1586,87 @@ impl Axes {
 
     /// 基于当前记录的 mappable 启用颜色条；无 mappable 时按 viridis / [0,1] 兜底。
     pub fn enable_colorbar(&mut self) {
-        self.colorbar = Some(
-            self.mappable
-                .clone()
-                .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0)),
-        );
+        let (cmap, vmin, vmax) = self
+            .mappable
+            .clone()
+            .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0));
+        self.colorbar = Some(ColorbarSpec::from_mappable(cmap, vmin, vmax));
+    }
+
+    /// 启用颜色条并应用 matplotlib `Figure.colorbar` 的完整参数。
+    ///
+    /// location 优先于 orientation（若给定 top/bottom 则强制水平）。未提供的参数
+    /// 沿用 `from_mappable` 的 matplotlib 缺省值。
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (location=None, orientation=None, shrink=None, aspect=None,
+        pad=None, fraction=None, label=None, extend=None, ticks=None, format=None))]
+    pub fn enable_colorbar_ex(
+        &mut self,
+        location: Option<String>,
+        orientation: Option<String>,
+        shrink: Option<f64>,
+        aspect: Option<f64>,
+        pad: Option<f64>,
+        fraction: Option<f64>,
+        label: Option<String>,
+        extend: Option<String>,
+        ticks: Option<Vec<f64>>,
+        format: Option<String>,
+    ) {
+        let (cmap, vmin, vmax) = self
+            .mappable
+            .clone()
+            .unwrap_or_else(|| ("viridis".to_string(), 0.0, 1.0));
+        let mut spec = ColorbarSpec::from_mappable(cmap, vmin, vmax);
+
+        // location 优先决定方向；仅给 orientation 时据其推导 location。
+        match location.as_deref().map(|s| s.to_ascii_lowercase()) {
+            Some(loc) if matches!(loc.as_str(), "left" | "right" | "top" | "bottom") => {
+                spec.orientation = if matches!(loc.as_str(), "top" | "bottom") {
+                    "horizontal".to_string()
+                } else {
+                    "vertical".to_string()
+                };
+                spec.location = loc;
+            }
+            _ => {
+                if let Some(o) = orientation.as_deref().map(|s| s.to_ascii_lowercase())
+                    && o == "horizontal"
+                {
+                    spec.orientation = "horizontal".to_string();
+                    spec.location = "bottom".to_string();
+                }
+            }
+        }
+        if let Some(v) = shrink {
+            spec.shrink = v.clamp(0.05, 1.0);
+        }
+        if let Some(v) = aspect
+            && v > 0.0
+        {
+            spec.aspect = v;
+        }
+        if let Some(v) = pad
+            && v >= 0.0
+        {
+            spec.pad = v;
+        }
+        if let Some(v) = fraction
+            && v > 0.0
+        {
+            spec.fraction = v;
+        }
+        if let Some(l) = label {
+            spec.label = l;
+        }
+        if let Some(e) = extend.map(|s| s.to_ascii_lowercase())
+            && matches!(e.as_str(), "neither" | "both" | "min" | "max")
+        {
+            spec.extend = e;
+        }
+        spec.ticks = ticks.filter(|v| !v.is_empty());
+        spec.format = format;
+        self.colorbar = Some(spec);
     }
 
     #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]

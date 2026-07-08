@@ -603,7 +603,7 @@ impl Figure {
             // plotters 的 titled() 无法承载二维排版，把可能含 IR 的文本降级为单行近似。
             let sup_plain = crate::utils::mathtext::to_plain(&self.suptitle);
             let sup_family = font_stack::select_family(&sup_plain);
-            let sup_size = 12.0 * font_scale;
+            let sup_size = 12.0 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
             // plotters 的 titled() 会把标题带贴着画布顶边（起始 y=0），显得太靠上。
             // 先给顶部留一段内边距（约半个字号），使总标题下移，接近 matplotlib
             // suptitle 默认 y≈0.98 的观感。返回的子区域丢弃，子图仍绘制在原 root 上，
@@ -853,6 +853,66 @@ impl Figure {
                 continue;
             }
 
+            // —— 颜色条预算：从子图数据区「窃取」一条空间给色带 + 刻度 + 标签，使色带
+            // 紧贴数据区（无论子图在网格哪一列/行，都不再飘到图中间）。预算在 aspect
+            // 约束「之前」用单元格尺寸计算，避免与 imshow 的 aspect 缩放循环耦合；随后
+            // 从 sub_w/sub_h 扣除，left/top 方向还需相应平移 x0/y0 让出外侧空间。
+            let cb_layout: Option<(bool, String, f64, f64, f64)> = if let Some(spec) = &ax.colorbar
+            {
+                let horiz = spec.is_horizontal();
+                // 厚度取自「短轴」单元格尺寸 / aspect，夹在 [6, 40]*ss。
+                let short_ref = if horiz { sub_w } else { sub_h };
+                let thickness = (spec.shrink * short_ref / spec.aspect).clamp(6.0 * ss, 40.0 * ss);
+                // pad 以窃取方向的父区尺寸为基准。
+                let steal_dim = if horiz { sub_h } else { sub_w };
+                let pad_px = (spec.pad * steal_dim).max(2.0 * ss);
+                let tick_len = crate::figure::axes_colorbar::colorbar_tick_len(ss);
+                let tick_gap = tick_len + 3.0 * ss;
+                let cb_font = crate::figure::axes::scale_font(10.0, font_scale);
+                // 刻度值占位：竖直→最宽刻度值实测宽；水平→一个字高。
+                let tick_label_extent = if horiz {
+                    cb_font.ceil()
+                } else {
+                    let ticks = spec.ticks.clone().unwrap_or_else(|| {
+                        crate::figure::axes_mesh::nice_ticks(spec.vmin, spec.vmax)
+                    });
+                    let (lo, hi) = (spec.vmin.min(spec.vmax), spec.vmin.max(spec.vmax));
+                    let labels: Vec<String> = ticks
+                        .iter()
+                        .filter(|&&v| v >= lo - 1e-9 && v <= hi + 1e-9)
+                        .map(|&v| {
+                            crate::figure::axes_colorbar::fmt_colorbar_tick(
+                                v,
+                                spec.format.as_deref(),
+                            )
+                        })
+                        .collect();
+                    measure_max_text_width(&labels, cb_font) as f64
+                };
+                let label_col = if spec.label.is_empty() {
+                    0.0
+                } else {
+                    cb_font.ceil() + 6.0 * ss
+                };
+                let budget = pad_px + thickness + tick_gap + tick_label_extent + label_col;
+                Some((horiz, spec.location.clone(), thickness, pad_px, budget))
+            } else {
+                None
+            };
+            if let Some((horiz, ref location, _, _, budget)) = cb_layout {
+                if horiz {
+                    if location == "top" {
+                        y0 += budget;
+                    }
+                    sub_h = (sub_h - budget).max(1.0);
+                } else {
+                    if location == "left" {
+                        x0 += budget;
+                    }
+                    sub_w = (sub_w - budget).max(1.0);
+                }
+            }
+
             // 纵横比约束（imshow 默认 aspect='equal'）：使 X/Y 轴单位长度按给定比例一致。
             // aspect = 一个 y 单位显示长度 / 一个 x 单位显示长度；取能放进子图框的最大统一
             // 缩放，随后把缩小后的数据区在原框内居中（与 matplotlib anchor='C' 一致）。
@@ -1067,22 +1127,23 @@ impl Figure {
                 )?;
             }
 
-            // 颜色条：在数据区右侧空白 margin 内绘制渐变色带 + 刻度标签。
+            // 颜色条：在从数据区窃取的空间内绘制渐变色带 + 刻度 + 标签，紧贴数据区。
             // 需在 drop(ax) 之前读取 ax.colorbar。数据区四边像素坐标与 plotters
             // 布局一致（见上文 xlabel/ylabel 手动绘制处的推导）。
-            if let Some((cb_cmap, cb_vmin, cb_vmax)) = &ax.colorbar {
+            if let (Some(spec), Some((_, _, thickness, pad_px, _))) = (&ax.colorbar, &cb_layout) {
+                let data_left = chart_x0 + y_label_actual as f64;
                 let data_right = chart_x0 + chart_w;
                 let data_top = chart_y0 + margin_top as f64;
                 let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
                 crate::figure::axes_colorbar::draw_colorbar(
                     &root,
-                    cb_cmap,
-                    *cb_vmin,
-                    *cb_vmax,
+                    spec,
+                    *thickness,
+                    *pad_px,
+                    data_left,
                     data_right,
                     data_top,
                     data_bottom,
-                    total_w,
                     font_scale,
                     ss,
                 )?;
@@ -1240,8 +1301,7 @@ impl Figure {
     ///
     /// 反解依据主渲染循环几何：左缘 data 区左边 = eff_left*total_w，其外 y 装饰宽 = left_ext，
     /// 故 eff_left = (pad + left_ext)/total_w；右/下/上同理（上边因 uniform_top_reserve 会把
-    /// 数据区整体下压，需扣除该预留）。含 colorbar 的右缘子图因 colorbar 尺寸与右边距循环耦合，
-    /// 保留默认右边距以保证 colorbar 稳定绘制空间。
+    /// 数据区整体下压，需扣除该预留）。颜色条从子图数据区内部窃取空间绘制，不占外边距。
     #[allow(clippy::too_many_arguments)]
     fn compute_auto_margins(
         &self,
@@ -1266,7 +1326,6 @@ impl Figure {
         let mut right_ext = 0.0f64;
         let mut bottom_ext_ng = 0.0f64;
         let mut top_extra = 0.0f64;
-        let mut has_right_colorbar = false;
 
         for (i, ax_py) in self.axes_list.iter().enumerate() {
             let ax = ax_py.borrow(py);
@@ -1307,9 +1366,6 @@ impl Figure {
             if touches_right {
                 let re = subplot_right_axis_extent(py, &ax, font_scale, ss);
                 right_ext = right_ext.max(re).max(x_tick_half);
-                if ax.colorbar.is_some() {
-                    has_right_colorbar = true;
-                }
             }
             if touches_bottom && !is_regular_grid {
                 bottom_ext_ng =
@@ -1322,7 +1378,7 @@ impl Figure {
                     let ts = if ax.title_fontsize > 0.0 {
                         ax.title_fontsize
                     } else {
-                        9.6
+                        9.6 * crate::figure::axes::DEFAULT_FONT_SCALE
                     };
                     crate::figure::axes::scale_font(ts, font_scale) + title_gap as f64 + pad2 as f64
                 };
@@ -1344,17 +1400,14 @@ impl Figure {
         let mut margin_t_px = pad + top_extra;
         // 有 suptitle 时，图顶预留其文字带 + pad，避免总标题压到顶行子图。
         if !self.suptitle.is_empty() {
-            let sup_size = 12.0 * font_scale;
+            let sup_size = 12.0 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
             margin_t_px = margin_t_px.max(sup_size * 1.5 + pad);
         }
         let eff_top = 1.0 - margin_t_px / total_h;
 
-        let eff_right = if has_right_colorbar {
-            self.subplot_right
-        } else {
-            // 右侧留白比其余三边多 50%（pad*1.5），使右缘不显局促。
-            1.0 - (pad * 1.5 + right_ext) / total_w
-        };
+        // 右侧留白比其余三边多 50%（pad*1.5），使右缘不显局促。颜色条现从子图数据区
+        // 内部窃取空间绘制，不再影响右边距，故右缘统一按装饰宽度反解。
+        let eff_right = 1.0 - (pad * 1.5 + right_ext) / total_w;
 
         // 防御性夹取：极端装饰下仍保证绘图区每维至少约一半可用，不越界、不塌缩。
         (

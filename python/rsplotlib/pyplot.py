@@ -2211,15 +2211,69 @@ def axis(arg=None, **kwargs):
     return None
 
 
-def colorbar(mappable=None, **kwargs):
-    """在当前坐标区右侧添加颜色条。
+def _apply_colorbar(target, kwargs):
+    """把 matplotlib colorbar kwargs 解析后应用到目标 Axes。
 
-    颜色条基于最近一次可映射绘制（scatter 数值 c + cmap，或 imshow）记录的
-    (cmap, vmin, vmax) 信息渲染。若此前没有可映射绘制，则按 viridis / [0,1] 兜底。
+    支持 location / orientation / shrink / aspect / pad / fraction / label / extend /
+    ticks / format；其余参数（cax / use_gridspec / anchor / panchor / extendfrac /
+    extendrect / drawedges / boundaries / values / spacing 等）接受但当前不生效。
     """
-    ax = _get_axes()
-    if ax is not None and hasattr(ax, 'enable_colorbar'):
-        ax.enable_colorbar()
+    if target is None:
+        return None
+    ex = getattr(target, 'enable_colorbar_ex', None)
+    if ex is None:
+        if hasattr(target, 'enable_colorbar'):
+            target.enable_colorbar()
+        return None
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    ticks = kwargs.get('ticks')
+    ticks_list = None
+    if ticks is not None:
+        seq = _to_list(ticks)
+        if isinstance(seq, (list, tuple)):
+            ticks_list = [float(t) for t in seq if _f(t) is not None]
+
+    fmt = kwargs.get('format')
+    location = kwargs.get('location')
+    orientation = kwargs.get('orientation')
+    extend = kwargs.get('extend')
+    label = kwargs.get('label')
+
+    ex(
+        location=str(location) if location is not None else None,
+        orientation=str(orientation) if orientation is not None else None,
+        shrink=_f(kwargs.get('shrink')),
+        aspect=_f(kwargs.get('aspect')),
+        pad=_f(kwargs.get('pad')),
+        fraction=_f(kwargs.get('fraction')),
+        label=str(label) if label is not None else None,
+        extend=str(extend) if extend is not None else None,
+        ticks=ticks_list,
+        format=fmt if isinstance(fmt, str) else None,
+    )
+    return None
+
+
+def colorbar(mappable=None, cax=None, ax=None, **kwargs):
+    """在目标坐标区上添加颜色条。
+
+    颜色条基于最近一次可映射绘制（scatter 数值 c + cmap，或 imshow / pcolormesh /
+    contourf）记录的 (cmap, vmin, vmax) 信息渲染。若此前没有可映射绘制，则按
+    viridis / [0,1] 兜底。支持 location/orientation/shrink/aspect/pad/fraction/
+    label/extend/ticks/format 等参数（见 `_apply_colorbar`）。
+    """
+    target = ax
+    if target is None and mappable is not None:
+        target = getattr(mappable, 'axes', None)
+    if target is None:
+        target = _get_axes()
+    _apply_colorbar(target, kwargs)
     return None
 
 
@@ -2270,16 +2324,16 @@ def _patch_figure_add_subplot():
 
     _rs.Figure.add_subplot = _add_subplot
 
-    def _fig_colorbar(self, mappable=None, ax=None, **kwargs):
-        """在目标子图上启用颜色条（近似）。优先用显式 ax，其次用 mappable 记录的
-        Axes，最后回退到当前 Axes。extend / shrink / aspect 等参数被接受但不生效。"""
+    def _fig_colorbar(self, mappable=None, cax=None, ax=None, use_gridspec=True, **kwargs):
+        """在目标子图上启用颜色条。优先用显式 ax，其次用 mappable 记录的 Axes，最后
+        回退到当前 Axes。支持 location/orientation/shrink/aspect/pad/fraction/label/
+        extend/ticks/format 等参数（见 `_apply_colorbar`）。"""
         target = ax
         if target is None and mappable is not None:
             target = getattr(mappable, 'axes', None)
         if target is None:
             target = _get_axes()
-        if target is not None and hasattr(target, 'enable_colorbar'):
-            target.enable_colorbar()
+        _apply_colorbar(target, kwargs)
         return None
 
     _rs.Figure.colorbar = _fig_colorbar

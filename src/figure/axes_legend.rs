@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 use crate::core::colors::{RgbColor, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
-use crate::figure::axes::scale_font;
+use crate::figure::axes::{DEFAULT_FONT_SCALE, scale_font};
 use crate::utils::mathtext::{self, HAlign, VAlign};
 
 /// 采样一个矩形填充区域内的代表点（3x3 网格），用于图例 "best" 位置的遮挡评估。
@@ -535,7 +535,7 @@ where
 
             // 图例文字相对线条/marker 略微上移以视觉居中：普通文字上移 20%，
             // 含数学排版（上/下标、分式、根号等）的文字块更高，上移 45%。
-            let label_fs = scale_font(11.0, font_scale);
+            let label_fs = scale_font(11.0 * DEFAULT_FONT_SCALE, font_scale);
             let text_nudge = if mathtext::contains_ir(label) {
                 -0.45 * label_fs
             } else {
