@@ -53,9 +53,18 @@ class Normalize:
         return self._apply(value)
 
     def _apply(self, value):
-        if _is_sequence(value):
-            return [self._normalize_scalar(v) for v in _flatten(value)]
-        return self._normalize_scalar(value)
+        if not _is_sequence(value):
+            return self._normalize_scalar(value)
+        # 循环不变量外提：vmin/vmax 的 float 转换与除数只算一次，再逐元素映射。
+        seq = _flatten(value)
+        vmin = 0.0 if self.vmin is None else float(self.vmin)
+        vmax = 1.0 if self.vmax is None else float(self.vmax)
+        if vmax == vmin:
+            return [0.0] * len(seq)
+        inv = 1.0 / (vmax - vmin)
+        if self.clip:
+            return [max(0.0, min(1.0, (v - vmin) * inv)) for v in seq]
+        return [(v - vmin) * inv for v in seq]
 
     def __repr__(self):
         return f'Normalize(vmin={self.vmin}, vmax={self.vmax})'
@@ -90,6 +99,25 @@ class LogNorm(Normalize):
         if self.clip:
             t = max(0.0, min(1.0, t))
         return t
+
+    def _apply(self, value):
+        if not _is_sequence(value):
+            return self._normalize_scalar(value)
+        # 循环不变量外提：log(vmin) 与对数跨度只算一次，避免逐元素重复求 log。
+        seq = _flatten(value)
+        vmin = self.vmin
+        vmax = self.vmax
+        if vmin is None or vmax is None or vmin <= 0 or vmax <= 0:
+            return [0.0] * len(seq)
+        log_vmin = math.log(vmin)
+        span = math.log(vmax) - log_vmin
+        if span == 0.0:
+            return [0.0] * len(seq)
+        inv = 1.0 / span
+        if self.clip:
+            return [max(0.0, min(1.0, (math.log(v) - log_vmin) * inv)) if v > 0 else 0.0
+                    for v in seq]
+        return [(math.log(v) - log_vmin) * inv if v > 0 else 0.0 for v in seq]
 
     def __repr__(self):
         return f'LogNorm(vmin={self.vmin}, vmax={self.vmax})'

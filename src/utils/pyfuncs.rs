@@ -493,22 +493,21 @@ pub fn imsave(
     format: Option<&str>,
     dpi: f64,
 ) -> PyResult<()> {
-    let mut rows = crate::figure::axes::image_array_to_rgb_rows(&arr, cmap, vmin, vmax)?;
-    if rows.is_empty() || rows[0].is_empty() {
+    let (mut pixels, width_u, height_u) =
+        crate::figure::axes::image_array_to_rgb_rows(&arr, cmap, vmin, vmax)?;
+    if width_u == 0 || height_u == 0 {
         return Err(PyValueError::new_err("imsave: empty image array"));
     }
     // origin: 默认 "upper"（首行在顶部，行序即输出行序）；"lower" 需翻转行序。
     if matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower")) {
-        rows.reverse();
+        crate::figure::axes::flip_image_rows(&mut pixels, width_u, height_u);
     }
-    let height = rows.len() as u32;
-    let width = rows[0].len() as u32;
+    let height = height_u as u32;
+    let width = width_u as u32;
     // 展平为行主序 RGB 缓冲（每像素 R,G,B）。
-    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
-    for row in &rows {
-        for &(r, g, b) in row {
-            rgb.extend_from_slice(&[r, g, b]);
-        }
+    let mut rgb = Vec::with_capacity(width_u * height_u * 3);
+    for &(r, g, b) in &pixels {
+        rgb.extend_from_slice(&[r, g, b]);
     }
     let fmt = match format {
         Some(f) => f.trim().to_ascii_lowercase(),

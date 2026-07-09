@@ -37,44 +37,41 @@ fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     list.extract::<Vec<f64>>()
 }
 
-/// 将 Python 对象（list、numpy 数组等）转换为 Vec<Option<f64>>
-/// 支持 None 值和空字符串 ""（均视为无值）
-fn py_to_vec_option_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Option<f64>>> {
-    // 快路径：一维 numpy 风格数组直接读原始缓冲区。NaN 保留为 Some(nan)，
+/// 将 Python 对象（list、numpy 数组等）转换为 `Vec<f64>`，缺失值以 `NaN` 哨兵表示。
+/// 支持 None 值和空字符串 ""（均视为无值 → NaN），供 `PlotElement::Line` 的断点语义使用。
+fn py_to_vec_f64_gaps(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
+    // 快路径：一维 numpy 风格数组直接读原始缓冲区。NaN 保留为 NaN（既是缺失也是断点），
     // 与旧 .tolist() 路径行为一致（缺失值语义由上层 None/"" 负责，不在此处理）。
     if let Some((shape, flat)) = array_interface_flat(obj)
         && shape.len() == 1
     {
-        return Ok(flat.into_iter().map(Some).collect());
+        return Ok(flat);
     }
-    // 先尝试直接 extract
+    // 先尝试直接 extract 为可空序列，再映射 None → NaN
     if let Ok(v) = obj.extract::<Vec<Option<f64>>>() {
-        return Ok(v);
+        return Ok(v.into_iter().map(|o| o.unwrap_or(f64::NAN)).collect());
     }
     // 尝试调用 .tolist()（numpy 数组）
     if obj.hasattr("tolist")? {
         let list = obj.call_method0("tolist")?;
-        return list.extract::<Vec<Option<f64>>>();
+        if let Ok(v) = list.extract::<Vec<Option<f64>>>() {
+            return Ok(v.into_iter().map(|o| o.unwrap_or(f64::NAN)).collect());
+        }
     }
     // 尝试逐元素转换
     let mut result = Vec::new();
     for item in obj.try_iter()? {
         let item = item?;
         if item.is_none() {
-            result.push(None);
+            result.push(f64::NAN);
         } else if let Ok(v) = item.extract::<f64>() {
-            result.push(Some(v));
+            result.push(v);
         } else if let Ok(s) = item.extract::<String>() {
-            // 空字符串 "" 视为无值
+            // 空字符串 "" 视为无值；否则尝试解析为浮点数，失败也视为无值
             if s.is_empty() {
-                result.push(None);
+                result.push(f64::NAN);
             } else {
-                // 尝试将字符串解析为浮点数
-                if let Ok(v) = s.parse::<f64>() {
-                    result.push(Some(v));
-                } else {
-                    result.push(None);
-                }
+                result.push(s.parse::<f64>().unwrap_or(f64::NAN));
             }
         } else {
             return Err(PyValueError::new_err("Cannot convert element to f64"));
@@ -158,7 +155,9 @@ fn array_interface_flat(obj: &Bound<'_, PyAny>) -> Option<(Vec<usize>, Vec<f64>)
 /// （`py_to_vec_vec_vec_f64` + `rgb_pixels_from_3d`，可处理缺失通道）。
 /// 颜色约定同 `rgb_pixels_from_3d`：全局最大值 <= 1.0 视为 [0,1] 浮点（乘 255），
 /// 否则视为已是 0..255。
-fn rgb_rows_from_array_interface(obj: &Bound<'_, PyAny>) -> Option<Vec<Vec<(u8, u8, u8)>>> {
+fn rgb_rows_from_array_interface(
+    obj: &Bound<'_, PyAny>,
+) -> Option<(Vec<(u8, u8, u8)>, usize, usize)> {
     let (shape, flat) = array_interface_flat(obj)?;
     let &[rows, cols, ch] = shape.as_slice() else {
         return None;
@@ -174,21 +173,19 @@ fn rgb_rows_from_array_interface(obj: &Bound<'_, PyAny>) -> Option<Vec<Vec<(u8, 
     }
     let scale = if max_v <= 1.0 { 255.0 } else { 1.0 };
     let to_u8 = |v: f64| -> u8 { (v * scale).round().clamp(0.0, 255.0) as u8 };
-    let mut out = Vec::with_capacity(rows);
+    let mut out = Vec::with_capacity(rows * cols);
     for r in 0..rows {
-        let mut row = Vec::with_capacity(cols);
         let base_r = r * cols * ch;
         for c in 0..cols {
             let base = base_r + c * ch;
-            row.push((
+            out.push((
                 to_u8(flat[base]),
                 to_u8(flat[base + 1]),
                 to_u8(flat[base + 2]),
             ));
         }
-        out.push(row);
     }
-    Some(out)
+    Some((out, cols, rows))
 }
 
 /// 将 Python 对象转换为 Vec<Vec<f64>>（用于 boxplot、hist 等）
@@ -263,7 +260,7 @@ fn py_to_vec_vec_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<Vec<f64>>>>
 /// 遵循 matplotlib 约定：浮点 RGB 在 [0,1]，整数 RGB 在 [0,255]。以全局最大值判断：
 /// 最大值 <= 1.0 视为 [0,1] 浮点（乘 255），否则视为已是 0..255。多于 3 个通道
 /// （如 RGBA）时仅取前三个通道。
-fn rgb_pixels_from_3d(data: &[Vec<Vec<f64>>]) -> Vec<Vec<(u8, u8, u8)>> {
+fn rgb_pixels_from_3d(data: &[Vec<Vec<f64>>]) -> (Vec<(u8, u8, u8)>, usize, usize) {
     let mut max_v = 0.0f64;
     for row in data {
         for px in row {
@@ -276,18 +273,18 @@ fn rgb_pixels_from_3d(data: &[Vec<Vec<f64>>]) -> Vec<Vec<(u8, u8, u8)>> {
     }
     let scale = if max_v <= 1.0 { 255.0 } else { 1.0 };
     let to_u8 = |v: f64| -> u8 { (v * scale).round().clamp(0.0, 255.0) as u8 };
-    data.iter()
-        .map(|row| {
-            row.iter()
-                .map(|px| {
-                    let r = px.first().copied().unwrap_or(0.0);
-                    let g = px.get(1).copied().unwrap_or(0.0);
-                    let b = px.get(2).copied().unwrap_or(0.0);
-                    (to_u8(r), to_u8(g), to_u8(b))
-                })
-                .collect()
-        })
-        .collect()
+    let rows = data.len();
+    let cols = data.first().map(|r| r.len()).unwrap_or(0);
+    let mut out = Vec::with_capacity(rows * cols);
+    for row in data {
+        for px in row {
+            let r = px.first().copied().unwrap_or(0.0);
+            let g = px.get(1).copied().unwrap_or(0.0);
+            let b = px.get(2).copied().unwrap_or(0.0);
+            out.push((to_u8(r), to_u8(g), to_u8(b)));
+        }
+    }
+    (out, cols, rows)
 }
 use crate::figure::axis::{Axis, Patch, SpineDict};
 
@@ -297,15 +294,16 @@ use crate::figure::axis::{Axis, Patch, SpineDict};
 /// - 二维 MxN 标量：按 vmin/vmax（缺省取有限值 min/max）归一化后经 `cmap` 上色。
 ///
 /// 不做 origin 翻转——调用方按 'upper'/'lower' 自行处理行序。
+/// 返回 `(行主序扁平像素, 宽 w, 高 h)`，`pixels.len() == w * h`。
 pub(crate) fn image_array_to_rgb_rows(
     x: &Bound<'_, PyAny>,
     cmap: &str,
     vmin: Option<f64>,
     vmax: Option<f64>,
-) -> PyResult<Vec<Vec<(u8, u8, u8)>>> {
+) -> PyResult<(Vec<(u8, u8, u8)>, usize, usize)> {
     // 快路径：三维 RGB(A) 数组直接从扁平缓冲区取色，跳过嵌套 Vec 分配。
-    if let Some(pixels) = rgb_rows_from_array_interface(x) {
-        return Ok(pixels);
+    if let Some(res) = rgb_rows_from_array_interface(x) {
+        return Ok(res);
     }
     if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
         return Ok(rgb_pixels_from_3d(&rgb3));
@@ -327,18 +325,35 @@ pub(crate) fn image_array_to_rgb_rows(
     } else {
         hi - lo
     };
-    Ok(data
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|&v| {
-                    let t = ((v - lo) / range).clamp(0.0, 1.0);
-                    let c = crate::core::colormap::colormap_color(cmap, t);
-                    (c.0, c.1, c.2)
-                })
-                .collect()
-        })
-        .collect())
+    let rows = data.len();
+    let cols = data.first().map(|r| r.len()).unwrap_or(0);
+    let mut out = Vec::with_capacity(rows * cols);
+    for row in &data {
+        for &v in row {
+            let t = ((v - lo) / range).clamp(0.0, 1.0);
+            let c = crate::core::colormap::colormap_color(cmap, t);
+            out.push((c.0, c.1, c.2));
+        }
+    }
+    Ok((out, cols, rows))
+}
+
+/// 就地按行块上下翻转扁平（行主序）像素缓冲区，用于 origin='lower' 的行序翻转。
+/// `w`/`h` 为图像宽/高，`pixels.len()` 须等于 `w * h`。
+pub(crate) fn flip_image_rows(pixels: &mut [(u8, u8, u8)], w: usize, h: usize) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    let mut top = 0usize;
+    let mut bot = h - 1;
+    while top < bot {
+        let (a, b) = (top * w, bot * w);
+        for c in 0..w {
+            pixels.swap(a + c, b + c);
+        }
+        top += 1;
+        bot -= 1;
+    }
 }
 
 /// 解析 matplotlib 风格的 aspect 值。
@@ -1051,8 +1066,8 @@ impl Axes {
             }
         }
 
-        let x_vec = py_to_vec_option_f64(&x)?;
-        let y_vec = py_to_vec_option_f64(&y)?;
+        let x_vec = py_to_vec_f64_gaps(&x)?;
+        let y_vec = py_to_vec_f64_gaps(&y)?;
         let color = c.or(actual_color);
         let linewidth = lw.unwrap_or(linewidth);
         let linestyle = ls.as_deref().unwrap_or(&actual_linestyle);
@@ -1523,24 +1538,28 @@ impl Axes {
 
         // 三维 RGB(A) 图像：直接使用逐像素颜色，不经 colormap。
         // 快路径：从扁平缓冲区直接取色，跳过嵌套 Vec 分配（大图 imshow 主要开销）。
-        if let Some(mut pixels) = rgb_rows_from_array_interface(x) {
+        if let Some((mut pixels, img_w, img_h)) = rgb_rows_from_array_interface(x) {
             if flip_rows {
-                pixels.reverse();
+                flip_image_rows(&mut pixels, img_w, img_h);
             }
             self.elements.push(PlotElement::Image {
                 pixels,
+                img_w,
+                img_h,
                 alpha: a,
                 interpolation: interp,
             });
             return Ok(());
         }
         if let Ok(rgb3) = py_to_vec_vec_vec_f64(x) {
-            let mut pixels = rgb_pixels_from_3d(&rgb3);
+            let (mut pixels, img_w, img_h) = rgb_pixels_from_3d(&rgb3);
             if flip_rows {
-                pixels.reverse();
+                flip_image_rows(&mut pixels, img_w, img_h);
             }
             self.elements.push(PlotElement::Image {
                 pixels,
+                img_w,
+                img_h,
                 alpha: a,
                 interpolation: interp,
             });
@@ -1584,31 +1603,31 @@ impl Axes {
         };
         let log_lo = lo.ln();
         let log_range = hi.ln() - lo.ln();
-        let mut pixels: Vec<Vec<(u8, u8, u8)>> = data
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|&v| {
-                        let t = if use_log {
-                            if v > 0.0 {
-                                ((v.ln() - log_lo) / log_range).clamp(0.0, 1.0)
-                            } else {
-                                0.0
-                            }
-                        } else {
-                            ((v - lo) / range).clamp(0.0, 1.0)
-                        };
-                        let c = crate::core::colormap::colormap_color(cmap, t);
-                        (c.0, c.1, c.2)
-                    })
-                    .collect()
-            })
-            .collect();
+        let img_h = data.len();
+        let img_w = data.first().map(|r| r.len()).unwrap_or(0);
+        let mut pixels: Vec<(u8, u8, u8)> = Vec::with_capacity(img_w * img_h);
+        for row in &data {
+            for &v in row {
+                let t = if use_log {
+                    if v > 0.0 {
+                        ((v.ln() - log_lo) / log_range).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    }
+                } else {
+                    ((v - lo) / range).clamp(0.0, 1.0)
+                };
+                let c = crate::core::colormap::colormap_color(cmap, t);
+                pixels.push((c.0, c.1, c.2));
+            }
+        }
         if flip_rows {
-            pixels.reverse();
+            flip_image_rows(&mut pixels, img_w, img_h);
         }
         self.elements.push(PlotElement::Image {
             pixels,
+            img_w,
+            img_h,
             alpha: a,
             interpolation: interp,
         });
@@ -2325,8 +2344,8 @@ impl Axes {
         });
     }
 
-    #[doc = "散点图 (支持每个点独立颜色和大小, Rust 层批量实现)\n\n参数:\n    x: x 坐标列表\n    y: y 坐标列表\n    s: 每个点的大小 (列表), 或 None 用默认\n    c: 每个点的颜色 (列表), 或 None 用默认\n    marker: 标记形状 ('o', 's', '^', 'D', '*', 'x', '+', 'v', '<', '>')\n    label: 图例标签\n    alpha: 透明度 (0.0-1.0)"]
-    #[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
+    #[doc = "散点图 (支持每个点独立颜色和大小, Rust 层批量实现)\n\n参数:\n    x: x 坐标列表\n    y: y 坐标列表\n    s: 每个点的大小 (列表), 或 None 用默认\n    c: 每个点的颜色 (颜色字符串列表), 或数值列表配合 cmap 经 colormap 上色, 或 None 用默认\n    marker: 标记形状 ('o', 's', '^', 'D', '*', 'x', '+', 'v', '<', '>')\n    label: 图例标签\n    alpha: 透明度 (0.0-1.0)\n    cmap/vmin/vmax: 当 c 为数值列表时, 用该 colormap 与归一化范围直接求逐点 RGB"]
+    #[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None, cmap=None, vmin=None, vmax=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn scatter_multi(
         &mut self,
@@ -2340,6 +2359,9 @@ impl Axes {
         alpha: f64,
         edgecolor: Option<String>,
         linewidths: Option<f64>,
+        cmap: Option<String>,
+        vmin: Option<f64>,
+        vmax: Option<f64>,
     ) -> PyResult<()> {
         let x_vec = py_to_vec_f64(&x)?;
         let y_vec = py_to_vec_f64(&y)?;
@@ -2350,24 +2372,72 @@ impl Axes {
             Some(v) => Some(py_to_vec_f64(&v)?),
             None => None,
         };
-        let c_list: Option<Vec<String>> = match c {
-            Some(v) => {
-                if let Ok(list) = v.extract::<Vec<String>>() {
-                    Some(list)
-                } else if let Ok(single) = v.extract::<String>() {
-                    Some(vec![single])
-                } else {
-                    None
-                }
-            }
+        // 逐点颜色预解析：一次算好 RgbColor，渲染时直接索引，省去逐点 String clone + parse。
+        // - cmap=Some（数值 c + colormap）：直接经 colormap_color 求 RGB，跳过 hex 字符串往返
+        //   （与旧的 colormap_hex → parse_hex 往返按位相同）。
+        // - cmap=None（颜色字符串列表）：逐点 parse_color，空串回退 default_color(idx)，
+        //   其余保留 color_idx+i 循环语义（与旧渲染逐点解析等价）。
+        let colors: Option<Vec<RgbColor>> = match c {
             None => None,
+            Some(v) => match cmap.as_deref() {
+                Some(cmap_name) => {
+                    let vals = py_to_vec_f64(&v)?;
+                    let lo = vmin.unwrap_or_else(|| {
+                        vals.iter()
+                            .cloned()
+                            .filter(|x| x.is_finite())
+                            .fold(f64::INFINITY, f64::min)
+                    });
+                    let hi = vmax.unwrap_or_else(|| {
+                        vals.iter()
+                            .cloned()
+                            .filter(|x| x.is_finite())
+                            .fold(f64::NEG_INFINITY, f64::max)
+                    });
+                    let range = if (hi - lo).abs() < 1e-12 { 1.0 } else { hi - lo };
+                    Some(
+                        vals.iter()
+                            .map(|&val| {
+                                let t = ((val - lo) / range).clamp(0.0, 1.0);
+                                let col = crate::core::colormap::colormap_color(cmap_name, t);
+                                RgbColor(col.0, col.1, col.2)
+                            })
+                            .collect(),
+                    )
+                }
+                None => {
+                    let strs: Vec<String> = if let Ok(list) = v.extract::<Vec<String>>() {
+                        list
+                    } else if let Ok(single) = v.extract::<String>() {
+                        vec![single]
+                    } else {
+                        Vec::new()
+                    };
+                    if strs.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            strs.iter()
+                                .enumerate()
+                                .map(|(i, s)| {
+                                    if s.is_empty() {
+                                        default_color(idx)
+                                    } else {
+                                        parse_color(s, idx + i).unwrap_or(default_color(idx + i))
+                                    }
+                                })
+                                .collect(),
+                        )
+                    }
+                }
+            },
         };
 
         self.elements.push(PlotElement::ScatterMulti {
             x: x_vec,
             y: y_vec,
             s_list,
-            c_list,
+            colors,
             marker: marker.to_string(),
             label,
             alpha,

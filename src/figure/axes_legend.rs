@@ -34,8 +34,8 @@ fn collect_data_points(elements: &[PlotElement]) -> Vec<(f64, f64)> {
         match el {
             PlotElement::Line { x, y, .. } => {
                 for (xi, yi) in x.iter().zip(y.iter()) {
-                    if let (Some(xv), Some(yv)) = (xi, yi) {
-                        pts.push((*xv, *yv));
+                    if xi.is_finite() && yi.is_finite() {
+                        pts.push((*xi, *yi));
                     }
                 }
             }

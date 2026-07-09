@@ -49,15 +49,31 @@ def _to_list_recursive(obj):
     return obj
 
 
+def _is_numeric_buffer(obj):
+    """obj 是否为暴露 __array_interface__ 的纯数值缓冲数组（float/int/uint/bool）。
+
+    这类数组可零拷贝下沉给 Rust，且不可能是字符串类别或日期，故可跳过 .tolist()
+    全量物化（plot/scatter 热路径最大收益）。typestr 形如 '<f8'/'|b1'/'<M8[h]'/'<U3'，
+    第 2 个字符为 kind：datetime64('M')、字符串('U'/'S')、复数('c')、timedelta('m')、
+    object('O') 均需 Python 侧特殊处理，返回 False 交回原有 .tolist() 路径。
+    """
+    ai = getattr(obj, '__array_interface__', None)
+    if not isinstance(ai, dict):
+        return False
+    typestr = ai.get('typestr', '')
+    kind = typestr[1:2] if len(typestr) >= 2 else ''
+    return kind in ('f', 'i', 'u', 'b')
+
+
 def _to_seq(obj):
-    """一维数值参数的透传辅助：暴露 __array_interface__ 的数组原样返回，
-    交由 Rust 层零拷贝读取原始缓冲区（避免 .tolist() 生成大量 Python 对象）；
-    其余对象（Python list/tuple、标量）走 _to_list 保持原行为。
+    """一维数值参数的透传辅助：纯数值缓冲数组原样返回，交由 Rust 层零拷贝读取
+    原始缓冲区（避免 .tolist() 生成大量 Python 对象）；其余对象（含 datetime64/
+    字符串数组、Python list/tuple、标量）走 _to_list 保持原行为。
 
     仅用于纯数值、直接下沉给 Rust 的坐标/长度参数，不用于需在 Python 侧
     做类别检测或逐元素判断的参数。
     """
-    if obj is not None and hasattr(obj, '__array_interface__'):
+    if _is_numeric_buffer(obj):
         return obj
     return _to_list(obj)
 
@@ -79,11 +95,25 @@ def _categorical(vals):
     """分类坐标支持：若 vals 是含字符串的序列，返回 (等距整数位置, 标签列表)；
     否则原样返回 (vals, None)。与 matplotlib 一致——字符串映射到 0,1,2,... 位置，
     字符串本身作为该轴刻度标签。
+
+    性能：数值缓冲区数组 (纯 float/int/bool) 不可能含字符串，直接原样返回，
+    避免 .tolist() 把上百万元素物化成 Python 对象 (plot/scatter 的热路径)。字符串/
+    datetime64 数组的 typestr kind 不是数值，_is_numeric_buffer 返回 False，才走 tolist
+    做类别检测。
     """
-    seq = _to_list(vals)
-    if isinstance(seq, (list, tuple)) and any(isinstance(v, str) for v in seq):
+    if vals is None:
+        return vals, None
+    if _is_numeric_buffer(vals):
+        return vals, None
+    if isinstance(vals, (list, tuple)):
+        seq = vals
+    elif hasattr(vals, 'tolist'):
+        seq = vals.tolist()
+    else:
+        return vals, None
+    if any(isinstance(v, str) for v in seq):
         labels = [str(v) for v in seq]
-        return list(range(len(seq))), labels
+        return list(range(len(labels))), labels
     return vals, None
 
 
@@ -91,14 +121,22 @@ def _maybe_dates_to_num(seq):
     """日期坐标支持：若 seq 为 datetime/date 序列 (含 numpy datetime64 数组，
     经 .tolist() 得 datetime 对象)，转为自 1970-01-01 起天数的 float 列表；
     否则返回 None。与 matplotlib 日期约定一致，供 ConciseDateFormatter 反解。
+
+    性能：纯数值缓冲区数组直接返回 None，避免 .tolist() 物化 (仅为窥视首元素)。
+    datetime64 数组 kind 为 'M'，非数值缓冲，仍走 .tolist() 做日期转换。
     """
     import datetime as _dt
     if seq is None or isinstance(seq, (str, _dt.date, _dt.datetime)):
         return None
-    lst = _to_list(seq)
-    if not isinstance(lst, (list, tuple)) or len(lst) == 0:
+    if _is_numeric_buffer(seq):
         return None
-    if not isinstance(lst[0], (_dt.date, _dt.datetime)):
+    if isinstance(seq, (list, tuple)):
+        lst = seq
+    elif hasattr(seq, 'tolist'):
+        lst = seq.tolist()
+    else:
+        return None
+    if len(lst) == 0 or not isinstance(lst[0], (_dt.date, _dt.datetime)):
         return None
     epoch = _dt.datetime(1970, 1, 1)
     out = []
@@ -1919,26 +1957,91 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     return fig, _AxesArray(flat, (nrows, ncols))
 
 
-def subplot_mosaic(mosaic, figsize=None, dpi=None, **kwargs):
-    """按标签网格创建命名子图 (matplotlib subplot_mosaic 兼容, 近似实现)。
+def _mosaic_track_edges(n, ratios, space):
+    """把 [0,1] 分成 n 条轨道，相邻轨道间留 `space` 比例间隙。
 
-    mosaic 为二维标签列表 (或多行字符串)：相同标签在网格中的矩形包围盒合并为
-    一个跨格子图，'.' 或 None 表示空位。返回 (Figure, {label: Axes})。
-    layout 等布局关键字被接受但当前不生效。
+    返回长度 n 的 [(start, size), ...]（沿正方向）。`ratios` 为各轨道相对尺寸
+    (None 视为等分)；`space` 为间隙占「平均轨道尺寸」的比例，与 matplotlib 的
+    wspace/hspace 语义一致 (等分时退化为后端 grid_position 的公式)。
     """
-    from .layout.gridspec import SubplotSpec
+    if n <= 0:
+        return []
+    if ratios is None:
+        ratios = [1.0] * n
+    ratios = [float(r) for r in ratios]
+    if len(ratios) != n:
+        raise ValueError(f"ratios 长度 {len(ratios)} 与轨道数 {n} 不符")
+    total_r = sum(ratios)
+    if total_r <= 0:
+        raise ValueError("ratios 之和必须为正")
+    gap_r = space * (total_r / n)           # 间隙的 ratio 单位
+    unit = 1.0 / (total_r + (n - 1) * gap_r)  # ratio 单位 -> [0,1] 分数
+    edges = []
+    cursor = 0.0
+    for r in ratios:
+        size = r * unit
+        edges.append((cursor, size))
+        cursor += size + gap_r * unit
+    return edges
+
+
+# subplot_mosaic 默认间距（未经 gridspec_kw 指定时）：与后端规则网格默认一致，
+# 足以容纳每个子图的标题 + 刻度值而不相互重叠。
+_MOSAIC_WSPACE = 0.3
+_MOSAIC_HSPACE = 0.55
+
+
+def subplot_mosaic(mosaic, *, sharex=False, sharey=False,
+                   width_ratios=None, height_ratios=None,
+                   empty_sentinel='.', subplot_kw=None, gridspec_kw=None,
+                   per_subplot_kw=None, figsize=None, dpi=None, **fig_kw):
+    """根据 ASCII 布局或嵌套标签列表创建命名子图 (matplotlib subplot_mosaic 兼容)。
+
+    参数:
+        mosaic: 可视化布局。可为多行字符串 (每字符一列、每行一行) 或标签的二维列表。
+            相同标签在网格中的矩形包围盒合并为一个跨行/跨列的子图，`empty_sentinel`
+            (默认 '.') 表示留空。
+        sharex, sharey: 接受以兼容 matplotlib 签名 (当前后端各子图坐标轴相互独立)。
+        width_ratios: 长度为 ncols 的列宽相对比例；等价于 gridspec_kw={'width_ratios': ...}。
+        height_ratios: 长度为 nrows 的行高相对比例；等价于 gridspec_kw={'height_ratios': ...}。
+        empty_sentinel: 表示「留空」的条目，默认 '.'。
+        subplot_kw: 传给每个子图的关键字参数 (经 Axes.set 应用)。
+        gridspec_kw: 网格参数，识别 wspace / hspace / width_ratios / height_ratios。
+        per_subplot_kw: {标签 或 标签元组: kwargs} 的按图覆盖 (优先级高于 subplot_kw)；
+            字符串 mosaic 下键可用多字符串 (如 "AB" 等价于 ('A','B'))。
+        figsize, dpi, **fig_kw: 传给 figure() (如 layout='constrained')。
+
+    返回:
+        (Figure, {label: Axes})。各子图之间按 wspace/hspace 自动留出间距。
+    """
+    # —— 解析 mosaic 为二维标签网格 ——
     if isinstance(mosaic, str):
-        rows = [list(line.strip()) for line in mosaic.strip().splitlines() if line.strip()]
+        lines = [ln.strip() for ln in mosaic.strip().splitlines()]
+        rows = [list(ln) for ln in lines if ln]
     else:
-        rows = [list(r) for r in mosaic]
+        rows = []
+        for r in mosaic:
+            if any(isinstance(c, (list, tuple)) for c in r):
+                raise NotImplementedError("subplot_mosaic 暂不支持嵌套布局")
+            rows.append(list(r))
     nrows = len(rows)
     ncols = max((len(r) for r in rows), default=0)
-    # 收集每个标签的矩形包围盒 (row_start, row_end, col_start, col_end)。
+    if nrows == 0 or ncols == 0:
+        raise ValueError("mosaic 不能为空")
+    # 列表输入允许行长不齐：短行用 empty_sentinel 补齐。
+    for r in rows:
+        if len(r) < ncols:
+            r.extend([empty_sentinel] * (ncols - len(r)))
+
+    # —— 收集每个标签的矩形包围盒 (row_start, row_end, col_start, col_end) ——
+    def _is_empty(label):
+        return label is None or label == empty_sentinel
+
     boxes = {}
     order = []
     for ri, row in enumerate(rows):
         for ci, label in enumerate(row):
-            if label is None or label == '.':
+            if _is_empty(label):
                 continue
             if label not in boxes:
                 boxes[label] = [ri, ri + 1, ci, ci + 1]
@@ -1949,15 +2052,53 @@ def subplot_mosaic(mosaic, figsize=None, dpi=None, **kwargs):
                 b[1] = max(b[1], ri + 1)
                 b[2] = min(b[2], ci)
                 b[3] = max(b[3], ci + 1)
-    fig = figure(figsize=figsize, dpi=dpi, **kwargs)
+
+    # —— 网格间距 / 比例：显式参数优先于 gridspec_kw ——
+    gridspec_kw = dict(gridspec_kw or {})
+    if width_ratios is None:
+        width_ratios = gridspec_kw.get('width_ratios')
+    if height_ratios is None:
+        height_ratios = gridspec_kw.get('height_ratios')
+    wspace = gridspec_kw.get('wspace')
+    hspace = gridspec_kw.get('hspace')
+    if wspace is None:
+        wspace = _MOSAIC_WSPACE
+    if hspace is None:
+        hspace = _MOSAIC_HSPACE
+
+    col_edges = _mosaic_track_edges(ncols, width_ratios, wspace)   # 从左向右 (x)
+    row_edges = _mosaic_track_edges(nrows, height_ratios, hspace)  # 从上向下 (自顶部量)
+
+    # —— per_subplot_kw 归一化为 {label: kwargs} ——
+    psk = {}
+    if per_subplot_kw:
+        for k, v in per_subplot_kw.items():
+            if isinstance(k, tuple):
+                keys = k
+            elif isinstance(mosaic, str) and isinstance(k, str) and len(k) > 1:
+                keys = tuple(k)
+            else:
+                keys = (k,)
+            for kk in keys:
+                psk.setdefault(kk, {}).update(v)
+
+    fig = figure(figsize=figsize, dpi=dpi, **fig_kw)
     axd = {}
     for label in order:
         rs, re, cs, ce = boxes[label]
-        spec = SubplotSpec(None, rs, re, cs, ce)
-        # Rust add_subplot 依据 spec 的 numRows/numCols 定位，须为整体网格尺寸。
-        spec.numRows = nrows
-        spec.numCols = ncols
-        axd[label] = fig.add_subplot(spec)
+        left = col_edges[cs][0]
+        right = col_edges[ce - 1][0] + col_edges[ce - 1][1]
+        top = 1.0 - row_edges[rs][0]
+        bottom = 1.0 - (row_edges[re - 1][0] + row_edges[re - 1][1])
+        ax = fig.add_axes(left, bottom, right - left, top - bottom)
+        merged = {}
+        if subplot_kw:
+            merged.update(subplot_kw)
+        if label in psk:
+            merged.update(psk[label])
+        if merged:
+            ax.set(**merged)
+        axd[label] = ax
     return fig, axd
 
 

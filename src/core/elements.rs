@@ -38,8 +38,12 @@ pub struct ArrowSpec {
 #[derive(Clone)]
 pub enum PlotElement {
     Line {
-        x: Vec<Option<f64>>,
-        y: Vec<Option<f64>>,
+        /// X 坐标，行主序。缺失值（Python 的 None/空串）与非法值统一以 `NaN`
+        /// 作为哨兵存储：渲染/边界/图例遇到 `NaN` 即视为断点（gap），效果等同旧的
+        /// `Option::None`。用 `Vec<f64>` 替代 `Vec<Option<f64>>` 使每元素从 16 字节
+        /// 降到 8 字节（省一半内存并改善缓存局部性）。
+        x: Vec<f64>,
+        y: Vec<f64>,
         label: Option<String>,
         color: String,
         linestyle: String,
@@ -67,7 +71,10 @@ pub enum PlotElement {
         x: Vec<f64>,
         y: Vec<f64>,
         s_list: Option<Vec<f64>>,
-        c_list: Option<Vec<String>>,
+        /// 预解析的逐点颜色（构建时一次算好，渲染直接索引）。
+        /// `None` 表示所有点用 `default_color(color_idx)`；某点索引越界时同样回退到该默认色。
+        /// 数值 c + cmap 场景直接经 `colormap_color` 求 RGB，与旧的 hex 字符串往返按位相同。
+        colors: Option<Vec<RgbColor>>,
         marker: String,
         label: Option<String>,
         alpha: f64,
@@ -105,9 +112,14 @@ pub enum PlotElement {
         color_idx: usize,
     },
     Image {
-        /// 逐像素已解析的 RGB（row-major）。origin 已在构建时应用：
-        /// 绘制时第 0 行画在数据区底部，最后一行画在顶部。
-        pixels: Vec<Vec<(u8, u8, u8)>>,
+        /// 逐像素已解析的 RGB，行主序**扁平**存储（长度 = img_w * img_h）。origin
+        /// 已在构建时应用：绘制时第 0 行画在数据区底部，最后一行画在顶部。扁平化
+        /// 避免了每行一次堆分配（大图数百次）并改善采样时的缓存局部性。
+        pixels: Vec<(u8, u8, u8)>,
+        /// 图像列数（宽度，像素）。
+        img_w: usize,
+        /// 图像行数（高度，像素）。
+        img_h: usize,
         /// 整体透明度（0.0-1.0）
         alpha: f64,
         /// 插值方法：`nearest`（块状、有分界线）或 `bilinear`/`bicubic`（平滑渐变）。

@@ -239,6 +239,25 @@ impl Figure {
         Ok(ax_py)
     }
 
+    #[doc = "按图内相对位置直接添加子图。\n\nleft/bottom/width/height 均为 [0,1] 使用区（去除四周边距后的绘图区）分数，\n与 matplotlib Figure.add_axes([left, bottom, width, height]) 语义一致。\nsubplot_mosaic 等自定义布局据此放置带间距的跨格子图。"]
+    fn add_axes(
+        &mut self,
+        py: Python,
+        left: f64,
+        bottom: f64,
+        width: f64,
+        height: f64,
+    ) -> PyResult<Py<Axes>> {
+        let ax = Axes::new();
+        let ax_py = Py::new(py, ax)?;
+        crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
+        self.axes_list.push(ax_py.clone_ref(py));
+        self.axes_positions
+            .push((left, left + width, bottom, bottom + height));
+        self.current_axes_index = self.axes_list.len() - 1;
+        Ok(ax_py)
+    }
+
     #[doc = "保存图形到文件\n\n参数:\n    filename: 文件名, 支持 .png/.jpg/.svg\n    dpi: 可选分辨率, 默认与创建时一致"]
     #[pyo3(signature = (filename, dpi=None))]
     fn savefig(&self, py: Python, filename: &str, dpi: Option<f64>) -> PyResult<()> {
