@@ -193,6 +193,14 @@ pub fn parse_color(name: &str, color_idx: usize) -> PyResult<RgbColor> {
     if trimmed.starts_with('#') {
         return parse_hex(trimmed);
     }
+    // matplotlib 'CN' 颜色循环记号（'C0'..'C9'）：大写 C 后跟数字，取默认颜色循环第 N 个。
+    if let Some(rest) = trimmed.strip_prefix('C')
+        && !rest.is_empty()
+        && rest.bytes().all(|b| b.is_ascii_digit())
+        && let Ok(n) = rest.parse::<usize>()
+    {
+        return Ok(default_color(n));
+    }
     // 精确匹配命名颜色（所有命名颜色都是小写）
     named_color(trimmed)
         .or_else(|| named_color(&trimmed.to_lowercase()))

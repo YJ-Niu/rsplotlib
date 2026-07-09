@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use crate::core::colors::{RgbColor, default_color, median, parse_color, to_plotters_color};
 use crate::core::elements::{ArrowSpec, PlotElement};
 use crate::core::marker::draw_marker;
-use crate::figure::axes::scale_font;
+use crate::figure::axes::{DEFAULT_FONT_SCALE, scale_font};
 use crate::utils::font_stack;
 use crate::utils::mathtext::{self, HAlign, VAlign};
 
@@ -477,8 +477,8 @@ thread_local! {
     /// 每条折线只写入被覆盖的像素，并把这些像素下标记录到 touched，绘制后逐一
     /// 复位为 +∞。这样避免了「每个折线元素都重新分配并清零整块绘图区」的巨大
     /// 开销——单张主图有数百条折线时，这正是渲染的主要瓶颈。
-    static AA_SCRATCH: std::cell::RefCell<(Vec<f32>, Vec<usize>)> =
-        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+    static AA_SCRATCH: std::cell::RefCell<(Vec<f32>, Vec<usize>, Vec<(f64, f64)>)> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new())) };
 }
 
 /// 抗锯齿等宽折线渲染（仅位图后端）。
@@ -520,7 +520,6 @@ where
     // 数据坐标 -> 绘图区局部连续像素坐标（y 轴翻转：y_max 对应 v=0）
     let to_px =
         |p: (f64, f64)| -> (f64, f64) { ((p.0 - x_min) / x_per_pix, (y_max - p.1) / y_per_pix) };
-    let pts: Vec<(f64, f64)> = points.iter().map(|&p| to_px(p)).collect();
 
     let half = width_px / 2.0;
     // 覆盖率 = 到折线笔画的距离经过 1px 线性斜坡：cov = clamp(half + 0.5 - dist, 0, 1)。
@@ -534,13 +533,19 @@ where
 
     let pw_u = pw as usize;
     let ph_u = ph as usize;
-    // dist_buf 从线程本地 scratch 借出复用（见 AA_SCRATCH），语义为"到折线笔画的
-    // 最小距离"，哨兵值 +∞ 表示未被本条折线触及。避免每个折线元素都重新分配/清零
-    // 整块绘图区。
-    let (mut dist_buf, mut touched) = AA_SCRATCH.with(|c| {
+    // dist_buf / touched / pts 均从线程本地 scratch 借出复用（见 AA_SCRATCH）：
+    // dist_buf 语义为"到折线笔画的最小距离"，哨兵值 +∞ 表示未被本条折线触及；
+    // pts 为折线的像素坐标缓存。避免每个折线元素都重新分配整块绘图区 / 坐标数组。
+    let (mut dist_buf, mut touched, mut pts) = AA_SCRATCH.with(|c| {
         let mut g = c.borrow_mut();
-        (std::mem::take(&mut g.0), std::mem::take(&mut g.1))
+        (
+            std::mem::take(&mut g.0),
+            std::mem::take(&mut g.1),
+            std::mem::take(&mut g.2),
+        )
     });
+    pts.clear();
+    pts.extend(points.iter().map(|&p| to_px(p)));
     if dist_buf.len() < pw_u * ph_u {
         dist_buf.resize(pw_u * ph_u, f32::INFINITY);
     }
@@ -657,6 +662,7 @@ where
         let mut g = c.borrow_mut();
         g.0 = std::mem::take(&mut dist_buf);
         g.1 = std::mem::take(&mut touched);
+        g.2 = std::mem::take(&mut pts);
     });
     draw_res
 }
@@ -828,13 +834,20 @@ fn cubic_kernel(t: f64) -> f64 {
 
 /// 在源 RGB 网格上采样连续坐标 (sr 行, sc 列)：`bicubic=false` 双线性，`true` 双三次。
 /// 越界索引 clamp 到网格边缘，避免出现黑边。返回未取整的 f64 RGB。
-fn sample_image(pixels: &[Vec<(u8, u8, u8)>], sr: f64, sc: f64, bicubic: bool) -> (f64, f64, f64) {
-    let nrows = pixels.len() as isize;
-    let ncols = pixels[0].len() as isize;
+fn sample_image(
+    pixels: &[(u8, u8, u8)],
+    w: usize,
+    h: usize,
+    sr: f64,
+    sc: f64,
+    bicubic: bool,
+) -> (f64, f64, f64) {
+    let nrows = h as isize;
+    let ncols = w as isize;
     let get = |r: isize, c: isize| -> (f64, f64, f64) {
         let r = r.clamp(0, nrows - 1) as usize;
         let c = c.clamp(0, ncols - 1) as usize;
-        let (pr, pg, pb) = pixels[r][c];
+        let (pr, pg, pb) = pixels[r * w + c];
         (pr as f64, pg as f64, pb as f64)
     };
     if bicubic {
@@ -888,7 +901,9 @@ fn sample_image(pixels: &[Vec<(u8, u8, u8)>], sr: f64, sc: f64, bicubic: bool) -
 #[allow(clippy::too_many_arguments)]
 fn render_image_smooth<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
-    pixels: &[Vec<(u8, u8, u8)>],
+    pixels: &[(u8, u8, u8)],
+    n_cols: usize,
+    n_rows: usize,
     alpha: f64,
     bicubic: bool,
     bitmap: bool,
@@ -900,8 +915,6 @@ fn render_image_smooth<DB: DrawingBackend>(
 where
     DB::ErrorType: 'static,
 {
-    let n_rows = pixels.len();
-    let n_cols = pixels[0].len();
     let (pw, ph) = {
         let dim = chart.plotting_area().dim_in_pixel();
         (dim.0 as f64, dim.1 as f64)
@@ -933,7 +946,7 @@ where
                     continue;
                 }
                 let sc = (data_x - 0.5).clamp(0.0, max_c);
-                let (r, g, b) = sample_image(pixels, sr, sc, bicubic);
+                let (r, g, b) = sample_image(pixels, n_cols, n_rows, sr, sc, bicubic);
                 let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
                 area.draw_pixel((xx, yy), &color)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
@@ -953,7 +966,7 @@ where
                 let x0 = ti as f64 / target_cols as f64 * n_cols as f64;
                 let x1 = (ti + 1) as f64 / target_cols as f64 * n_cols as f64;
                 let sc = ((x0 + x1) * 0.5 - 0.5).clamp(0.0, max_c);
-                let (r, g, b) = sample_image(pixels, sr, sc, bicubic);
+                let (r, g, b) = sample_image(pixels, n_cols, n_rows, sr, sc, bicubic);
                 let style =
                     plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha).filled();
                 chart
@@ -974,7 +987,9 @@ where
 #[allow(clippy::too_many_arguments)]
 fn render_image_nearest_bitmap<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
-    pixels: &[Vec<(u8, u8, u8)>],
+    pixels: &[(u8, u8, u8)],
+    n_cols: usize,
+    n_rows: usize,
     alpha: f64,
     x_min: f64,
     x_max: f64,
@@ -984,8 +999,6 @@ fn render_image_nearest_bitmap<DB: DrawingBackend>(
 where
     DB::ErrorType: 'static,
 {
-    let n_rows = pixels.len();
-    let n_cols = pixels[0].len();
     let (pw, ph) = {
         let dim = chart.plotting_area().dim_in_pixel();
         (dim.0 as f64, dim.1 as f64)
@@ -1008,14 +1021,14 @@ where
             continue;
         }
         let r = (data_y.floor() as isize).clamp(0, max_r) as usize;
-        let row = &pixels[r];
+        let row_base = r * n_cols;
         for xx in 0..pw_i {
             let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
             if data_x < 0.0 || data_x > n_cols as f64 {
                 continue;
             }
             let c = (data_x.floor() as isize).clamp(0, max_c) as usize;
-            let (pr, pg, pb) = row[c];
+            let (pr, pg, pb) = pixels[row_base + c];
             let color = plotters::style::RGBAColor(pr, pg, pb, alpha);
             area.draw_pixel((xx, yy), &color)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
@@ -1100,9 +1113,6 @@ where
             } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
-                // 折线线宽增加 50%
-                let lw_scaled = *linewidth * 1.5;
-                let linewidth = &lw_scaled;
                 // plotters 的坐标映射对屏幕像素取 floor，会让点整体偏高约 0.5 像素。
                 // 向下偏移半个像素，等效为四舍五入，使线/marker 的中心落在坐标点上。
                 let y_half_px = {
@@ -1120,15 +1130,13 @@ where
                     {
                         let mut current: Vec<(f64, f64)> = Vec::new();
                         for (xv, yv) in x.iter().zip(y.iter()) {
-                            if let (Some(xv), Some(yv)) = (xv, yv) {
-                                let txv = tx(*xv);
-                                let tyv = ty(*yv);
-                                if txv.is_finite() && tyv.is_finite() {
-                                    current.push((txv, tyv - y_half_px));
-                                    continue;
-                                }
+                            let txv = tx(*xv);
+                            let tyv = ty(*yv);
+                            if txv.is_finite() && tyv.is_finite() {
+                                current.push((txv, tyv - y_half_px));
+                                continue;
                             }
-                            // 遇到 None 或不合法值，结束当前段
+                            // 遇到 NaN 哨兵（断点）或不合法值，结束当前段
                             if current.len() >= 2 {
                                 segments.push(std::mem::take(&mut current));
                             } else {
@@ -1140,50 +1148,50 @@ where
                         }
                     }
                     if linestyle != " " {
+                        // 循环不变量外提：线宽像素、每像素数据跨度、dash 图案对所有分段
+                        // 相同（只依赖 linestyle/linewidth/绘图区尺寸），循环外算一次。
+                        let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
+                        let (pw_dash, ph_dash) = {
+                            let dim = chart.plotting_area().dim_in_pixel();
+                            (dim.0 as f64, dim.1 as f64)
+                        };
+                        let x_per_pix = if pw_dash > 0.0 {
+                            (x_max - x_min) / pw_dash
+                        } else {
+                            1.0
+                        };
+                        let y_per_pix = if ph_dash > 0.0 {
+                            (y_max - y_min) / ph_dash
+                        } else {
+                            1.0
+                        };
+                        // dash 图案按 matplotlib 名义线宽缩放；font_scale = dpi/72
+                        let lw_nominal = (*linewidth).max(0.1);
+                        let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
+                        let width_px = (lw_px as i32 - 1).max(1) as f64;
+                        // matplotlib 默认 dash 图案 (rcParams)，None 表示实线
+                        let dash_pattern: Option<Vec<(f64, bool)>> = match linestyle.as_str() {
+                            // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
+                            "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
+                            // dotted (lines.dotted_pattern): 点 1, 隙 1.65
+                            ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
+                            // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
+                            "-." => Some(vec![
+                                (6.4 * ds, true),
+                                (1.6 * ds, false),
+                                (1.0 * ds, true),
+                                (1.6 * ds, false),
+                            ]),
+                            _ => None,
+                        };
                         for points in &segments {
-                            // 将 linewidth 从 points 转换为像素：1pt = dpi/72 px，dpi = 72 * font_scale
-                            let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
-                            // 虚线图案按「显示像素」度量：matplotlib 图案(points) × 名义线宽 × (dpi/72)。
-                            let (pw_dash, ph_dash) = {
-                                let dim = chart.plotting_area().dim_in_pixel();
-                                (dim.0 as f64, dim.1 as f64)
-                            };
-                            let x_per_pix = if pw_dash > 0.0 {
-                                (x_max - x_min) / pw_dash
-                            } else {
-                                1.0
-                            };
-                            let y_per_pix = if ph_dash > 0.0 {
-                                (y_max - y_min) / ph_dash
-                            } else {
-                                1.0
-                            };
-                            // 撤销前面 1.5x 线宽膨胀，dash 图案按 matplotlib 名义线宽缩放；font_scale = dpi/72
-                            let lw_nominal = (*linewidth / 1.5).max(0.1);
-                            let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
-                            let width_px = (lw_px as i32 - 1).max(1) as f64;
-                            // matplotlib 默认 dash 图案 (rcParams)，None 表示实线
-                            let dash_pattern: Option<Vec<(f64, bool)>> = match linestyle.as_str() {
-                                // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
-                                "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
-                                // dotted (lines.dotted_pattern): 点 1, 隙 1.65
-                                ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
-                                // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
-                                "-." => Some(vec![
-                                    (6.4 * ds, true),
-                                    (1.6 * ds, false),
-                                    (1.0 * ds, true),
-                                    (1.6 * ds, false),
-                                ]),
-                                _ => None,
-                            };
-                            if let Some(pattern) = dash_pattern {
+                            if let Some(pattern) = &dash_pattern {
                                 if bitmap {
                                     // 位图后端无原生 dash：按像素图案把折线切成一段段 dash（沿线方向），
                                     // 每段走与实线相同的 AA 渲染入口，线宽处处一致、无 Z 形 / 星形。
                                     // dash 端点用 "butt"（matplotlib 默认 dash_capstyle）。
                                     let dashes = compute_dash_segments(
-                                        points, &pattern, x_per_pix, y_per_pix,
+                                        points, pattern, x_per_pix, y_per_pix,
                                     );
                                     for dash in &dashes {
                                         render_polyline(
@@ -1267,25 +1275,23 @@ where
                         diameter_px / 2.0
                     };
                     for (xv, yv) in x.iter().zip(y.iter()) {
-                        if let (Some(xv), Some(yv)) = (xv, yv) {
-                            let txv = tx(*xv);
-                            let tyv = ty(*yv) - y_half_px;
-                            if txv.is_finite() && tyv.is_finite() {
-                                draw_marker(
-                                    chart,
-                                    marker_name,
-                                    txv,
-                                    tyv,
-                                    marker_size,
-                                    face_rgb,
-                                    edge_rgb,
-                                    1.0,
-                                    0.0,
-                                )
-                                .map_err(|e| {
-                                    PyRuntimeError::new_err(format!("Failed to draw marker: {}", e))
-                                })?;
-                            }
+                        let txv = tx(*xv);
+                        let tyv = ty(*yv) - y_half_px;
+                        if txv.is_finite() && tyv.is_finite() {
+                            draw_marker(
+                                chart,
+                                marker_name,
+                                txv,
+                                tyv,
+                                marker_size,
+                                face_rgb,
+                                edge_rgb,
+                                1.0,
+                                0.0,
+                            )
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("Failed to draw marker: {}", e))
+                            })?;
                         }
                     }
                 }
@@ -1324,7 +1330,7 @@ where
                 x,
                 y,
                 s_list,
-                c_list,
+                colors,
                 marker,
                 alpha,
                 color_idx,
@@ -1335,24 +1341,38 @@ where
                 if x.is_empty() || y.is_empty() {
                     continue;
                 }
+                // 逐点边缘解析的循环不变量外提：edgecolor 为具体颜色时对所有点相同，
+                // 只算一次（省去逐点 to_ascii_lowercase 分配 + parse_color）。
+                // edge_override=Some 表示固定描边色；None 表示描边色跟随各点填充色。
+                let (edge_override, edge_w): (Option<RGBColor>, f64) = match edgecolor.as_deref() {
+                    None => (None, 0.0),
+                    Some(es) => {
+                        let key = es.trim().to_ascii_lowercase();
+                        if key.is_empty() || key == "face" || key == "none" {
+                            (None, 0.0)
+                        } else {
+                            let lw_pt = (*linewidth).unwrap_or(1.5);
+                            let w = (lw_pt * marker_scale).max(1.0);
+                            match parse_color(es, *color_idx) {
+                                Ok(cc) => (Some(to_plotters_color(cc)), w),
+                                Err(_) => (None, w),
+                            }
+                        }
+                    }
+                };
                 for (i, (&xv, &yv)) in x.iter().zip(y.iter()).enumerate() {
                     let txv = tx(xv);
                     let tyv = ty(yv);
                     if !txv.is_finite() || !tyv.is_finite() {
                         continue;
                     }
-                    let c_str = c_list
+                    // 颜色已在构建时预解析：直接索引；无颜色或越界回退 default_color(color_idx)。
+                    let col = colors
                         .as_ref()
-                        .and_then(|c| c.get(i).cloned())
-                        .unwrap_or_default();
-                    let col = if c_str.is_empty() {
-                        parse_color("", *color_idx).unwrap_or(default_color(*color_idx + i))
-                    } else {
-                        parse_color(&c_str, *color_idx + i).unwrap_or(default_color(*color_idx + i))
-                    };
+                        .and_then(|cs| cs.get(i).copied())
+                        .unwrap_or_else(|| default_color(*color_idx));
                     let rgb = to_plotters_color(col);
-                    let (edge_rgb, edge_w) =
-                        resolve_marker_edge(edgecolor, *linewidth, rgb, marker_scale, *color_idx);
+                    let edge_rgb = edge_override.unwrap_or(rgb);
                     let size = (s_list
                         .as_ref()
                         .and_then(|s| s.get(i).cloned())
@@ -1504,10 +1524,13 @@ where
             }
             PlotElement::Image {
                 pixels,
+                img_w,
+                img_h,
                 alpha,
                 interpolation,
             } => {
-                if pixels.is_empty() || pixels[0].is_empty() {
+                let (img_w, img_h) = (*img_w, *img_h);
+                if img_w == 0 || img_h == 0 {
                     continue;
                 }
                 if interpolation == "nearest" {
@@ -1515,12 +1538,14 @@ where
                         // 位图后端：按绘图区分辨率逐输出像素取最近源 cell，
                         // 开销与输出面积成正比（而非源像素数），大图快很多。
                         render_image_nearest_bitmap(
-                            chart, pixels, *alpha, x_min, x_max, y_min, y_max,
+                            chart, pixels, img_w, img_h, *alpha, x_min, x_max, y_min, y_max,
                         )?;
                     } else {
                         // SVG 后端：每个源 cell 画一个矩形，块状、有明显分界线。
-                        for (r, row) in pixels.iter().enumerate() {
-                            for (c, &(pr, pg, pb)) in row.iter().enumerate() {
+                        for r in 0..img_h {
+                            let row_base = r * img_w;
+                            for c in 0..img_w {
+                                let (pr, pg, pb) = pixels[row_base + c];
                                 let style = plotters::style::RGBAColor(pr, pg, pb, *alpha).filled();
                                 chart
                                     .draw_series(std::iter::once(Rectangle::new(
@@ -1540,7 +1565,8 @@ where
                     // 平滑插值：bilinear 仅双线性，其余（bicubic/lanczos 等）用双三次。
                     let bicubic = interpolation != "bilinear";
                     render_image_smooth(
-                        chart, pixels, *alpha, bicubic, bitmap, x_min, x_max, y_min, y_max,
+                        chart, pixels, img_w, img_h, *alpha, bicubic, bitmap, x_min, x_max, y_min,
+                        y_max,
                     )?;
                 }
             }
@@ -1743,10 +1769,12 @@ where
                         let ly = mid_angle.sin() * label_r * sy + oy;
                         // 使用 BLACK 让 font.color() 返回 TextStyle，再 .pos() 调整锚点
                         let pie_family = font_stack::select_family(l);
-                        let pie_label_style: TextStyle =
-                            FontDesc::from((pie_family.as_str(), scale_font(12.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        let pie_label_style: TextStyle = FontDesc::from((
+                            pie_family.as_str(),
+                            scale_font(12.0 * DEFAULT_FONT_SCALE, font_scale),
+                        ))
+                        .color(&BLACK)
+                        .pos(Pos::new(HPos::Center, VPos::Center));
                         chart
                             .draw_series(std::iter::once(plotters::element::Text::new(
                                 l.to_string(),
@@ -1770,10 +1798,12 @@ where
                         let tx = mid_angle.cos() * text_r * sx + ox;
                         let ty = mid_angle.sin() * text_r * sy + oy;
                         let autopct_family = font_stack::select_family(&text);
-                        let autopct_style: TextStyle =
-                            FontDesc::from((autopct_family.as_str(), scale_font(11.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        let autopct_style: TextStyle = FontDesc::from((
+                            autopct_family.as_str(),
+                            scale_font(11.0 * DEFAULT_FONT_SCALE, font_scale),
+                        ))
+                        .color(&BLACK)
+                        .pos(Pos::new(HPos::Center, VPos::Center));
                         chart
                             .draw_series(std::iter::once(plotters::element::Text::new(
                                 text,
@@ -2209,10 +2239,12 @@ where
                         && let Some(l) = lbls.get(i)
                     {
                         let box_family = font_stack::select_family(l);
-                        let box_label_style: TextStyle =
-                            FontDesc::from((box_family.as_str(), scale_font(11.0, font_scale)))
-                                .color(&BLACK)
-                                .pos(Pos::new(HPos::Center, VPos::Center));
+                        let box_label_style: TextStyle = FontDesc::from((
+                            box_family.as_str(),
+                            scale_font(11.0 * DEFAULT_FONT_SCALE, font_scale),
+                        ))
+                        .color(&BLACK)
+                        .pos(Pos::new(HPos::Center, VPos::Center));
                         chart
                             .draw_series(std::iter::once(plotters::element::Text::new(
                                 l.to_string(),

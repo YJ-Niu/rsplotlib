@@ -54,7 +54,7 @@ pub fn compute_bounds(
     for el in elements {
         match el {
             PlotElement::Line { x, y, .. } => {
-                for v in x.iter().flatten() {
+                for v in x.iter() {
                     let tv = tx(*v);
                     if tv > f64::NEG_INFINITY && tv < x_min {
                         x_min = tv;
@@ -63,7 +63,7 @@ pub fn compute_bounds(
                         x_max = tv;
                     }
                 }
-                for v in y.iter().flatten() {
+                for v in y.iter() {
                     let tv = ty(*v);
                     if tv > f64::NEG_INFINITY && tv < y_min {
                         y_min = tv;
@@ -212,14 +212,14 @@ pub fn compute_bounds(
                     y_sticky_min = true;
                 }
             }
-            PlotElement::Image { pixels, .. } => {
-                if pixels.is_empty() || pixels[0].is_empty() {
+            PlotElement::Image { img_w, img_h, .. } => {
+                if *img_w == 0 || *img_h == 0 {
                     continue;
                 }
                 x_min = 0.0;
-                x_max = pixels[0].len() as f64;
+                x_max = *img_w as f64;
                 y_min = 0.0;
-                y_max = pixels.len() as f64;
+                y_max = *img_h as f64;
                 tight_image = true;
             }
             PlotElement::Text { x, y, .. } => {

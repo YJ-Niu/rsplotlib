@@ -12,7 +12,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use crate::core::colors::RgbColor;
-use crate::figure::axes::scale_font;
+use crate::figure::axes::{DEFAULT_FONT_SCALE, scale_font};
 use crate::utils::font_stack;
 use crate::utils::mathtext::{self, HAlign, VAlign};
 
@@ -63,7 +63,7 @@ where
     let title_size = if title_fontsize > 0.0 {
         title_fontsize
     } else {
-        9.6
+        9.6 * DEFAULT_FONT_SCALE
     };
     let rgb = RGBColor(title_color.0, title_color.1, title_color.2);
     mathtext::draw_math_chart(

@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 use crate::core::colors::{RgbColor, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
-use crate::figure::axes::scale_font;
+use crate::figure::axes::{DEFAULT_FONT_SCALE, scale_font};
 use crate::utils::mathtext::{self, HAlign, VAlign};
 
 /// 采样一个矩形填充区域内的代表点（3x3 网格），用于图例 "best" 位置的遮挡评估。
@@ -34,8 +34,8 @@ fn collect_data_points(elements: &[PlotElement]) -> Vec<(f64, f64)> {
         match el {
             PlotElement::Line { x, y, .. } => {
                 for (xi, yi) in x.iter().zip(y.iter()) {
-                    if let (Some(xv), Some(yv)) = (xi, yi) {
-                        pts.push((*xv, *yv));
+                    if xi.is_finite() && yi.is_finite() {
+                        pts.push((*xi, *yi));
                     }
                 }
             }
@@ -264,9 +264,40 @@ where
         let entry_count = legend_labels.len();
         let x_range = (x_max - x_min).abs();
         let y_range = (y_max - y_min).abs();
-        let entry_height = y_range * 0.04;
-        let legend_height = entry_height * entry_count as f64 + y_range * 0.02;
-        let legend_width = x_range * 0.25;
+
+        // 数据坐标 <-> 像素换算：图例的尺寸与间距均以像素/字号设定，再换算到数据坐标，
+        // 从而不随数据范围畸变。
+        let (pw, ph) = chart.plotting_area().dim_in_pixel();
+        let x_per_px = if pw > 0 {
+            x_range / pw as f64
+        } else {
+            x_range * 0.001
+        };
+        let y_per_px = if ph > 0 {
+            y_range / ph as f64
+        } else {
+            y_range * 0.001
+        };
+
+        // 图例文字像素字号（与下方文字绘制保持一致）。
+        let label_fs = scale_font(11.0 * DEFAULT_FONT_SCALE, font_scale);
+
+        // 横向布局（像素）：左内边距 | 线条/marker 样本 | 间隙 | 文字 | 右内边距。
+        // 宽度按最宽标签自适应，避免长文字溢出图例框。
+        let pad_h_px = 8.0 * font_scale;
+        let handle_px = 34.0 * font_scale;
+        let gap_px = 7.0 * font_scale;
+        let max_text_px = legend_labels
+            .iter()
+            .map(|(label, ..)| mathtext::measure_plain(label.as_str(), None, label_fs).0)
+            .fold(0.0_f64, f64::max);
+        let legend_width = (pad_h_px + handle_px + gap_px + max_text_px + pad_h_px) * x_per_px;
+
+        // 纵向：行高取字号的 1.6 倍（既不拥挤也不稀疏），上下各留 0.55 倍字号内边距。
+        let row_px = label_fs * 1.6;
+        let pad_v_px = label_fs * 0.55;
+        let entry_height = row_px * y_per_px;
+        let legend_height = entry_height * entry_count as f64 + 2.0 * pad_v_px * y_per_px;
 
         // 已知固定位置直接定位；其余（含 "best" 与未识别值）自动避让数据。
         let (box_x1, box_y1, box_x2, box_y2) = match loc.as_str() {
@@ -383,7 +414,6 @@ where
 
         // 圆角半径：以像素为基准，再按数据/像素比例换算到数据坐标，
         // 使 x、y 两个方向的圆角在视觉上一致（圆弧而非椭圆弧）。
-        let (pw, ph) = chart.plotting_area().dim_in_pixel();
         let r_px = 8.0 * font_scale;
         let rx = if pw > 0 {
             r_px * x_range / pw as f64
@@ -412,19 +442,14 @@ where
 
         // 图例线段的虚线/点线间隔需以像素为基准，再换算到数据坐标，
         // 否则固定的数据单位间隔在不同数据范围下会失效（例如整段被一个"虚线"填满而显示为实线）。
-        let x_per_px = if pw > 0 {
-            x_range / pw as f64
-        } else {
-            x_range * 0.001
-        };
         let dash_unit = font_scale * x_per_px;
 
         for (i, (label, color, ls, marker_opt, lw)) in legend_labels.iter().enumerate() {
-            // 从顶部向下排列，使条目按插入顺序从上到下显示。
-            let y_pos = box_y2 - entry_height * 0.75 - i as f64 * entry_height;
-            let x_line_start = box_x1 + x_range * 0.015;
-            let x_line_end = box_x1 + x_range * 0.06;
-            let x_text = box_x1 + x_range * 0.07;
+            // 从顶部向下排列，使条目按插入顺序从上到下显示。行内垂直居中于其行高。
+            let y_pos = box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - i as f64 * entry_height;
+            let x_line_start = box_x1 + pad_h_px * x_per_px;
+            let x_line_end = x_line_start + handle_px * x_per_px;
+            let x_text = x_line_end + gap_px * x_per_px;
 
             let rgb = to_plotters_color(*color);
             // 使用实际的 linewidth（与数据线保持一致），将 points 转换为像素
@@ -532,7 +557,6 @@ where
 
             // 图例文字相对线条/marker 略微上移以视觉居中：普通文字上移 20%，
             // 含数学排版（上/下标、分式、根号等）的文字块更高，上移 45%。
-            let label_fs = scale_font(11.0, font_scale);
             let text_nudge = if mathtext::contains_ir(label) {
                 -0.45 * label_fs
             } else {

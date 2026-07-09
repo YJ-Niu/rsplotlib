@@ -241,7 +241,7 @@ pub fn scatter<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
+#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None, cmap=None, vmin=None, vmax=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn scatter_multi<'a>(
     py: Python<'a>,
@@ -254,9 +254,14 @@ pub fn scatter_multi<'a>(
     alpha: f64,
     edgecolor: Option<String>,
     linewidths: Option<f64>,
+    cmap: Option<String>,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.scatter_multi(py, x, y, s, c, marker, label, alpha, edgecolor, linewidths)?;
+        ax.scatter_multi(
+            py, x, y, s, c, marker, label, alpha, edgecolor, linewidths, cmap, vmin, vmax,
+        )?;
     })
 }
 
@@ -445,7 +450,7 @@ pub fn step<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None))]
+#[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None, norm=None))]
 pub fn imshow<'a>(
     py: Python<'a>,
     x: Bound<'a, PyAny>,
@@ -456,9 +461,20 @@ pub fn imshow<'a>(
     alpha: Option<f64>,
     origin: Option<&'a str>,
     interpolation: Option<&'a str>,
+    norm: Option<&'a str>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.imshow(&x, cmap, aspect, vmin, vmax, alpha, origin, interpolation)?;
+        ax.imshow(
+            &x,
+            cmap,
+            aspect,
+            vmin,
+            vmax,
+            alpha,
+            origin,
+            interpolation,
+            norm,
+        )?;
     })
 }
 
@@ -482,22 +498,21 @@ pub fn imsave(
     format: Option<&str>,
     dpi: f64,
 ) -> PyResult<()> {
-    let mut rows = crate::figure::axes::image_array_to_rgb_rows(&arr, cmap, vmin, vmax)?;
-    if rows.is_empty() || rows[0].is_empty() {
+    let (mut pixels, width_u, height_u) =
+        crate::figure::axes::image_array_to_rgb_rows(&arr, cmap, vmin, vmax)?;
+    if width_u == 0 || height_u == 0 {
         return Err(PyValueError::new_err("imsave: empty image array"));
     }
     // origin: 默认 "upper"（首行在顶部，行序即输出行序）；"lower" 需翻转行序。
     if matches!(origin, Some(o) if o.eq_ignore_ascii_case("lower")) {
-        rows.reverse();
+        crate::figure::axes::flip_image_rows(&mut pixels, width_u, height_u);
     }
-    let height = rows.len() as u32;
-    let width = rows[0].len() as u32;
+    let height = height_u as u32;
+    let width = width_u as u32;
     // 展平为行主序 RGB 缓冲（每像素 R,G,B）。
-    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
-    for row in &rows {
-        for &(r, g, b) in row {
-            rgb.extend_from_slice(&[r, g, b]);
-        }
+    let mut rgb = Vec::with_capacity(width_u * height_u * 3);
+    for &(r, g, b) in &pixels {
+        rgb.extend_from_slice(&[r, g, b]);
     }
     let fmt = match format {
         Some(f) => f.trim().to_ascii_lowercase(),
@@ -850,18 +865,14 @@ pub fn close(_py: Python) -> PyResult<()> {
 #[pyfunction]
 pub fn twinx(py: Python) -> PyResult<Py<Axes>> {
     let ax = get_current_axes(py)?;
-    let twin = ax.borrow_mut(py).twinx();
-    let twin_py = Py::new(py, twin)?;
-    init_axes_self_py(&twin_py, py);
+    let twin_py = ax.borrow_mut(py).twinx(py)?;
     Ok(twin_py)
 }
 
 #[pyfunction]
 pub fn twiny(py: Python) -> PyResult<Py<Axes>> {
     let ax = get_current_axes(py)?;
-    let twin = ax.borrow_mut(py).twiny();
-    let twin_py = Py::new(py, twin)?;
-    init_axes_self_py(&twin_py, py);
+    let twin_py = ax.borrow_mut(py).twiny(py)?;
     Ok(twin_py)
 }
 
