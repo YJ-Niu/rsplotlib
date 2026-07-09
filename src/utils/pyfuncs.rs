@@ -241,7 +241,7 @@ pub fn scatter<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None))]
+#[pyo3(signature = (x, y, s=None, c=None, marker="o", label=None, alpha=1.0, edgecolor=None, linewidths=None, cmap=None, vmin=None, vmax=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn scatter_multi<'a>(
     py: Python<'a>,
@@ -254,9 +254,14 @@ pub fn scatter_multi<'a>(
     alpha: f64,
     edgecolor: Option<String>,
     linewidths: Option<f64>,
+    cmap: Option<String>,
+    vmin: Option<f64>,
+    vmax: Option<f64>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     make_fig_ax!(py, |ax| {
-        ax.scatter_multi(py, x, y, s, c, marker, label, alpha, edgecolor, linewidths)?;
+        ax.scatter_multi(
+            py, x, y, s, c, marker, label, alpha, edgecolor, linewidths, cmap, vmin, vmax,
+        )?;
     })
 }
 

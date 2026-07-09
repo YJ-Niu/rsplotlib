@@ -2394,7 +2394,11 @@ impl Axes {
                             .filter(|x| x.is_finite())
                             .fold(f64::NEG_INFINITY, f64::max)
                     });
-                    let range = if (hi - lo).abs() < 1e-12 { 1.0 } else { hi - lo };
+                    let range = if (hi - lo).abs() < 1e-12 {
+                        1.0
+                    } else {
+                        hi - lo
+                    };
                     Some(
                         vals.iter()
                             .map(|&val| {

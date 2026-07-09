@@ -65,6 +65,39 @@ def _is_numeric_buffer(obj):
     return kind in ('f', 'i', 'u', 'b')
 
 
+def _numeric_buffer_1d_len(obj):
+    """若 obj 为一维纯数值缓冲数组 (float/int/uint/bool)，返回其长度；否则 None。
+
+    用于 scatter 数值 c 的快路径：一维数值缓冲不可能是颜色字符串或 RGB(A) 行数组，
+    可零拷贝直传 Rust 经 colormap 上色，跳过 .tolist() / 逐元素类别检查 / [float(v)] 物化。
+    """
+    ai = getattr(obj, '__array_interface__', None)
+    if not isinstance(ai, dict):
+        return None
+    typestr = ai.get('typestr', '')
+    kind = typestr[1:2] if len(typestr) >= 2 else ''
+    if kind not in ('f', 'i', 'u', 'b'):
+        return None
+    shape = ai.get('shape')
+    if not (isinstance(shape, tuple) and len(shape) == 1):
+        return None
+    return shape[0]
+
+
+def _reduce_to_float(v):
+    """把数组规约结果 (.min()/.max()) 归一为 Python float。
+
+    rsnumpy 的规约返回类型不稳定：np.linspace / np.array([...]) 返回 Python float，
+    而 np.random.rand / randint 返回 0 维 ndarray（float() 报错，但 .item() 可取标量）。
+    """
+    if isinstance(v, (int, float)):
+        return float(v)
+    item = getattr(v, 'item', None)
+    if item is not None:
+        return float(item())
+    return float(v)
+
+
 def _to_seq(obj):
     """一维数值参数的透传辅助：纯数值缓冲数组原样返回，交由 Rust 层零拷贝读取
     原始缓冲区（避免 .tolist() 生成大量 Python 对象）；其余对象（含 datetime64/
@@ -168,25 +201,25 @@ def _rgba_to_hex(row):
 
 
 def _resolve_scatter_colors(c_vals, cmap, vmin, vmax):
-    """把 c 序列解析为逐点颜色字符串列表 + colorbar 所需的 mappable 元数据。
+    """把 c 序列解析为传给 scatter_multi 的逐点颜色参数 + colorbar 所需的 mappable 元数据。
 
-    返回 (colors, mappable):
-    - 颜色字符串序列 / RGB(A) 二维行数组: mappable 为 None
-    - 数值序列: 经 colormap 映射为 hex，mappable = (cmap名, vmin, vmax)
+    返回 (c_arg, cmap_name, mappable):
+    - 颜色字符串序列 / RGB(A) 二维行数组: c_arg 为颜色字符串列表, cmap_name 与 mappable 为 None
+    - 数值序列: c_arg 为原始数值列表, cmap_name 为 colormap 名, mappable = (名, lo, hi);
+      逐点 RGB 由 Rust 层直接经 colormap_color 求得, 不再经百万级 hex 字符串往返。
     """
     if len(c_vals) == 0:
-        return None, None
+        return None, None, None
     first = c_vals[0]
     if _is_scatter_sequence(first):  # RGB(A) 二维行数组
-        return [_rgba_to_hex(row) for row in c_vals], None
+        return [_rgba_to_hex(row) for row in c_vals], None, None
     if isinstance(first, str):       # 颜色字符串序列
-        return [str(v) for v in c_vals], None
-    vals = [float(v) for v in c_vals]  # 数值 -> colormap
+        return [str(v) for v in c_vals], None, None
+    vals = [float(v) for v in c_vals]  # 数值 -> 交由 Rust 直接 colormap 上色
     name = cmap if isinstance(cmap, str) else 'viridis'
     lo = min(vals) if vmin is None else float(vmin)
     hi = max(vals) if vmax is None else float(vmax)
-    colors = list(_rsplotlib.colormap_hex(vals, name, lo, hi))
-    return colors, (name, lo, hi)
+    return vals, name, (name, lo, hi)
 
 
 def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, kwargs):
@@ -194,7 +227,9 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, k
 
     返回 (use_multi, args, mappable):
     - use_multi=False: args = (x, y, s:float, c:str|None, marker, label, alpha, edgecolor, linewidth)
-    - use_multi=True:  args = (x, y, s:list|None, c:list|None, marker, label, alpha, edgecolor, linewidth)
+    - use_multi=True:  args = (x, y, s:list|None, c:list|None, marker, label, alpha, edgecolor,
+      linewidth, cmap:str|None, vmin:float|None, vmax:float|None)。c 为数值数组时保持原始数值，
+      配合 cmap/vmin/vmax 由 Rust 层直接经 colormap_color 上色（避免 hex 字符串往返）。
     - mappable: None 或 (cmap名, vmin, vmax)，当 c 为数值数组经 colormap 映射时给出，
       供随后的 plt.colorbar() 绘制颜色条。
     """
@@ -215,16 +250,37 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, k
     c_list = None
     c_single = None
     mappable = None
+    cmap_name = None
     if c_is_seq:
-        c_vals = _to_list(c)
-        # 单个 RGB(A)（长度 3/4 的纯数值序列，且与点数不同）视为统一单色
-        is_flat_numeric = all(
-            not isinstance(v, str) and not _is_scatter_sequence(v) for v in c_vals
-        )
-        if is_flat_numeric and len(c_vals) in (3, 4) and len(c_vals) != n:
-            c_single = _rgba_to_hex(c_vals)
-        else:
-            c_list, mappable = _resolve_scatter_colors(c_vals, cmap, vmin, vmax)
+        # 快路径：一维数值缓冲 c（且非「长度 3/4 单 RGB」歧义）明确是 colormap 数值，
+        # 零拷贝直传 Rust，跳过 .tolist() / 逐元素类别检查 / [float(v)] 物化（scatter 热路径）。
+        clen = _numeric_buffer_1d_len(c)
+        can_fast = clen is not None and not (clen in (3, 4) and clen != n)
+        fast_done = False
+        if can_fast:
+            # rsnumpy 的 .min()/.max() 返回类型不稳定（float 或 0 维 ndarray），
+            # 用 _reduce_to_float 归一；缺少 min/max 等异常时回退慢路径确保不崩。
+            try:
+                lo = _reduce_to_float(c.min()) if vmin is None else float(vmin)
+                hi = _reduce_to_float(c.max()) if vmax is None else float(vmax)
+                cmap_name = cmap if isinstance(cmap, str) else 'viridis'
+                c_list = c
+                mappable = (cmap_name, lo, hi)
+                fast_done = True
+            except (TypeError, ValueError, AttributeError):
+                cmap_name = None
+                c_list = None
+                mappable = None
+        if not fast_done:
+            c_vals = _to_list(c)
+            # 单个 RGB(A)（长度 3/4 的纯数值序列，且与点数不同）视为统一单色
+            is_flat_numeric = all(
+                not isinstance(v, str) and not _is_scatter_sequence(v) for v in c_vals
+            )
+            if is_flat_numeric and len(c_vals) in (3, 4) and len(c_vals) != n:
+                c_single = _rgba_to_hex(c_vals)
+            else:
+                c_list, cmap_name, mappable = _resolve_scatter_colors(c_vals, cmap, vmin, vmax)
     elif isinstance(c, str):
         c_single = c
 
@@ -248,8 +304,16 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, k
         c_arg = [c_single] * n
     else:
         c_arg = None
+
+    # 数值 colormap 路径：把 cmap 名与已解析的 lo/hi 传给 Rust，由其直接算 RGB（跳过 hex 往返）。
+    # 字符串 / RGB(A) 颜色路径 cmap_name 为 None，Rust 按颜色字符串解析。
+    if cmap_name is not None and mappable is not None:
+        cmap_arg, vmin_arg, vmax_arg = mappable
+    else:
+        cmap_arg, vmin_arg, vmax_arg = None, None, None
     return (True,
-            (x, y, s_arg, c_arg, marker, label, alpha, edgecolor, linewidth),
+            (x, y, s_arg, c_arg, marker, label, alpha, edgecolor, linewidth,
+             cmap_arg, vmin_arg, vmax_arg),
             mappable)
 
 
