@@ -434,17 +434,31 @@ impl Figure {
         let ss = SUPERSAMPLE;
         let sw = out_w * ss;
         let sh = out_h * ss;
-        let mut hi = vec![0u8; (sw as usize) * (sh as usize) * 3];
-        {
-            let backend: BitMapBackend<'_, plotters::backend::RGBPixel> =
-                BitMapBackend::with_buffer_and_format(&mut hi, (sw, sh)).map_err(|e| {
-                    PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e))
-                })?;
+        // 目标缓冲放在 Rc<RefCell<..>> 里，与自定义后端 RgbBufferBackend 及线程本地 canvas
+        // 共享同一块内存：plotters 常规绘制经后端落盘，热路径（折线 AA / imshow）经线程
+        // 本地 canvas 直接 blit，二者写同一缓冲。渲染结束取回缓冲再盒式滤波缩放。
+        let shared: std::rc::Rc<std::cell::RefCell<Vec<u8>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(vec![
+                0u8;
+                (sw as usize)
+                    * (sh as usize)
+                    * 3
+            ]));
+        crate::utils::rgb_backend::set_canvas(shared.clone(), sw, sh);
+        let render_res = {
+            let backend =
+                crate::utils::rgb_backend::RgbBufferBackend::new(shared.clone(), (sw, sh));
             let backend = crate::utils::glyph_cache::GlyphCacheBackend::new(backend);
             // 传 actual_w/h = 超采样尺寸（render_to_backend 据此算出相对 self.width 的总缩放
             // 比例并放大各布局常量），font_scale 也乘以 ss，让字体/线宽在放大画布上同比放大。
-            self.render_to_backend(py, backend, sw, sh, true, font_scale * ss as f64)?;
-        }
+            self.render_to_backend(py, backend, sw, sh, true, font_scale * ss as f64)
+        };
+        // 先清线程本地 canvas 释放其 Rc 引用，再取回缓冲（此时 shared 引用计数应为 1）。
+        crate::utils::rgb_backend::clear_canvas();
+        render_res?;
+        let hi = std::rc::Rc::try_unwrap(shared)
+            .map_err(|_| PyRuntimeError::new_err("canvas buffer still borrowed after render"))?
+            .into_inner();
         Ok(downsample_box(&hi, sw, sh, ss))
     }
 

@@ -640,16 +640,38 @@ where
     // 开销与被覆盖像素数成正比，而非与整块绘图区成正比。复位对每个 touched 下标
     // 都执行（即使绘制中途出错），以保证 dist_buf 归还 scratch 时仍为全 +∞。
     let area = chart.plotting_area().strip_coord_spec();
+    let base = area.get_base_pixel();
     let mut draw_res: PyResult<()> = Ok(());
     let cov_reach_f = cov_reach as f32;
+    let (cr, cg, cb) = (rgb.0, rgb.1, rgb.2);
+    // 位图渲染时线程本地 canvas 已就绪：借出共享缓冲一次，热循环内直接 blit（绕过逐像素
+    // 坐标变换与 RefCell 借用）。show() 等无 canvas 场景回退经 area.draw_pixel，结果一致。
+    let cvs = crate::utils::rgb_backend::canvas();
+    let cwh = cvs.as_ref().map(|t| (t.1, t.2));
+    let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
     for &idx in touched.iter() {
         let d = dist_buf[idx];
         dist_buf[idx] = f32::INFINITY;
-        if draw_res.is_ok() {
-            let cov = (cov_reach_f - d).clamp(0.0, 1.0);
-            if cov > 0.0 {
-                let xx = (idx % pw_u) as i32;
-                let yy = (idx / pw_u) as i32;
+        if draw_res.is_err() {
+            continue;
+        }
+        let cov = (cov_reach_f - d).clamp(0.0, 1.0);
+        if cov > 0.0 {
+            let xx = (idx % pw_u) as i32;
+            let yy = (idx / pw_u) as i32;
+            if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
+                crate::utils::rgb_backend::put_rgb_pixel(
+                    buf,
+                    cw,
+                    ch,
+                    xx + base.0,
+                    yy + base.1,
+                    cr,
+                    cg,
+                    cb,
+                    cov as f64,
+                );
+            } else {
                 let color = rgb.mix(cov as f64);
                 if let Err(e) = area.draw_pixel((xx, yy), &color) {
                     draw_res = Err(PyRuntimeError::new_err(format!("AA polyline: {}", e)));
@@ -657,6 +679,7 @@ where
             }
         }
     }
+    drop(buf_guard);
     touched.clear();
     AA_SCRATCH.with(|c| {
         let mut g = c.borrow_mut();
@@ -1171,8 +1194,14 @@ where
             return Ok(());
         }
         let area = chart.plotting_area().strip_coord_spec();
+        let base = area.get_base_pixel();
         let (pw_i, ph_i) = (pw as i32, ph as i32);
         let (max_r, max_c) = ((n_rows - 1) as f64, (n_cols - 1) as f64);
+        // 位图渲染时借出线程本地 canvas 共享缓冲一次，逐输出像素直接 blit；无 canvas 时
+        // 回退经 area.draw_pixel（结果逐字节一致）。
+        let cvs = crate::utils::rgb_backend::canvas();
+        let cwh = cvs.as_ref().map(|t| (t.1, t.2));
+        let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
         for yy in 0..ph_i {
             // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
             let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
@@ -1187,9 +1216,24 @@ where
                 }
                 let sc = (data_x - 0.5).clamp(0.0, max_c);
                 let (r, g, b) = sample_image(pixels, n_cols, n_rows, sr, sc, bicubic);
-                let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
-                area.draw_pixel((xx, yy), &color)
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+                if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
+                    crate::utils::rgb_backend::put_rgb_pixel(
+                        buf,
+                        cw,
+                        ch,
+                        xx + base.0,
+                        yy + base.1,
+                        to_u8(r),
+                        to_u8(g),
+                        to_u8(b),
+                        alpha,
+                    );
+                } else {
+                    let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
+                    area.draw_pixel((xx, yy), &color).map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
+                    })?;
+                }
             }
         }
     } else {
@@ -1252,8 +1296,14 @@ where
         return Ok(());
     }
     let area = chart.plotting_area().strip_coord_spec();
+    let base = area.get_base_pixel();
     let (pw_i, ph_i) = (pw as i32, ph as i32);
     let (max_r, max_c) = (n_rows as isize - 1, n_cols as isize - 1);
+    // 位图渲染时借出线程本地 canvas 共享缓冲一次，逐输出像素直接 blit；无 canvas 时
+    // 回退经 area.draw_pixel（结果逐字节一致）。
+    let cvs = crate::utils::rgb_backend::canvas();
+    let cwh = cvs.as_ref().map(|t| (t.1, t.2));
+    let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
     for yy in 0..ph_i {
         // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
         let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
@@ -1269,9 +1319,23 @@ where
             }
             let c = (data_x.floor() as isize).clamp(0, max_c) as usize;
             let (pr, pg, pb) = pixels[row_base + c];
-            let color = plotters::style::RGBAColor(pr, pg, pb, alpha);
-            area.draw_pixel((xx, yy), &color)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
+                crate::utils::rgb_backend::put_rgb_pixel(
+                    buf,
+                    cw,
+                    ch,
+                    xx + base.0,
+                    yy + base.1,
+                    pr,
+                    pg,
+                    pb,
+                    alpha,
+                );
+            } else {
+                let color = plotters::style::RGBAColor(pr, pg, pb, alpha);
+                area.draw_pixel((xx, yy), &color)
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            }
         }
     }
     Ok(())
