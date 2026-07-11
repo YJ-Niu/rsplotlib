@@ -151,6 +151,50 @@ fn blend_channel(prev: &mut u8, new: u8, a: u64) {
     }
 }
 
+/// 把 canvas 缓冲中「自 `base_y` 行起、共 `rows` 行」的区域按行切分给多线程并行填充。
+///
+/// `render(chunk, yy0, chunk_rows)` 负责渲染输出行 `[yy0, yy0+chunk_rows)`：`chunk` 是该
+/// 块对应的可变字节切片（宽 `cw`、高 `chunk_rows`，行主序 RGB），其第 0 行即输出行 `yy0`，
+/// 故块内写像素时行坐标用「局部行」（`全局行 - yy0`）、高度用 `chunk_rows`。
+///
+/// 各块覆盖互不重叠的行，写入天然无数据竞争；且每个输出像素在其所属块内只被计算/写入一次，
+/// 结果与单线程逐行处理逐字节相同（imshow 无跨像素依赖）。线程数 ≤1 时直接串行，避免线程开销。
+///
+/// 调用方须保证 `(base_y + rows) * cw * 3 <= buf.len()`（即区域落在缓冲内）。
+pub fn par_render_rows<F>(buf: &mut [u8], cw: u32, base_y: usize, rows: usize, render: F)
+where
+    F: Fn(&mut [u8], usize, usize) + Sync,
+{
+    let stride = cw as usize * 3;
+    if rows == 0 || stride == 0 {
+        return;
+    }
+    let region = &mut buf[base_y * stride..(base_y + rows) * stride];
+    let nthreads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(rows)
+        .min(8);
+    if nthreads <= 1 {
+        render(region, 0, rows);
+        return;
+    }
+    let rows_per = rows.div_ceil(nthreads);
+    let render = &render;
+    std::thread::scope(|scope| {
+        let mut rest = region;
+        let mut start = 0usize;
+        while start < rows {
+            let end = (start + rows_per).min(rows);
+            let take = (end - start) * stride;
+            let (chunk, tail) = rest.split_at_mut(take);
+            rest = tail;
+            scope.spawn(move || render(chunk, start, end - start));
+            start = end;
+        }
+    });
+}
+
 /// 直接向 RGB 缓冲写单像素，语义与 `BitMapBackend<RGBPixel>::draw_pixel` 完全一致：
 /// 越界忽略；`alpha >= 1 - 1/256` 直接覆盖；`alpha <= 0` 跳过；否则按整数 alpha 混合
 /// （`a = (alpha*256).floor()`）。因此走此路径与经 `area.draw_pixel` 逐字节相同。
