@@ -1265,21 +1265,29 @@ def hist(x, bins=None, range=None, density=False, weights=None,
     if bins is None:
         bins = 10
 
-    # 数据规整为“组的列表”
-    x = _to_list_recursive(x)
-    if x and isinstance(x[0], (list, tuple)):
-        x_list = [list(v) for v in x]
+    # 数据规整为“组的列表”。一维纯数值缓冲直接下沉给 Rust 零拷贝读取，避免
+    # _to_list_recursive + [list(x)] 把百万级数据点物化成 Python 对象（hist 大数据热路径）。
+    if _numeric_buffer_1d_len(x) is not None:
+        x_list = x
+        n_datasets = 1
     else:
-        x_list = [list(x)]
-    n_datasets = len(x_list)
-
-    # weights 规整为与 x 平行的结构
-    if weights is not None:
-        w = _to_list_recursive(weights)
-        if w and isinstance(w[0], (list, tuple)):
-            weights_arg = [list(v) for v in w]
+        x = _to_list_recursive(x)
+        if x and isinstance(x[0], (list, tuple)):
+            x_list = [list(v) for v in x]
         else:
-            weights_arg = [list(w)]
+            x_list = [list(x)]
+        n_datasets = len(x_list)
+
+    # weights 规整为与 x 平行的结构（一维数值缓冲同样直传，Rust 侧零拷贝读取）
+    if weights is not None:
+        if _numeric_buffer_1d_len(weights) is not None:
+            weights_arg = weights
+        else:
+            w = _to_list_recursive(weights)
+            if w and isinstance(w[0], (list, tuple)):
+                weights_arg = [list(v) for v in w]
+            else:
+                weights_arg = [list(w)]
     else:
         weights_arg = None
 

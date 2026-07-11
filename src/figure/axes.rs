@@ -3570,6 +3570,24 @@ impl Axes {
     }
 
     pub fn parse_hist_data(x: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
+        // 快路径：numpy 风格数值数组直接零拷贝读原始缓冲区，避免把百万级数据点逐元素
+        // extract 成 Python/Rust 对象（hist 大数据的主要边界开销）。一维视为单组数据，
+        // 二维按行拆为多组，与旧 `_to_list_recursive`→行 及 py_to_vec_vec_f64 语义一致。
+        // Python list / list-of-lists 无缓冲协议，array_interface_flat 返回 None，
+        // 落到下方原有逐元素路径，行为不变。
+        if let Some((shape, flat)) = array_interface_flat(x) {
+            match shape.as_slice() {
+                [_] => return Ok(vec![flat]),
+                [rows, cols] => {
+                    let mut out = Vec::with_capacity(*rows);
+                    for r in 0..*rows {
+                        out.push(flat[r * cols..(r + 1) * cols].to_vec());
+                    }
+                    return Ok(out);
+                }
+                _ => {}
+            }
+        }
         if let Ok(lst) = x.extract::<Vec<Bound<'_, PyAny>>>() {
             if lst.is_empty() {
                 return Ok(Vec::new());
