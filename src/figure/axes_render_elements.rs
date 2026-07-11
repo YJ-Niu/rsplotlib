@@ -1197,38 +1197,69 @@ where
         let base = area.get_base_pixel();
         let (pw_i, ph_i) = (pw as i32, ph as i32);
         let (max_r, max_c) = ((n_rows - 1) as f64, (n_cols - 1) as f64);
-        // 位图渲染时借出线程本地 canvas 共享缓冲一次，逐输出像素直接 blit；无 canvas 时
-        // 回退经 area.draw_pixel（结果逐字节一致）。
+        // 位图渲染时借出线程本地 canvas 共享缓冲；各输出行写入互不重叠的 canvas 行，故按行
+        // 切分给多线程并行填充（每像素独立采样、无跨像素依赖，结果与串行逐字节一致）。无
+        // canvas 时回退经 area.draw_pixel（同样逐字节一致）。
         let cvs = crate::utils::rgb_backend::canvas();
-        let cwh = cvs.as_ref().map(|t| (t.1, t.2));
-        let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
-        for yy in 0..ph_i {
-            // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
-            let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
-            if data_y < 0.0 || data_y > n_rows as f64 {
-                continue;
-            }
-            let sr = (data_y - 0.5).clamp(0.0, max_r);
-            for xx in 0..pw_i {
-                let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
-                if data_x < 0.0 || data_x > n_cols as f64 {
+        if let Some((buf_rc, cw, ch)) = cvs {
+            let mut buf = buf_rc.borrow_mut();
+            // 输出行 yy 落在 canvas 行 yy+base.1；仅处理落在缓冲内的行（yy+base.1 < ch），
+            // 与逐像素 y>=ch 越界跳过等价。
+            let base_y = base.1.max(0) as usize;
+            let rows = (ch as usize)
+                .saturating_sub(base_y)
+                .min(ph_i.max(0) as usize);
+            let render = |chunk: &mut [u8], yy0: usize, chunk_rows: usize| {
+                for local in 0..chunk_rows {
+                    let yy = (yy0 + local) as i32;
+                    let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
+                    if data_y < 0.0 || data_y > n_rows as f64 {
+                        continue;
+                    }
+                    let sr = (data_y - 0.5).clamp(0.0, max_r);
+                    for xx in 0..pw_i {
+                        let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
+                        if data_x < 0.0 || data_x > n_cols as f64 {
+                            continue;
+                        }
+                        let sc = (data_x - 0.5).clamp(0.0, max_c);
+                        let (r, g, b) = sample_image(pixels, n_cols, n_rows, sr, sc, bicubic);
+                        crate::utils::rgb_backend::put_rgb_pixel(
+                            chunk,
+                            cw,
+                            chunk_rows as u32,
+                            xx + base.0,
+                            local as i32,
+                            to_u8(r),
+                            to_u8(g),
+                            to_u8(b),
+                            alpha,
+                        );
+                    }
+                }
+            };
+            crate::utils::rgb_backend::par_render_rows(
+                buf.as_mut_slice(),
+                cw,
+                base_y,
+                rows,
+                render,
+            );
+        } else {
+            for yy in 0..ph_i {
+                // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
+                let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
+                if data_y < 0.0 || data_y > n_rows as f64 {
                     continue;
                 }
-                let sc = (data_x - 0.5).clamp(0.0, max_c);
-                let (r, g, b) = sample_image(pixels, n_cols, n_rows, sr, sc, bicubic);
-                if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
-                    crate::utils::rgb_backend::put_rgb_pixel(
-                        buf,
-                        cw,
-                        ch,
-                        xx + base.0,
-                        yy + base.1,
-                        to_u8(r),
-                        to_u8(g),
-                        to_u8(b),
-                        alpha,
-                    );
-                } else {
+                let sr = (data_y - 0.5).clamp(0.0, max_r);
+                for xx in 0..pw_i {
+                    let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
+                    if data_x < 0.0 || data_x > n_cols as f64 {
+                        continue;
+                    }
+                    let sc = (data_x - 0.5).clamp(0.0, max_c);
+                    let (r, g, b) = sample_image(pixels, n_cols, n_rows, sr, sc, bicubic);
                     let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
                     area.draw_pixel((xx, yy), &color).map_err(|e| {
                         PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
@@ -1299,39 +1330,63 @@ where
     let base = area.get_base_pixel();
     let (pw_i, ph_i) = (pw as i32, ph as i32);
     let (max_r, max_c) = (n_rows as isize - 1, n_cols as isize - 1);
-    // 位图渲染时借出线程本地 canvas 共享缓冲一次，逐输出像素直接 blit；无 canvas 时
-    // 回退经 area.draw_pixel（结果逐字节一致）。
+    // 位图渲染时借出线程本地 canvas 共享缓冲；各输出行写入互不重叠的 canvas 行，故按行切分
+    // 给多线程并行填充（每像素独立取样、无跨像素依赖，结果与串行逐字节一致）。无 canvas 时
+    // 回退经 area.draw_pixel（同样逐字节一致）。
     let cvs = crate::utils::rgb_backend::canvas();
-    let cwh = cvs.as_ref().map(|t| (t.1, t.2));
-    let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
-    for yy in 0..ph_i {
-        // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
-        let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
-        if data_y < 0.0 || data_y > n_rows as f64 {
-            continue;
-        }
-        let r = (data_y.floor() as isize).clamp(0, max_r) as usize;
-        let row_base = r * n_cols;
-        for xx in 0..pw_i {
-            let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
-            if data_x < 0.0 || data_x > n_cols as f64 {
+    if let Some((buf_rc, cw, ch)) = cvs {
+        let mut buf = buf_rc.borrow_mut();
+        let base_y = base.1.max(0) as usize;
+        let rows = (ch as usize)
+            .saturating_sub(base_y)
+            .min(ph_i.max(0) as usize);
+        let render = |chunk: &mut [u8], yy0: usize, chunk_rows: usize| {
+            for local in 0..chunk_rows {
+                let yy = (yy0 + local) as i32;
+                let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
+                if data_y < 0.0 || data_y > n_rows as f64 {
+                    continue;
+                }
+                let r = (data_y.floor() as isize).clamp(0, max_r) as usize;
+                let row_base = r * n_cols;
+                for xx in 0..pw_i {
+                    let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
+                    if data_x < 0.0 || data_x > n_cols as f64 {
+                        continue;
+                    }
+                    let c = (data_x.floor() as isize).clamp(0, max_c) as usize;
+                    let (pr, pg, pb) = pixels[row_base + c];
+                    crate::utils::rgb_backend::put_rgb_pixel(
+                        chunk,
+                        cw,
+                        chunk_rows as u32,
+                        xx + base.0,
+                        local as i32,
+                        pr,
+                        pg,
+                        pb,
+                        alpha,
+                    );
+                }
+            }
+        };
+        crate::utils::rgb_backend::par_render_rows(buf.as_mut_slice(), cw, base_y, rows, render);
+    } else {
+        for yy in 0..ph_i {
+            // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
+            let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
+            if data_y < 0.0 || data_y > n_rows as f64 {
                 continue;
             }
-            let c = (data_x.floor() as isize).clamp(0, max_c) as usize;
-            let (pr, pg, pb) = pixels[row_base + c];
-            if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
-                crate::utils::rgb_backend::put_rgb_pixel(
-                    buf,
-                    cw,
-                    ch,
-                    xx + base.0,
-                    yy + base.1,
-                    pr,
-                    pg,
-                    pb,
-                    alpha,
-                );
-            } else {
+            let r = (data_y.floor() as isize).clamp(0, max_r) as usize;
+            let row_base = r * n_cols;
+            for xx in 0..pw_i {
+                let data_x = x_min + (xx as f64 + 0.5) * x_per_pix;
+                if data_x < 0.0 || data_x > n_cols as f64 {
+                    continue;
+                }
+                let c = (data_x.floor() as isize).clamp(0, max_c) as usize;
+                let (pr, pg, pb) = pixels[row_base + c];
                 let color = plotters::style::RGBAColor(pr, pg, pb, alpha);
                 area.draw_pixel((xx, yy), &color)
                     .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
