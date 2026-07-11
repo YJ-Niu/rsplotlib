@@ -1373,7 +1373,11 @@ def boxplot(x, labels=None, vert=True, **kwargs):
         labels: 每个箱的标签列表
         vert: 是否垂直绘制 (默认 True)
     """
-    x = _to_list_recursive(x)
+    # 纯数值缓冲数组直接下沉给 Rust 零拷贝读取（py_to_vec_vec_f64：一维→单箱，
+    # 二维→按行拆多箱，与旧 _to_list_recursive 语义一致），避免物化百万级数据点。
+    # Python list（含 list of arrays）、含字符串等非缓冲对象保持原路径。
+    if not _is_numeric_buffer(x):
+        x = _to_list_recursive(x)
     return _route_to_ax('boxplot', _rsplotlib.boxplot, x, labels, vert)
 
 
