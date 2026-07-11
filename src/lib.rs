@@ -18,6 +18,11 @@ fn install_default_sans(font_data: Vec<u8>) -> bool {
     let face_copy = font_data.clone();
     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
     if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+        crate::utils::glyph_cache::register_ab_glyph(
+            "sans-serif",
+            plotters::style::FontStyle::Normal,
+            font_ref,
+        );
         crate::utils::font_stack::set_default_face(face_copy);
         true
     } else {
@@ -45,11 +50,86 @@ fn install_math_fallback(candidates: &[&str]) -> bool {
         // family 名需在两侧一致：plotters 绘制时按此名查表，选择器也返回此名。
         let leaked_family: &'static str = Box::leak(family.clone().into_boxed_str());
         if register_font(leaked_family, plotters::style::FontStyle::Normal, font_ref).is_ok() {
+            crate::utils::glyph_cache::register_ab_glyph(
+                leaked_family,
+                plotters::style::FontStyle::Normal,
+                font_ref,
+            );
             crate::utils::font_stack::set_math_face(family, face_copy);
             return true;
         }
     }
     false
+}
+
+/// 以给定的通用族名（如 "monospace"/"serif"）注册系统/matplotlib 字体到 plotters。
+///
+/// matplotlib 的 `family="monospace"`、`"serif"` 等是**通用族关键字**；plotters 必须
+/// 先以该名 `register_font` 才能绘制它，否则渲染时抛 `FontUnavailable`。依次尝试候选
+/// 路径，注册第一个可读取的字体，并将其 face 记入 `font_stack::register_named_family`
+/// 供选择/覆盖查询。返回是否成功。
+fn install_named_font(family: &str, candidates: &[&str]) -> bool {
+    for path in candidates {
+        let Ok(font_data) = std::fs::read(path) else {
+            continue;
+        };
+        let face_copy = font_data.clone();
+        let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+        if register_font(family, plotters::style::FontStyle::Normal, font_ref).is_ok() {
+            crate::utils::glyph_cache::register_ab_glyph(
+                family,
+                plotters::style::FontStyle::Normal,
+                font_ref,
+            );
+            crate::utils::font_stack::register_named_family(family, face_copy);
+            return true;
+        }
+    }
+    false
+}
+
+/// 返回虚拟环境中 matplotlib 自带字体的候选路径（用于与 matplotlib 外观一致的
+/// monospace/serif 回退）。`file` 形如 "DejaVuSansMono.ttf"。
+fn mpl_font_paths(file: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for prefix in [
+        std::env::var("VIRTUAL_ENV").ok(),
+        Some(
+            std::env::current_dir()
+                .map(|p| p.join(".venv").to_string_lossy().to_string())
+                .unwrap_or_default(),
+        )
+        .filter(|p| !p.is_empty()),
+    ]
+    .iter()
+    .flatten()
+    {
+        out.push(
+            std::path::Path::new(prefix)
+                .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf")
+                .join(file)
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+    out
+}
+
+/// 注册 matplotlib 通用族 monospace / serif。
+///
+/// 优先使用 matplotlib 自带的 DejaVu Sans Mono / DejaVu Serif（与 matplotlib 默认
+/// 外观一致），再回退到平台自带字体。仅接受单一字体的 TTF/OTF（ab_glyph 无法解析
+/// TTC 集合，故避免 .ttc）。
+fn install_generic_families(platform_mono: &[&str], platform_serif: &[&str]) {
+    let mono_mpl = mpl_font_paths("DejaVuSansMono.ttf");
+    let mut mono: Vec<&str> = mono_mpl.iter().map(|s| s.as_str()).collect();
+    mono.extend_from_slice(platform_mono);
+    install_named_font("monospace", &mono);
+
+    let serif_mpl = mpl_font_paths("DejaVuSerif.ttf");
+    let mut serif: Vec<&str> = serif_mpl.iter().map(|s| s.as_str()).collect();
+    serif.extend_from_slice(platform_serif);
+    install_named_font("serif", &serif);
 }
 
 #[pymodule]
@@ -123,6 +203,18 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "/System/Library/Fonts/Supplemental/STIXGeneral.otf",
             "/Library/Fonts/STIXTwoMath.otf",
         ]);
+        // 通用族 monospace / serif：优先 matplotlib 自带 DejaVu，再回退系统 TTF
+        // （避免 .ttc 集合——ab_glyph 不支持）。
+        install_generic_families(
+            &[
+                "/System/Library/Fonts/Supplemental/Andale Mono.ttf",
+                "/System/Library/Fonts/Supplemental/Courier New.ttf",
+            ],
+            &[
+                "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+                "/System/Library/Fonts/Supplemental/Georgia.ttf",
+            ],
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -176,6 +268,21 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "/usr/share/fonts/stix/STIXTwoMath-Regular.otf",
             "/usr/share/fonts/OTF/STIXTwoMath-Regular.otf",
         ]);
+        // 通用族 monospace / serif：优先 matplotlib 自带 DejaVu，再回退系统 TTF。
+        install_generic_families(
+            &[
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+                "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+            ],
+            &[
+                "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSerif.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+                "/usr/share/fonts/liberation/LiberationSerif-Regular.ttf",
+            ],
+        );
     }
 
     #[cfg(target_os = "windows")]
@@ -206,6 +313,11 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "C:/Windows/Fonts/cambria.ttc",
             "C:/Windows/Fonts/STIXTwoMath-Regular.otf",
         ]);
+        // 通用族 monospace / serif：优先 matplotlib 自带 DejaVu，再回退系统 TTF。
+        install_generic_families(
+            &["C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/cour.ttf"],
+            &["C:/Windows/Fonts/times.ttf", "C:/Windows/Fonts/georgia.ttf"],
+        );
     }
 
     m.add_class::<Figure>()?;

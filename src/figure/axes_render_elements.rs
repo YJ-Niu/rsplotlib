@@ -640,16 +640,38 @@ where
     // 开销与被覆盖像素数成正比，而非与整块绘图区成正比。复位对每个 touched 下标
     // 都执行（即使绘制中途出错），以保证 dist_buf 归还 scratch 时仍为全 +∞。
     let area = chart.plotting_area().strip_coord_spec();
+    let base = area.get_base_pixel();
     let mut draw_res: PyResult<()> = Ok(());
     let cov_reach_f = cov_reach as f32;
+    let (cr, cg, cb) = (rgb.0, rgb.1, rgb.2);
+    // 位图渲染时线程本地 canvas 已就绪：借出共享缓冲一次，热循环内直接 blit（绕过逐像素
+    // 坐标变换与 RefCell 借用）。show() 等无 canvas 场景回退经 area.draw_pixel，结果一致。
+    let cvs = crate::utils::rgb_backend::canvas();
+    let cwh = cvs.as_ref().map(|t| (t.1, t.2));
+    let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
     for &idx in touched.iter() {
         let d = dist_buf[idx];
         dist_buf[idx] = f32::INFINITY;
-        if draw_res.is_ok() {
-            let cov = (cov_reach_f - d).clamp(0.0, 1.0);
-            if cov > 0.0 {
-                let xx = (idx % pw_u) as i32;
-                let yy = (idx / pw_u) as i32;
+        if draw_res.is_err() {
+            continue;
+        }
+        let cov = (cov_reach_f - d).clamp(0.0, 1.0);
+        if cov > 0.0 {
+            let xx = (idx % pw_u) as i32;
+            let yy = (idx / pw_u) as i32;
+            if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
+                crate::utils::rgb_backend::put_rgb_pixel(
+                    buf,
+                    cw,
+                    ch,
+                    xx + base.0,
+                    yy + base.1,
+                    cr,
+                    cg,
+                    cb,
+                    cov as f64,
+                );
+            } else {
                 let color = rgb.mix(cov as f64);
                 if let Err(e) = area.draw_pixel((xx, yy), &color) {
                     draw_res = Err(PyRuntimeError::new_err(format!("AA polyline: {}", e)));
@@ -657,6 +679,7 @@ where
             }
         }
     }
+    drop(buf_guard);
     touched.clear();
     AA_SCRATCH.with(|c| {
         let mut g = c.borrow_mut();
@@ -665,6 +688,31 @@ where
         g.2 = std::mem::take(&mut pts);
     });
     draw_res
+}
+
+/// 解析元组 linestyle 的编码串 `"dashes=<offset>;<v0>,<v1>,..."` 为
+/// `(相位偏移像素, 图案 Vec<(段长像素, 是否绘制)>)`。
+///
+/// - `ds` = 名义线宽 × font_scale，即「1 图案单位(point) → 像素」的换算因子
+///   （与 matplotlib `scale_dashes` 把 on/off 值按线宽缩放后再转像素一致）。
+/// - 序列自 draw=true 起交替（on, off, on, off, ...）。
+/// - 序列为空 / 全 0 / 解析失败时返回 None（当作实线处理）。
+fn parse_dash_encoding(rest: &str, ds: f64) -> Option<(f64, Vec<(f64, bool)>)> {
+    let (off_s, seq_s) = rest.split_once(';')?;
+    let offset: f64 = off_s.trim().parse().ok()?;
+    let mut pattern: Vec<(f64, bool)> = Vec::new();
+    for (i, tok) in seq_s.split(',').enumerate() {
+        let tok = tok.trim();
+        if tok.is_empty() {
+            continue;
+        }
+        let v: f64 = tok.parse().ok()?;
+        pattern.push((v * ds, i % 2 == 0));
+    }
+    if pattern.is_empty() || pattern.iter().all(|(l, _)| *l <= 0.0) {
+        return None;
+    }
+    Some((offset * ds, pattern))
 }
 
 /// 沿折线按「显示像素」度量的图案切分出各段 dash 折线（纯几何，不做绘制）。
@@ -682,15 +730,36 @@ fn compute_dash_segments(
     pattern: &[(f64, bool)],
     x_per_pix: f64,
     y_per_pix: f64,
+    offset_px: f64,
 ) -> Vec<Vec<(f64, f64)>> {
     let mut out: Vec<Vec<(f64, f64)>> = Vec::new();
     if points.len() < 2 || pattern.is_empty() {
         return out;
     }
 
-    let mut pat_idx = 0usize;
-    let mut pat_remain = pattern[0].0.max(1e-6);
-    let mut drawing = pattern[0].1;
+    // 按 dash 相位偏移(offset_px)确定起始 pattern 段：在总图案长度内取模后，
+    // 找到偏移落入的段, 并算出该段剩余长度。matplotlib 元组 linestyle 的第一个
+    // 元素即此相位偏移。
+    let (mut pat_idx, mut pat_remain, mut drawing) = {
+        let total: f64 = pattern.iter().map(|(l, _)| *l).sum();
+        if total <= 1e-9 {
+            (0usize, pattern[0].0.max(1e-6), pattern[0].1)
+        } else {
+            let mut off = offset_px % total;
+            if off < 0.0 {
+                off += total;
+            }
+            let mut idx = 0usize;
+            loop {
+                let seg = pattern[idx].0;
+                if off < seg || idx + 1 == pattern.len() {
+                    break (idx, (seg - off).max(1e-6), pattern[idx].1);
+                }
+                off -= seg;
+                idx += 1;
+            }
+        }
+    };
     // 当前正在累积的一段 dash 折点（数据坐标），可跨多段折线累积
     let mut cur: Vec<(f64, f64)> = Vec::new();
 
@@ -735,6 +804,200 @@ fn compute_dash_segments(
         out.push(cur);
     }
     out
+}
+
+/// 折线线段简化（每像素列 min/max 聚合，即 M4 抽稀）。
+///
+/// 当折线点数远多于绘图区横向像素数时，同一像素列内往往堆叠成百上千个点，逐点画
+/// 抗锯齿线段是大数据折线渲染的主要开销（且不可见）。此函数按屏幕像素列分桶，每列
+/// 保留 first / last / min-y / max-y 至多四个**真实数据点**，把绘制线段数从 O(N)
+/// 降到 O(像素宽)，同时完整保留竖直包络与逐列真实峰谷——输出与全量渲染像素级几乎
+/// 一致（对比朴素隔点抽稀会丢失噪声带并产生走样）。
+///
+/// 仅在以下条件下抽稀，否则返回 `None`（调用方保持原折线）：
+/// - 点数至少为像素列数的 2 倍（否则无收益）；
+/// - x 单调（递增或递减）——保证按列分桶不破坏折线连通性；参数曲线（如 Lissajous）
+///   x 非单调，跳过以免错连。
+///
+/// 列映射用图表的 `[x_min, x_max]` 与像素宽（而非线段自身范围），使仅占少数屏幕像素
+/// 的线段只落入对应少数列，不会被过度细分。位图后端此时为超采样尺寸（宽度已 ×SSAA），
+/// 故抽稀保真到超采样分辨率，缩回后画质不损。
+fn decimate_min_max(
+    points: &[(f64, f64)],
+    x_min: f64,
+    x_max: f64,
+    plot_w_px: f64,
+) -> Option<Vec<(f64, f64)>> {
+    let n = points.len();
+    let cols = plot_w_px.floor().max(1.0) as usize;
+    if plot_w_px <= 0.0 || n < cols.saturating_mul(2).max(64) {
+        return None;
+    }
+    let inc = points[n - 1].0 >= points[0].0;
+    let monotonic = points.windows(2).all(|w| {
+        if inc {
+            w[1].0 >= w[0].0
+        } else {
+            w[1].0 <= w[0].0
+        }
+    });
+    if !monotonic {
+        return None;
+    }
+    let span = x_max - x_min;
+    if !span.is_finite() || span == 0.0 {
+        return None;
+    }
+    let col_of = |x: f64| -> i64 {
+        ((x - x_min) / span * plot_w_px)
+            .floor()
+            .clamp(-1.0, plot_w_px) as i64
+    };
+    // 输出某一像素列聚合出的 1~4 个代表点，按行进方向（x 序）排列并跳过相邻重复点。
+    let emit = |out: &mut Vec<(f64, f64)>,
+                first: (f64, f64),
+                last: (f64, f64),
+                lo: (f64, f64),
+                hi: (f64, f64)| {
+        let mut pts = [first, lo, hi, last];
+        if inc {
+            pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        } else {
+            pts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        for p in pts {
+            if out.last().is_none_or(|l| l.0 != p.0 || l.1 != p.1) {
+                out.push(p);
+            }
+        }
+    };
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(cols * 4 + 8);
+    let mut col = col_of(points[0].0);
+    let (mut first, mut last, mut lo, mut hi) = (points[0], points[0], points[0], points[0]);
+    for &p in &points[1..] {
+        let c = col_of(p.0);
+        if c != col {
+            emit(&mut out, first, last, lo, hi);
+            col = c;
+            first = p;
+            last = p;
+            lo = p;
+            hi = p;
+        } else {
+            last = p;
+            if p.1 < lo.1 {
+                lo = p;
+            }
+            if p.1 > hi.1 {
+                hi = p;
+            }
+        }
+    }
+    emit(&mut out, first, last, lo, hi);
+    if out.len() >= 2 { Some(out) } else { None }
+}
+
+/// 融合版大数据折线抽稀：直接读取原始 `x`/`y` 并施加 `tx`/`ty` 变换，边扫描边按像素列
+/// min/max 分桶。相比「先构建整段 `Vec<(f64,f64)>`（1M 点约 16MB）再 `decimate_min_max`」
+/// 省掉中间段的物化与额外的单调性、分桶两趟扫描，大数据单调折线的 savefig 渲染显著更快。
+///
+/// 仅当「点数 ≥ 阈值、x 单调、全部有限（无 NaN 断点）」时返回 `Some`，其输出与
+/// 「构建整段 + `decimate_min_max`」逐点（乃至逐字节）完全一致；任一条件不满足即返回
+/// `None`，调用方回退到原始「构建段 + 逐段 decimate」路径，行为与像素输出均不变。
+fn decimate_min_max_fused<FX: Fn(f64) -> f64, FY: Fn(f64) -> f64>(
+    x: &[f64],
+    y: &[f64],
+    tx: &FX,
+    ty: &FY,
+    y_half_px: f64,
+    x_min: f64,
+    x_max: f64,
+    plot_w_px: f64,
+) -> Option<Vec<(f64, f64)>> {
+    let n = x.len();
+    if n != y.len() {
+        return None;
+    }
+    let cols = plot_w_px.floor().max(1.0) as usize;
+    if plot_w_px <= 0.0 || n < cols.saturating_mul(2).max(64) {
+        return None;
+    }
+    let span = x_max - x_min;
+    if !span.is_finite() || span == 0.0 {
+        return None;
+    }
+    // 第 0 点必须有限（否则原路径会把它当断点并分段，此处交由回退路径处理）。
+    let px0 = tx(x[0]);
+    let py0 = ty(y[0]);
+    if !px0.is_finite() || !py0.is_finite() {
+        return None;
+    }
+    // inc 由首末（变换后）x 决定，与原路径「段内首末点」判定一致；末点亦须有限。
+    let fxn = tx(x[n - 1]);
+    if !fxn.is_finite() {
+        return None;
+    }
+    let inc = fxn >= px0;
+    let col_of = |xx: f64| -> i64 {
+        ((xx - x_min) / span * plot_w_px)
+            .floor()
+            .clamp(-1.0, plot_w_px) as i64
+    };
+    let emit = |out: &mut Vec<(f64, f64)>,
+                first: (f64, f64),
+                last: (f64, f64),
+                lo: (f64, f64),
+                hi: (f64, f64)| {
+        let mut pts = [first, lo, hi, last];
+        if inc {
+            pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        } else {
+            pts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        for p in pts {
+            if out.last().is_none_or(|l| l.0 != p.0 || l.1 != p.1) {
+                out.push(p);
+            }
+        }
+    };
+    let p0 = (px0, py0 - y_half_px);
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(cols * 4 + 8);
+    let mut col = col_of(p0.0);
+    let (mut first, mut last, mut lo, mut hi) = (p0, p0, p0, p0);
+    let mut prev_x = p0.0;
+    for i in 1..n {
+        let txv = tx(x[i]);
+        let tyv = ty(y[i]);
+        if !txv.is_finite() || !tyv.is_finite() {
+            return None; // 含断点：回退到分段路径以保持一致
+        }
+        // 单调性校验，与原 decimate 的 windows(2).all(...) 等价。
+        let violated = if inc { txv < prev_x } else { txv > prev_x };
+        if violated {
+            return None;
+        }
+        prev_x = txv;
+        let p = (txv, tyv - y_half_px);
+        let c = col_of(p.0);
+        if c != col {
+            emit(&mut out, first, last, lo, hi);
+            col = c;
+            first = p;
+            last = p;
+            lo = p;
+            hi = p;
+        } else {
+            last = p;
+            if p.1 < lo.1 {
+                lo = p;
+            }
+            if p.1 > hi.1 {
+                hi = p;
+            }
+        }
+    }
+    emit(&mut out, first, last, lo, hi);
+    if out.len() >= 2 { Some(out) } else { None }
 }
 
 /// 统一的折线渲染入口：实线与每一段 dash 都经此绘制，保证任意斜率线宽一致、沿线方向。
@@ -931,8 +1194,14 @@ where
             return Ok(());
         }
         let area = chart.plotting_area().strip_coord_spec();
+        let base = area.get_base_pixel();
         let (pw_i, ph_i) = (pw as i32, ph as i32);
         let (max_r, max_c) = ((n_rows - 1) as f64, (n_cols - 1) as f64);
+        // 位图渲染时借出线程本地 canvas 共享缓冲一次，逐输出像素直接 blit；无 canvas 时
+        // 回退经 area.draw_pixel（结果逐字节一致）。
+        let cvs = crate::utils::rgb_backend::canvas();
+        let cwh = cvs.as_ref().map(|t| (t.1, t.2));
+        let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
         for yy in 0..ph_i {
             // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
             let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
@@ -947,9 +1216,24 @@ where
                 }
                 let sc = (data_x - 0.5).clamp(0.0, max_c);
                 let (r, g, b) = sample_image(pixels, n_cols, n_rows, sr, sc, bicubic);
-                let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
-                area.draw_pixel((xx, yy), &color)
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+                if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
+                    crate::utils::rgb_backend::put_rgb_pixel(
+                        buf,
+                        cw,
+                        ch,
+                        xx + base.0,
+                        yy + base.1,
+                        to_u8(r),
+                        to_u8(g),
+                        to_u8(b),
+                        alpha,
+                    );
+                } else {
+                    let color = plotters::style::RGBAColor(to_u8(r), to_u8(g), to_u8(b), alpha);
+                    area.draw_pixel((xx, yy), &color).map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to draw image: {}", e))
+                    })?;
+                }
             }
         }
     } else {
@@ -1012,8 +1296,14 @@ where
         return Ok(());
     }
     let area = chart.plotting_area().strip_coord_spec();
+    let base = area.get_base_pixel();
     let (pw_i, ph_i) = (pw as i32, ph as i32);
     let (max_r, max_c) = (n_rows as isize - 1, n_cols as isize - 1);
+    // 位图渲染时借出线程本地 canvas 共享缓冲一次，逐输出像素直接 blit；无 canvas 时
+    // 回退经 area.draw_pixel（结果逐字节一致）。
+    let cvs = crate::utils::rgb_backend::canvas();
+    let cwh = cvs.as_ref().map(|t| (t.1, t.2));
+    let mut buf_guard = cvs.as_ref().map(|t| t.0.borrow_mut());
     for yy in 0..ph_i {
         // 像素中心数据 y（y 翻转：像素行 0 对应 y_max 顶部）
         let data_y = y_max - (yy as f64 + 0.5) * y_per_pix;
@@ -1029,9 +1319,23 @@ where
             }
             let c = (data_x.floor() as isize).clamp(0, max_c) as usize;
             let (pr, pg, pb) = pixels[row_base + c];
-            let color = plotters::style::RGBAColor(pr, pg, pb, alpha);
-            area.draw_pixel((xx, yy), &color)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            if let (Some(buf), Some((cw, ch))) = (buf_guard.as_deref_mut(), cwh) {
+                crate::utils::rgb_backend::put_rgb_pixel(
+                    buf,
+                    cw,
+                    ch,
+                    xx + base.0,
+                    yy + base.1,
+                    pr,
+                    pg,
+                    pb,
+                    alpha,
+                );
+            } else {
+                let color = plotters::style::RGBAColor(pr, pg, pb, alpha);
+                area.draw_pixel((xx, yy), &color)
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw image: {}", e)))?;
+            }
         }
     }
     Ok(())
@@ -1125,10 +1429,24 @@ where
                     }
                 };
                 if !x.is_empty() && x.len() == y.len() {
-                    // 构建连续有效数据段（被 None 分隔）
+                    let plot_w_px = chart.plotting_area().dim_in_pixel().0 as f64;
+                    // 大数据折线线段简化：点数远多于横向像素列时，按像素列 min/max 抽稀，
+                    // 把绘制线段数从 O(N) 降到 O(像素宽)（保留竖直包络，输出像素级几乎一致）。
+                    // marker 分支用原始 x/y 全量绘制，不受此影响。
                     let mut segments: Vec<Vec<(f64, f64)>> = Vec::new();
+                    // 快路径：大数据单调、无断点时直接从原始 x/y 抽稀，跳过物化整段中间
+                    // Vec（1M 点约 16MB）与额外的单调/分桶两趟扫描；输出逐点等同慢路径。
+                    if let Some(reduced) =
+                        decimate_min_max_fused(x, y, &tx, &ty, y_half_px, x_min, x_max, plot_w_px)
                     {
-                        let mut current: Vec<(f64, f64)> = Vec::new();
+                        segments.push(reduced);
+                    } else {
+                        // 慢路径：构建连续有效数据段（被 None 分隔），再逐段抽稀。含 NaN
+                        // 断点、非单调、点数不足等情形走此路径，行为与像素输出保持不变。
+                        // 首段预分配到点数上界，消除大数据折线逐点 push 时的反复扩容（0→N
+                        // 约 20 次翻倍 realloc，累计拷贝 ~2N 元素）。断点后的后续段罕见，任其
+                        // 自然增长，避免多段场景下每段都按 N 过量预留。
+                        let mut current: Vec<(f64, f64)> = Vec::with_capacity(x.len());
                         for (xv, yv) in x.iter().zip(y.iter()) {
                             let txv = tx(*xv);
                             let tyv = ty(*yv);
@@ -1145,6 +1463,11 @@ where
                         }
                         if current.len() >= 2 {
                             segments.push(current);
+                        }
+                        for seg in segments.iter_mut() {
+                            if let Some(reduced) = decimate_min_max(seg, x_min, x_max, plot_w_px) {
+                                *seg = reduced;
+                            }
                         }
                     }
                     if linestyle != " " {
@@ -1169,21 +1492,31 @@ where
                         let lw_nominal = (*linewidth).max(0.1);
                         let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
                         let width_px = (lw_px as i32 - 1).max(1) as f64;
-                        // matplotlib 默认 dash 图案 (rcParams)，None 表示实线
-                        let dash_pattern: Option<Vec<(f64, bool)>> = match linestyle.as_str() {
-                            // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
-                            "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
-                            // dotted (lines.dotted_pattern): 点 1, 隙 1.65
-                            ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
-                            // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
-                            "-." => Some(vec![
-                                (6.4 * ds, true),
-                                (1.6 * ds, false),
-                                (1.0 * ds, true),
-                                (1.6 * ds, false),
-                            ]),
-                            _ => None,
-                        };
+                        // matplotlib 默认 dash 图案 (rcParams)，None 表示实线。
+                        // "dashes=<offset>;<seq>" 是元组 linestyle 的编码：解析出图案与相位偏移。
+                        let (dash_pattern, dash_offset_px): (Option<Vec<(f64, bool)>>, f64) =
+                            if let Some(rest) = linestyle.strip_prefix("dashes=") {
+                                match parse_dash_encoding(rest, ds) {
+                                    Some((off, pat)) => (Some(pat), off),
+                                    None => (None, 0.0),
+                                }
+                            } else {
+                                let p = match linestyle.as_str() {
+                                    // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
+                                    "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
+                                    // dotted (lines.dotted_pattern): 点 1, 隙 1.65
+                                    ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
+                                    // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
+                                    "-." => Some(vec![
+                                        (6.4 * ds, true),
+                                        (1.6 * ds, false),
+                                        (1.0 * ds, true),
+                                        (1.6 * ds, false),
+                                    ]),
+                                    _ => None,
+                                };
+                                (p, 0.0)
+                            };
                         for points in &segments {
                             if let Some(pattern) = &dash_pattern {
                                 if bitmap {
@@ -1191,7 +1524,11 @@ where
                                     // 每段走与实线相同的 AA 渲染入口，线宽处处一致、无 Z 形 / 星形。
                                     // dash 端点用 "butt"（matplotlib 默认 dash_capstyle）。
                                     let dashes = compute_dash_segments(
-                                        points, pattern, x_per_pix, y_per_pix,
+                                        points,
+                                        pattern,
+                                        x_per_pix,
+                                        y_per_pix,
+                                        dash_offset_px,
                                     );
                                     for dash in &dashes {
                                         render_polyline(
@@ -2264,40 +2601,98 @@ where
                 fontsize,
                 color,
                 arrow,
+                xycoords,
+                textcoords,
+                ha,
+                family,
             } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let rgb = to_plotters_color(col);
-                let (tx_data, ty_data) = xytext.unwrap_or(*xy);
-                let text_x = tx(tx_data);
-                let text_y = ty(ty_data);
+
+                // 绘图区像素尺寸 → 每像素跨越的数据(可能是 log 空间)跨度，
+                // 供 "offset points/pixels" 把像素偏移换算成数据坐标增量。
+                let (pw, ph) = {
+                    let dim = chart.plotting_area().dim_in_pixel();
+                    (dim.0 as f64, dim.1 as f64)
+                };
+                let x_per_pix = if pw > 0.0 { (x_max - x_min) / pw } else { 0.0 };
+                let y_per_pix = if ph > 0.0 { (y_max - y_min) / ph } else { 0.0 };
+
+                // 把某坐标系下的 (x, y) 解析为 chart 坐标(data 值经 tx/ty；axes 分数
+                // 在 [min,max] 间线性插值——log 轴下 min/max 已是 log 空间，仍线性正确)。
+                let to_chart = |val: (f64, f64), coords: &str| -> (f64, f64) {
+                    match coords {
+                        "axes fraction" | "axes" => (
+                            x_min + val.0 * (x_max - x_min),
+                            y_min + val.1 * (y_max - y_min),
+                        ),
+                        // y 轴变换：x 取 axes 分数, y 取 data。
+                        "yaxis_transform" => (x_min + val.0 * (x_max - x_min), ty(val.1)),
+                        // x 轴变换：x 取 data, y 取 axes 分数。
+                        "xaxis_transform" => (tx(val.0), y_min + val.1 * (y_max - y_min)),
+                        // "data" 及未知值按数据坐标处理。
+                        _ => (tx(val.0), ty(val.1)),
+                    }
+                };
+
+                // 被标注点(箭头指向处) chart 坐标。
+                let (anchor_x, anchor_y) = to_chart(*xy, xycoords);
+
+                // 文本放置点：无 xytext 时与 anchor 重合；offset points/pixels 按像素偏移
+                // (+x 右, +y 上) 换算成数据增量；其余坐标系直接解析 xytext。
+                let (text_x, text_y) = match xytext {
+                    None => (anchor_x, anchor_y),
+                    Some(off) => {
+                        if textcoords == "offset points" || textcoords == "offset pixels" {
+                            // points → pixels 换算因子恰为 font_scale(=dpi/72)。
+                            let scale = if textcoords == "offset points" {
+                                font_scale
+                            } else {
+                                1.0
+                            };
+                            (
+                                anchor_x + off.0 * scale * x_per_pix,
+                                anchor_y + off.1 * scale * y_per_pix,
+                            )
+                        } else {
+                            to_chart(*off, textcoords)
+                        }
+                    }
+                };
                 if !text_x.is_finite() || !text_y.is_finite() {
                     continue;
                 }
+
+                let halign = match ha.to_ascii_lowercase().as_str() {
+                    "left" => HAlign::Left,
+                    "right" => HAlign::Right,
+                    _ => HAlign::Center,
+                };
+                let fam = family.as_deref();
+
                 // 先画箭头（置于文本下层，使文本压住箭尾）。仅当提供 xytext 且
                 // arrowprops 非 None 时绘制。
                 if let Some(spec) = arrow
                     && xytext.is_some()
+                    && anchor_x.is_finite()
+                    && anchor_y.is_finite()
                 {
-                    let target_x = tx(xy.0);
-                    let target_y = ty(xy.1);
-                    if target_x.is_finite() && target_y.is_finite() {
-                        draw_annotation_arrow(
-                            chart,
-                            spec,
-                            text,
-                            scale_font(*fontsize, font_scale),
-                            text_x,
-                            text_y,
-                            target_x,
-                            target_y,
-                            font_scale,
-                            x_min,
-                            x_max,
-                            y_min,
-                            y_max,
-                            col,
-                        )?;
-                    }
+                    draw_annotation_arrow(
+                        chart,
+                        spec,
+                        text,
+                        scale_font(*fontsize, font_scale),
+                        text_x,
+                        text_y,
+                        anchor_x,
+                        anchor_y,
+                        font_scale,
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                        col,
+                    )?;
                 }
                 mathtext::draw_math_chart(
                     chart,
@@ -2306,8 +2701,8 @@ where
                     text,
                     scale_font(*fontsize, font_scale),
                     rgb,
-                    None,
-                    HAlign::Center,
+                    fam,
+                    halign,
                     VAlign::Center,
                     0.0,
                 )?;

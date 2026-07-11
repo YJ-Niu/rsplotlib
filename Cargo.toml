@@ -1,6 +1,6 @@
 [package]
 name = "rsplotlib"
-version = "0.2.6"
+version = "0.2.8"
 edition = "2024"
 
 [lib]
@@ -14,6 +14,10 @@ png = "0.18.1"
 owned_ttf_parser = "0.25.1"
 jpeg-encoder = "0.7.0"
 jpeg-decoder = "0.3.2"
+# 与 plotters 0.3.7 相同版本的 ab_glyph / plotters-backend（均已在 Cargo.lock 锁定，
+# 不引入新下载）：glyph 缓存需直接引用 ab_glyph 光栅化器与后端 trait 类型。
+ab_glyph = "0.2.32"
+plotters-backend = "0.3.7"
 
 [profile.release]
 lto = "fat"

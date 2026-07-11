@@ -50,6 +50,7 @@ pub fn register_sans_serif_font(
     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
     register_font(&family, FontStyle::Normal, font_ref)
         .map_err(|_| PyValueError::new_err(format!("Failed to register font from '{}'", path)))?;
+    crate::utils::glyph_cache::register_ab_glyph(&family, FontStyle::Normal, font_ref);
 
     // 推入字体栈（重新读取，因为 font_data 已被 Box::leak 消耗）
     let font_data2 = std::fs::read(&path)
@@ -950,6 +951,35 @@ pub fn grid_position_span(
     (left, right, bottom, top)
 }
 
+/// 把 [0,1] 沿一个方向分成 `n` 条轨道，相邻轨道间留 `space` 比例间隙，各轨道尺寸按
+/// `ratios` 成比例分配。返回长度 `n` 的 `[(start, size), ...]`（沿正方向）。
+///
+/// 与 matplotlib 的 gridspec `width_ratios`/`height_ratios` + wspace/hspace 语义一致：
+/// 间隙以「平均轨道尺寸」为单位（`gap_r = space * total_r / n`）。当 `ratios` 为
+/// None 或长度不符时退化为等分，此时结果与 [`grid_position`] 完全一致（无回归）。
+pub fn track_edges(n: usize, ratios: Option<&[f64]>, space: f64) -> Vec<(f64, f64)> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let ratios: Vec<f64> = match ratios {
+        Some(r) if r.len() == n && r.iter().all(|v| v.is_finite() && *v > 0.0) => r.to_vec(),
+        _ => vec![1.0; n],
+    };
+    let total_r: f64 = ratios.iter().sum();
+    let n_f = n as f64;
+    let gap_r = space * (total_r / n_f);
+    let denom = total_r + (n_f - 1.0) * gap_r;
+    let unit = if denom > 0.0 { 1.0 / denom } else { 1.0 };
+    let mut edges = Vec::with_capacity(n);
+    let mut cursor = 0.0;
+    for r in &ratios {
+        let size = r * unit;
+        edges.push((cursor, size));
+        cursor += size + gap_r * unit;
+    }
+    edges
+}
+
 #[pyfunction]
 #[pyo3(signature = (nrows=1, ncols=1, index=None))]
 pub fn subplot<'py>(
@@ -1047,13 +1077,15 @@ pub fn subplot<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None))]
+#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None))]
 pub fn subplots(
     py: Python<'_>,
     nrows: usize,
     ncols: usize,
     figsize: Option<(f64, f64)>,
     dpi: Option<f64>,
+    width_ratios: Option<Vec<f64>>,
+    height_ratios: Option<Vec<f64>>,
 ) -> PyResult<Bound<'_, PyTuple>> {
     let total = nrows * ncols;
     let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
@@ -1071,6 +1103,11 @@ pub fn subplots(
     fig.width = width.max(100);
     fig.height = height.max(100);
     fig.dpi = dpi_val;
+    // 仅在长度与网格轨道数一致时采纳比例，否则回退等分（渲染阶段据此按比例分配行/列）。
+    let width_ratios = width_ratios.filter(|r| r.len() == ncols);
+    let height_ratios = height_ratios.filter(|r| r.len() == nrows);
+    fig.width_ratios = width_ratios.clone();
+    fig.height_ratios = height_ratios.clone();
     fig.axes_list.clear();
     fig.axes_positions.clear();
     let fig_py = Py::new(py, fig)?;
@@ -1089,14 +1126,19 @@ pub fn subplots(
         let ax_obj = ax_py.bind(py).as_any().clone();
         PyTuple::new(py, [fig_obj, ax_obj])
     } else {
+        let col_edges = track_edges(ncols, width_ratios.as_deref(), BASE_WSPACE);
+        let row_edges = track_edges(nrows, height_ratios.as_deref(), BASE_HSPACE);
         let mut py_axes: Vec<Bound<'_, PyAny>> = Vec::new();
         {
             let mut fig_ref = fig_py.borrow_mut(py);
             for k in 0..total {
                 let ax_py = Py::new(py, Axes::new())?;
                 init_axes_self_py(&ax_py, py);
-                let pos =
-                    grid_position(k / ncols, k % ncols, nrows, ncols, BASE_WSPACE, BASE_HSPACE);
+                // 行号 0 在最上方：row_edges 沿「自顶部量」的正方向，top = 1 - start。
+                let (col_start, col_size) = col_edges[k % ncols];
+                let (row_start, row_size) = row_edges[k / ncols];
+                let top = 1.0 - row_start;
+                let pos = (col_start, col_start + col_size, top - row_size, top);
                 fig_ref.axes_list.push(ax_py.clone_ref(py));
                 fig_ref.axes_positions.push(pos);
                 py_axes.push(ax_py.bind(py).as_any().clone());

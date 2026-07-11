@@ -49,20 +49,44 @@ def _to_list_recursive(obj):
     return obj
 
 
+def _buffer_kind(obj):
+    """返回 obj 的 dtype kind 字符（numpy 约定 'f'/'i'/'u'/'b'/'M'/'S'/'U'/'c'…），
+    无法判定时返回 None。
+
+    优先读廉价的 obj.dtype.kind：rsnumpy 的 __array_interface__ 属性每次访问都会即时把
+    整个缓冲区序列化成 bytes（百万点约 2.6ms/次，随后被丢弃），而 dtype 访问是 O(1)。
+    仅当对象没有 dtype（如 Python list、标量、或 numpy 之外仅实现数组接口的第三方缓冲）
+    时，才回退读取 __array_interface__ 的 typestr。真实 numpy 的 __array_interface__ 为
+    指针形式、开销极小，不受此影响。
+    """
+    dt = None
+    try:
+        dt = getattr(obj, 'dtype', None)
+    except Exception:
+        # rsnumpy 对 datetime64[h]/timedelta64 等 dtype 的 .dtype 属性会抛 TypeError
+        # （非 AttributeError，getattr 默认值挡不住）。此处按"无法判定"处理，落到
+        # __array_interface__ 回退——这些非数值 dtype 本就应返回非 fiub kind。
+        dt = None
+    if dt is not None:
+        kind = getattr(dt, 'kind', None)
+        if isinstance(kind, str) and len(kind) == 1:
+            return kind
+    ai = getattr(obj, '__array_interface__', None)
+    if isinstance(ai, dict):
+        typestr = ai.get('typestr', '')
+        return typestr[1:2] if len(typestr) >= 2 else None
+    return None
+
+
 def _is_numeric_buffer(obj):
-    """obj 是否为暴露 __array_interface__ 的纯数值缓冲数组（float/int/uint/bool）。
+    """obj 是否为纯数值缓冲数组（float/int/uint/bool）。
 
     这类数组可零拷贝下沉给 Rust，且不可能是字符串类别或日期，故可跳过 .tolist()
-    全量物化（plot/scatter 热路径最大收益）。typestr 形如 '<f8'/'|b1'/'<M8[h]'/'<U3'，
-    第 2 个字符为 kind：datetime64('M')、字符串('U'/'S')、复数('c')、timedelta('m')、
-    object('O') 均需 Python 侧特殊处理，返回 False 交回原有 .tolist() 路径。
+    全量物化（plot/scatter 热路径最大收益）。dtype kind 为 datetime64('M')、字符串
+    ('U'/'S')、复数('c')、timedelta('m')、object('O') 均需 Python 侧特殊处理，返回
+    False 交回原有 .tolist() 路径。
     """
-    ai = getattr(obj, '__array_interface__', None)
-    if not isinstance(ai, dict):
-        return False
-    typestr = ai.get('typestr', '')
-    kind = typestr[1:2] if len(typestr) >= 2 else ''
-    return kind in ('f', 'i', 'u', 'b')
+    return _buffer_kind(obj) in ('f', 'i', 'u', 'b')
 
 
 def _numeric_buffer_1d_len(obj):
@@ -71,14 +95,13 @@ def _numeric_buffer_1d_len(obj):
     用于 scatter 数值 c 的快路径：一维数值缓冲不可能是颜色字符串或 RGB(A) 行数组，
     可零拷贝直传 Rust 经 colormap 上色，跳过 .tolist() / 逐元素类别检查 / [float(v)] 物化。
     """
-    ai = getattr(obj, '__array_interface__', None)
-    if not isinstance(ai, dict):
+    if _buffer_kind(obj) not in ('f', 'i', 'u', 'b'):
         return None
-    typestr = ai.get('typestr', '')
-    kind = typestr[1:2] if len(typestr) >= 2 else ''
-    if kind not in ('f', 'i', 'u', 'b'):
-        return None
-    shape = ai.get('shape')
+    shape = getattr(obj, 'shape', None)
+    if shape is None:
+        ai = getattr(obj, '__array_interface__', None)
+        if isinstance(ai, dict):
+            shape = ai.get('shape')
     if not (isinstance(shape, tuple) and len(shape) == 1):
         return None
     return shape[0]
@@ -421,6 +444,7 @@ def _map_aliases(kwargs):
             kwargs.pop(alias)
     # 规范化 linestyle 词形 ('solid'/'dotted'/'dashed'/'dashdot') 与空值到简写，
     # 与 matplotlib 一致：既可写 linestyle='dotted' 也可写 linestyle=':'。
+    # 元组形式 (offset, onoffseq)（参数化 dash 图案）编码为 "dashes=..." 串下沉到 Rust。
     ls = kwargs.get('linestyle')
     if isinstance(ls, str):
         key = ls.strip().lower()
@@ -429,6 +453,35 @@ def _map_aliases(kwargs):
         elif key in _LINESTYLE_ALIASES:
             kwargs['linestyle'] = _LINESTYLE_ALIASES[key]
         # 已是简写 ('-' / '--' / ':' / '-.') 时保持不变
+    elif isinstance(ls, (tuple, list)):
+        enc = _encode_dash_linestyle(ls)
+        if enc is not None:
+            kwargs['linestyle'] = enc
+
+
+def _encode_dash_linestyle(ls):
+    """matplotlib 元组 linestyle ``(offset, onoffseq)`` -> ``"dashes=<offset>;<v0>,<v1>,..."`` 编码串。
+
+    - 空 / None 的 onoffseq 视为实线 ('-')。
+    - 结构非法时返回 None（交由下游忽略, 保持原值）。
+    """
+    if len(ls) != 2:
+        return None
+    offset, seq = ls
+    if seq is None:
+        return '-'
+    try:
+        seq = list(seq)
+    except TypeError:
+        return None
+    if len(seq) == 0:
+        return '-'
+    if offset is None:
+        offset = 0
+    try:
+        return "dashes=%g;%s" % (float(offset), ",".join("%g" % float(v) for v in seq))
+    except (TypeError, ValueError):
+        return None
 
 
 # linestyle 词形 -> 简写。空串 / 'None' 在 _map_aliases 中单独处理为 ' '(不画线)。
@@ -942,6 +995,28 @@ def _parse_fmt(fmt):
     return result
 
 
+def _implicit_x(y):
+    """plot(y) 的隐式横坐标 = [0, 1, ..., len(y)-1]。
+
+    优先用 rsnumpy.arange(n, dtype=float) 生成 float64 数组：可经 PEP 3118 缓冲协议
+    零拷贝下沉 Rust，并让 _categorical/_maybe_dates_to_num/_to_seq 走数值缓冲快路径，
+    跳过对 list(range(n)) 的逐元素扫描与百万级 Python int 提取（大数据热路径）。
+    值 0.0..n-1 与 range 完全一致（n ≤ 2^53 精确），渲染输出逐字节不变。
+
+    rsnumpy 不可用（ImportError）或 arange 异常时回退到 list(range(n))；y 无 len 时
+    沿用原逻辑（可迭代取 list(y)，否则空）。
+    """
+    try:
+        n = len(y)
+    except Exception:
+        return list(y) if hasattr(y, '__iter__') else []
+    try:
+        import rsnumpy as _rsnp
+        return _rsnp.arange(n, dtype=float)
+    except Exception:
+        return list(range(n))
+
+
 def _parse_plot_args(args, kwargs):
     """解析 plot() 的位置参数为 [(x, y, fmt_or_none), ...] 对列表 + kwargs
 
@@ -965,10 +1040,7 @@ def _parse_plot_args(args, kwargs):
 
         if len(group) == 1:
             y = group[0]
-            try:
-                x = list(range(len(y)))
-            except Exception:
-                x = list(y) if hasattr(y, '__iter__') else []
+            x = _implicit_x(y)
             pairs.append((x, y, fmt))
         else:
             pairs.append((group[0], group[1], fmt))
@@ -1193,21 +1265,29 @@ def hist(x, bins=None, range=None, density=False, weights=None,
     if bins is None:
         bins = 10
 
-    # 数据规整为“组的列表”
-    x = _to_list_recursive(x)
-    if x and isinstance(x[0], (list, tuple)):
-        x_list = [list(v) for v in x]
+    # 数据规整为“组的列表”。一维纯数值缓冲直接下沉给 Rust 零拷贝读取，避免
+    # _to_list_recursive + [list(x)] 把百万级数据点物化成 Python 对象（hist 大数据热路径）。
+    if _numeric_buffer_1d_len(x) is not None:
+        x_list = x
+        n_datasets = 1
     else:
-        x_list = [list(x)]
-    n_datasets = len(x_list)
-
-    # weights 规整为与 x 平行的结构
-    if weights is not None:
-        w = _to_list_recursive(weights)
-        if w and isinstance(w[0], (list, tuple)):
-            weights_arg = [list(v) for v in w]
+        x = _to_list_recursive(x)
+        if x and isinstance(x[0], (list, tuple)):
+            x_list = [list(v) for v in x]
         else:
-            weights_arg = [list(w)]
+            x_list = [list(x)]
+        n_datasets = len(x_list)
+
+    # weights 规整为与 x 平行的结构（一维数值缓冲同样直传，Rust 侧零拷贝读取）
+    if weights is not None:
+        if _numeric_buffer_1d_len(weights) is not None:
+            weights_arg = weights
+        else:
+            w = _to_list_recursive(weights)
+            if w and isinstance(w[0], (list, tuple)):
+                weights_arg = [list(v) for v in w]
+            else:
+                weights_arg = [list(w)]
     else:
         weights_arg = None
 
@@ -1293,7 +1373,11 @@ def boxplot(x, labels=None, vert=True, **kwargs):
         labels: 每个箱的标签列表
         vert: 是否垂直绘制 (默认 True)
     """
-    x = _to_list_recursive(x)
+    # 纯数值缓冲数组直接下沉给 Rust 零拷贝读取（py_to_vec_vec_f64：一维→单箱，
+    # 二维→按行拆多箱，与旧 _to_list_recursive 语义一致），避免物化百万级数据点。
+    # Python list（含 list of arrays）、含字符串等非缓冲对象保持原路径。
+    if not _is_numeric_buffer(x):
+        x = _to_list_recursive(x)
     return _route_to_ax('boxplot', _rsplotlib.boxplot, x, labels, vert)
 
 
@@ -1385,10 +1469,10 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0, **kwargs):
         colors: 每个数据集的颜色列表
         alpha: 透明度 (默认 1.0)
     """
-    x = _to_list(x)
-    y_data = [list(a) for a in args if a is not None]
+    x = _to_seq(x)
+    y_data = [_to_seq(a) for a in args if a is not None]
     if not y_data and 'y' in kwargs:
-        y_data = [_to_list(kwargs['y'])]
+        y_data = [_to_seq(kwargs['y'])]
     return _route_to_ax('stackplot', _rsplotlib.stackplot, x, *y_data,
                         labels=labels, colors=colors, alpha=alpha)
 
@@ -1632,15 +1716,15 @@ def annotate(text, xy, xytext=None, fontsize=None, color='black', arrowprops=Non
             xytext 绘制箭头指向 xy。支持简单箭头 (width/headwidth/headlength/
             shrink) 与花式箭头 (arrowstyle/connectionstyle/mutation_scale/
             shrinkA/shrinkB 等)。
-        **kwargs: 其他关键字参数 (如 xycoords/textcoords, 当前忽略)
+        **kwargs: 其他关键字参数 (如 xycoords/textcoords/ha/family)，转发给 Axes.annotate
     """
     text = _render_mathtext(text)
     ax = _get_axes()
     if ax is not None and hasattr(ax, 'annotate'):
-        ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
+        ax.annotate(text, xy, xytext, fontsize, color, arrowprops, **kwargs)
         return _get_figure()
     fig, ax = _rsplotlib.subplots()
-    ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
+    ax.annotate(text, xy, xytext, fontsize, color, arrowprops, **kwargs)
     return fig, ax
 
 
@@ -1989,12 +2073,23 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
         - 1xN 或 Nx1: (Figure, 一维 ndarray[Axes])
         - MxN: (Figure, 二维 ndarray[Axes]), 支持 axs[i, j] 索引
     """
-    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi)
+    # width_ratios/height_ratios 可作为 subplots 的直接关键字，或经 gridspec_kw 传入
+    # （与 matplotlib 一致，直接关键字优先）。传给 Rust 侧 subplots 以按比例分配行/列尺寸。
+    gridspec_kw = kwargs.get('gridspec_kw') or {}
+    width_ratios = kwargs.get('width_ratios')
+    if width_ratios is None:
+        width_ratios = gridspec_kw.get('width_ratios')
+    height_ratios = kwargs.get('height_ratios')
+    if height_ratios is None:
+        height_ratios = gridspec_kw.get('height_ratios')
+    width_ratios = _to_list(width_ratios) if width_ratios is not None else None
+    height_ratios = _to_list(height_ratios) if height_ratios is not None else None
+
+    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi, width_ratios, height_ratios)
     fig = result[0]
 
     # gridspec_kw={'wspace':.., 'hspace':..} 与 matplotlib 一致地控制子图间距，
     # 复用 subplots_adjust 的存储路径（在渲染阶段覆盖默认/启发式间距）。
-    gridspec_kw = kwargs.get('gridspec_kw')
     if gridspec_kw:
         ws = gridspec_kw.get('wspace')
         hs = gridspec_kw.get('hspace')
@@ -2924,6 +3019,20 @@ def _patch_axes():
     _rs.Axes.set_xticks = _set_xticks
     _rs.Axes.set_yticks = _set_yticks
 
+    # set_xticklabels / set_yticklabels: 归一为字符串 list，吸收 rotation/ha/fontsize 等
+    # 未支持的样式 kwargs。须在 set_xticks/set_yticks 固定刻度位置后调用（matplotlib 语义）。
+    _orig_set_xticklabels = _rs.Axes.set_xticklabels
+    _orig_set_yticklabels = _rs.Axes.set_yticklabels
+
+    def _set_xticklabels(self, labels, **kwargs):
+        return _orig_set_xticklabels(self, [str(x) for x in _to_list(labels)])
+
+    def _set_yticklabels(self, labels, **kwargs):
+        return _orig_set_yticklabels(self, [str(x) for x in _to_list(labels)])
+
+    _rs.Axes.set_xticklabels = _set_xticklabels
+    _rs.Axes.set_yticklabels = _set_yticklabels
+
     # axis: 支持序列 [xmin,xmax,ymin,ymax] 设定轴限，及 'off'/'on'/'equal' 等字符串。
     _orig_axis = _rs.Axes.axis
 
@@ -2982,15 +3091,28 @@ def _patch_axes():
     _orig_annotate = _rs.Axes.annotate
 
     def _annotate(self, text, xy, xytext=None, fontsize=None,
-                  color="black", arrowprops=None, **kwargs):
-        # va/ha/xycoords 等后端未支持的参数被 **kwargs 吸收后丢弃。
+                  color="black", arrowprops=None, xycoords='data',
+                  textcoords=None, ha=None, family=None, **kwargs):
+        # 支持坐标系 (xycoords/textcoords)、水平对齐 (ha/horizontalalignment)、
+        # 字体族 (family/fontfamily)；其余未支持参数 (如 va) 被 **kwargs 吸收后丢弃。
         if isinstance(text, str):
             text = _render_mathtext(text)
         # 未显式指定 fontsize 时，默认字号随其余默认字号一并放大 DEFAULT_FONT_SCALE 倍；
         # 用户显式传入 fontsize 则保持原值不放大。
         if fontsize is None:
             fontsize = _DEFAULT_ANNOTATE_FONTSIZE
-        return _orig_annotate(self, text, xy, xytext, fontsize, color, arrowprops)
+        if ha is None:
+            ha = kwargs.get('horizontalalignment', 'center')
+        if family is None:
+            family = kwargs.get('fontfamily', None)
+        # xycoords 可能是 get_xaxis_transform / get_yaxis_transform 返回的标记字符串；
+        # 若传入的是其它非字符串的 transform 对象则回退到 'data'。
+        if not isinstance(xycoords, str):
+            xycoords = 'data'
+        if textcoords is not None and not isinstance(textcoords, str):
+            textcoords = None
+        return _orig_annotate(self, text, xy, xytext, fontsize, color,
+                              arrowprops, xycoords, textcoords, ha, family)
 
     _rs.Axes.annotate = _annotate
 

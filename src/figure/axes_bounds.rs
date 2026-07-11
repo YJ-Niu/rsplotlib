@@ -436,36 +436,65 @@ pub fn compute_bounds(
                     x_max = n + 1.0;
                 }
             }
-            PlotElement::Annotate { xy, xytext, .. } => {
+            PlotElement::Annotate {
+                xy,
+                xytext,
+                xycoords,
+                textcoords,
+                ..
+            } => {
+                // 仅当某分量确为 data 坐标时才用于自动缩放；axes 分数 / offset
+                // points 等非数据坐标不应撑开数据范围。
+                let (x_is_data, y_is_data) = match xycoords.as_str() {
+                    "data" => (true, true),
+                    "yaxis_transform" => (false, true),
+                    "xaxis_transform" => (true, false),
+                    _ => (false, false),
+                };
                 let (xv, yv) = *xy;
-                let tvx = tx(xv);
-                let tvy = ty(yv);
-                if tvx > f64::NEG_INFINITY && tvx < x_min {
-                    x_min = tvx;
+                if x_is_data {
+                    let tvx = tx(xv);
+                    if tvx > f64::NEG_INFINITY && tvx < x_min {
+                        x_min = tvx;
+                    }
+                    if tvx > x_max {
+                        x_max = tvx;
+                    }
                 }
-                if tvx > x_max {
-                    x_max = tvx;
+                if y_is_data {
+                    let tvy = ty(yv);
+                    if tvy > f64::NEG_INFINITY && tvy < y_min {
+                        y_min = tvy;
+                    }
+                    if tvy > y_max {
+                        y_max = tvy;
+                    }
                 }
-                if tvy > f64::NEG_INFINITY && tvy < y_min {
-                    y_min = tvy;
-                }
-                if tvy > y_max {
-                    y_max = tvy;
-                }
+                // xytext 仅在其坐标系为 data 时参与自动缩放（offset points/axes 分数不计）。
+                let (xt_is_data, yt_is_data) = match textcoords.as_str() {
+                    "data" => (true, true),
+                    "yaxis_transform" => (false, true),
+                    "xaxis_transform" => (true, false),
+                    _ => (false, false),
+                };
                 if let Some((xt, yt)) = xytext {
-                    let tvxt = tx(*xt);
-                    let tvyt = ty(*yt);
-                    if tvxt > f64::NEG_INFINITY && tvxt < x_min {
-                        x_min = tvxt;
+                    if xt_is_data {
+                        let tvxt = tx(*xt);
+                        if tvxt > f64::NEG_INFINITY && tvxt < x_min {
+                            x_min = tvxt;
+                        }
+                        if tvxt > x_max {
+                            x_max = tvxt;
+                        }
                     }
-                    if tvxt > x_max {
-                        x_max = tvxt;
-                    }
-                    if tvyt > f64::NEG_INFINITY && tvyt < y_min {
-                        y_min = tvyt;
-                    }
-                    if tvyt > y_max {
-                        y_max = tvyt;
+                    if yt_is_data {
+                        let tvyt = ty(*yt);
+                        if tvyt > f64::NEG_INFINITY && tvyt < y_min {
+                            y_min = tvyt;
+                        }
+                        if tvyt > y_max {
+                            y_max = tvyt;
+                        }
                     }
                 }
             }

@@ -1,5 +1,7 @@
 use crate::figure::axes::Axes;
+use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
+use pyo3::types::PySlice;
 
 #[pyclass]
 pub struct Axis {
@@ -277,12 +279,34 @@ impl SpineDict {
         }
     }
 
-    fn __getitem__(&mut self, py: Python<'_>, key: &str) -> Option<Spine> {
-        self.spines.iter().position(|s| s.name == key).map(|i| {
-            let mut spine = self.spines[i].clone();
-            spine.parent = self.parent.as_ref().map(|p| p.clone_ref(py));
-            spine
-        })
+    /// 索引取 spine：字符串键返回单个 Spine；切片（如 `ax.spines[:]`）或名称列表返回
+    /// 广播代理 SpineProxy，其方法（set_visible/set_color/set_linewidth）作用于所选全部
+    /// spine，对齐 matplotlib 的 `SpinesProxy` 行为。
+    fn __getitem__(&mut self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        if let Ok(name) = key.extract::<String>() {
+            return match self.spines.iter().position(|s| s.name == name) {
+                Some(i) => {
+                    let mut spine = self.spines[i].clone();
+                    spine.parent = self.parent.as_ref().map(|p| p.clone_ref(py));
+                    Ok(Py::new(py, spine)?.into_any())
+                }
+                None => Err(PyKeyError::new_err(name)),
+            };
+        }
+        let names: Vec<String> = if key.is_instance_of::<PySlice>() {
+            self.spines.iter().map(|s| s.name.clone()).collect()
+        } else if let Ok(list) = key.extract::<Vec<String>>() {
+            list
+        } else {
+            return Err(PyTypeError::new_err(
+                "spines index must be a str, slice, or list of str",
+            ));
+        };
+        let proxy = SpineProxy {
+            names,
+            parent: self.parent.as_ref().map(|p| p.clone_ref(py)),
+        };
+        Ok(Py::new(py, proxy)?.into_any())
     }
 
     fn items(&self, _py: Python<'_>) -> Vec<(String, Spine)> {
@@ -346,6 +370,52 @@ impl Spine {
     }
 
     fn set_linewidth(&mut self, lw: f64, py: Python<'_>) {
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            ax.spine_linewidth = lw;
+        }
+    }
+}
+
+/// `ax.spines[:]` / `ax.spines[['left', 'bottom']]` 返回的广播代理：方法调用作用于
+/// 选中的全部 spine（matplotlib 中为 `SpinesProxy`）。
+#[pyclass]
+pub struct SpineProxy {
+    pub names: Vec<String>,
+    pub parent: Option<Py<PyAny>>,
+}
+
+#[pymethods]
+impl SpineProxy {
+    fn set_visible(&self, visible: bool, py: Python<'_>) {
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            for name in &self.names {
+                match name.as_str() {
+                    "top" => ax.spine_top = visible,
+                    "bottom" => ax.spine_bottom = visible,
+                    "left" => ax.spine_left = visible,
+                    "right" => ax.spine_right = visible,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn set_color(&self, color: &str, py: Python<'_>) {
+        if let Some(parent) = &self.parent
+            && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
+        {
+            let mut ax = ax_bound.borrow_mut();
+            ax.spine_color = color.to_string();
+        }
+    }
+
+    fn set_linewidth(&self, lw: f64, py: Python<'_>) {
         if let Some(parent) = &self.parent
             && let Ok(ax_bound) = parent.bind(py).cast::<Axes>()
         {

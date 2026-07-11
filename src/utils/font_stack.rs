@@ -43,8 +43,37 @@ static DEFAULT_FACE: OnceLock<Option<OwnedFace>> = OnceLock::new();
 /// 从而让这些数学字母真正渲染出来，且不影响普通文本的字体选择。
 static MATH_FACE: OnceLock<Option<(String, OwnedFace)>> = OnceLock::new();
 
+/// 通用字体族（如 "monospace"/"serif"）注册表，由 lib.rs 在启动时按平台注册。
+///
+/// matplotlib 的 `family="monospace"` / `"serif"` 是**通用族关键字**，需映射到
+/// 实际字体。plotters 只有把某 family 名 `register_font` 后才能绘制它，否则
+/// 抛 `FontUnavailable`。这里记录每个通用族对应的解析后 face：
+/// - 供 `resolve_font_family` 判断显式 family 是否可绘制（未注册则回退默认 sans）；
+/// - 供覆盖查询：若该族字体无法覆盖文本（如等宽字体缺 CJK），回退默认 sans 避免缺字形。
+static NAMED_FACES: OnceLock<RwLock<Vec<FontEntry>>> = OnceLock::new();
+
 fn stack() -> &'static RwLock<Vec<FontEntry>> {
     FONT_STACK.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+fn named_faces() -> &'static RwLock<Vec<FontEntry>> {
+    NAMED_FACES.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// 注册一个通用字体族名（如 "monospace"/"serif"）及其字体二进制。
+///
+/// 调用方（lib.rs）须保证该 `family` 已用相同名称 `register_font` 到 plotters，
+/// 方能被实际绘制。解析出的 face 供 `resolve_font_family` 判断可用性与覆盖查询。
+pub fn register_named_family(family: &str, data: Vec<u8>) {
+    if let Ok(face) = OwnedFace::from_vec(data, 0) {
+        let mut v = named_faces().write().unwrap();
+        if v.iter().all(|e| e.family != family) {
+            v.push(FontEntry {
+                family: family.to_string(),
+                face,
+            });
+        }
+    }
 }
 
 /// 记录默认 "sans-serif" 字体二进制，解析为 face 供 glyph 覆盖查询。
@@ -215,11 +244,28 @@ pub fn select_family(text: &str) -> String {
 /// 这是渲染端统一的"字体选择入口"，所有硬编码 "sans-serif" 的地方都应替换为
 /// 此函数调用。
 pub fn resolve_font_family(text: &str, explicit_family: Option<&str>) -> String {
-    if let Some(family) = explicit_family
-        && !family.is_empty()
-        && family != "sans-serif"
-    {
-        return family.to_string();
+    if let Some(family) = explicit_family {
+        let f = family.trim();
+        if !f.is_empty() && f != "sans-serif" {
+            // 通用族（monospace/serif）：仅当已注册且能覆盖文本时采用；否则回退默认 sans，
+            // 避免 plotters `FontUnavailable`（未注册）或缺字形方框（字体不覆盖该文本）。
+            {
+                let nf = named_faces().read().unwrap();
+                if let Some(entry) = nf.iter().find(|e| e.family == f) {
+                    return if can_render_text(&entry.face, text) {
+                        f.to_string()
+                    } else {
+                        // 命中通用族但无法覆盖文本（如等宽字体缺 CJK）→ 回退默认选择。
+                        select_family(text)
+                    };
+                }
+            }
+            // 用户经 rcParams/register 注册的具体字体族：直接采用（其已在 plotters 注册）。
+            if stack().read().unwrap().iter().any(|e| e.family == f) {
+                return f.to_string();
+            }
+            // 其余未知族名：回退默认选择，避免 FontUnavailable。
+        }
     }
     select_family(text)
 }
