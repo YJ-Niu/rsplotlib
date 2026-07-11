@@ -667,6 +667,31 @@ where
     draw_res
 }
 
+/// 解析元组 linestyle 的编码串 `"dashes=<offset>;<v0>,<v1>,..."` 为
+/// `(相位偏移像素, 图案 Vec<(段长像素, 是否绘制)>)`。
+///
+/// - `ds` = 名义线宽 × font_scale，即「1 图案单位(point) → 像素」的换算因子
+///   （与 matplotlib `scale_dashes` 把 on/off 值按线宽缩放后再转像素一致）。
+/// - 序列自 draw=true 起交替（on, off, on, off, ...）。
+/// - 序列为空 / 全 0 / 解析失败时返回 None（当作实线处理）。
+fn parse_dash_encoding(rest: &str, ds: f64) -> Option<(f64, Vec<(f64, bool)>)> {
+    let (off_s, seq_s) = rest.split_once(';')?;
+    let offset: f64 = off_s.trim().parse().ok()?;
+    let mut pattern: Vec<(f64, bool)> = Vec::new();
+    for (i, tok) in seq_s.split(',').enumerate() {
+        let tok = tok.trim();
+        if tok.is_empty() {
+            continue;
+        }
+        let v: f64 = tok.parse().ok()?;
+        pattern.push((v * ds, i % 2 == 0));
+    }
+    if pattern.is_empty() || pattern.iter().all(|(l, _)| *l <= 0.0) {
+        return None;
+    }
+    Some((offset * ds, pattern))
+}
+
 /// 沿折线按「显示像素」度量的图案切分出各段 dash 折线（纯几何，不做绘制）。
 ///
 /// `pattern` 是 (段长像素, 是否绘制) 的循环序列，例如 dashed = [(dash,true),(gap,false)]。
@@ -682,15 +707,36 @@ fn compute_dash_segments(
     pattern: &[(f64, bool)],
     x_per_pix: f64,
     y_per_pix: f64,
+    offset_px: f64,
 ) -> Vec<Vec<(f64, f64)>> {
     let mut out: Vec<Vec<(f64, f64)>> = Vec::new();
     if points.len() < 2 || pattern.is_empty() {
         return out;
     }
 
-    let mut pat_idx = 0usize;
-    let mut pat_remain = pattern[0].0.max(1e-6);
-    let mut drawing = pattern[0].1;
+    // 按 dash 相位偏移(offset_px)确定起始 pattern 段：在总图案长度内取模后，
+    // 找到偏移落入的段, 并算出该段剩余长度。matplotlib 元组 linestyle 的第一个
+    // 元素即此相位偏移。
+    let (mut pat_idx, mut pat_remain, mut drawing) = {
+        let total: f64 = pattern.iter().map(|(l, _)| *l).sum();
+        if total <= 1e-9 {
+            (0usize, pattern[0].0.max(1e-6), pattern[0].1)
+        } else {
+            let mut off = offset_px % total;
+            if off < 0.0 {
+                off += total;
+            }
+            let mut idx = 0usize;
+            loop {
+                let seg = pattern[idx].0;
+                if off < seg || idx + 1 == pattern.len() {
+                    break (idx, (seg - off).max(1e-6), pattern[idx].1);
+                }
+                off -= seg;
+                idx += 1;
+            }
+        }
+    };
     // 当前正在累积的一段 dash 折点（数据坐标），可跨多段折线累积
     let mut cur: Vec<(f64, f64)> = Vec::new();
 
@@ -1169,21 +1215,31 @@ where
                         let lw_nominal = (*linewidth).max(0.1);
                         let ds = lw_nominal * font_scale; // 1 图案单位(point) -> 像素
                         let width_px = (lw_px as i32 - 1).max(1) as f64;
-                        // matplotlib 默认 dash 图案 (rcParams)，None 表示实线
-                        let dash_pattern: Option<Vec<(f64, bool)>> = match linestyle.as_str() {
-                            // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
-                            "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
-                            // dotted (lines.dotted_pattern): 点 1, 隙 1.65
-                            ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
-                            // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
-                            "-." => Some(vec![
-                                (6.4 * ds, true),
-                                (1.6 * ds, false),
-                                (1.0 * ds, true),
-                                (1.6 * ds, false),
-                            ]),
-                            _ => None,
-                        };
+                        // matplotlib 默认 dash 图案 (rcParams)，None 表示实线。
+                        // "dashes=<offset>;<seq>" 是元组 linestyle 的编码：解析出图案与相位偏移。
+                        let (dash_pattern, dash_offset_px): (Option<Vec<(f64, bool)>>, f64) =
+                            if let Some(rest) = linestyle.strip_prefix("dashes=") {
+                                match parse_dash_encoding(rest, ds) {
+                                    Some((off, pat)) => (Some(pat), off),
+                                    None => (None, 0.0),
+                                }
+                            } else {
+                                let p = match linestyle.as_str() {
+                                    // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
+                                    "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
+                                    // dotted (lines.dotted_pattern): 点 1, 隙 1.65
+                                    ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
+                                    // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
+                                    "-." => Some(vec![
+                                        (6.4 * ds, true),
+                                        (1.6 * ds, false),
+                                        (1.0 * ds, true),
+                                        (1.6 * ds, false),
+                                    ]),
+                                    _ => None,
+                                };
+                                (p, 0.0)
+                            };
                         for points in &segments {
                             if let Some(pattern) = &dash_pattern {
                                 if bitmap {
@@ -1191,7 +1247,11 @@ where
                                     // 每段走与实线相同的 AA 渲染入口，线宽处处一致、无 Z 形 / 星形。
                                     // dash 端点用 "butt"（matplotlib 默认 dash_capstyle）。
                                     let dashes = compute_dash_segments(
-                                        points, pattern, x_per_pix, y_per_pix,
+                                        points,
+                                        pattern,
+                                        x_per_pix,
+                                        y_per_pix,
+                                        dash_offset_px,
                                     );
                                     for dash in &dashes {
                                         render_polyline(
@@ -2264,40 +2324,98 @@ where
                 fontsize,
                 color,
                 arrow,
+                xycoords,
+                textcoords,
+                ha,
+                family,
             } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 0, 0));
                 let rgb = to_plotters_color(col);
-                let (tx_data, ty_data) = xytext.unwrap_or(*xy);
-                let text_x = tx(tx_data);
-                let text_y = ty(ty_data);
+
+                // 绘图区像素尺寸 → 每像素跨越的数据(可能是 log 空间)跨度，
+                // 供 "offset points/pixels" 把像素偏移换算成数据坐标增量。
+                let (pw, ph) = {
+                    let dim = chart.plotting_area().dim_in_pixel();
+                    (dim.0 as f64, dim.1 as f64)
+                };
+                let x_per_pix = if pw > 0.0 { (x_max - x_min) / pw } else { 0.0 };
+                let y_per_pix = if ph > 0.0 { (y_max - y_min) / ph } else { 0.0 };
+
+                // 把某坐标系下的 (x, y) 解析为 chart 坐标(data 值经 tx/ty；axes 分数
+                // 在 [min,max] 间线性插值——log 轴下 min/max 已是 log 空间，仍线性正确)。
+                let to_chart = |val: (f64, f64), coords: &str| -> (f64, f64) {
+                    match coords {
+                        "axes fraction" | "axes" => (
+                            x_min + val.0 * (x_max - x_min),
+                            y_min + val.1 * (y_max - y_min),
+                        ),
+                        // y 轴变换：x 取 axes 分数, y 取 data。
+                        "yaxis_transform" => (x_min + val.0 * (x_max - x_min), ty(val.1)),
+                        // x 轴变换：x 取 data, y 取 axes 分数。
+                        "xaxis_transform" => (tx(val.0), y_min + val.1 * (y_max - y_min)),
+                        // "data" 及未知值按数据坐标处理。
+                        _ => (tx(val.0), ty(val.1)),
+                    }
+                };
+
+                // 被标注点(箭头指向处) chart 坐标。
+                let (anchor_x, anchor_y) = to_chart(*xy, xycoords);
+
+                // 文本放置点：无 xytext 时与 anchor 重合；offset points/pixels 按像素偏移
+                // (+x 右, +y 上) 换算成数据增量；其余坐标系直接解析 xytext。
+                let (text_x, text_y) = match xytext {
+                    None => (anchor_x, anchor_y),
+                    Some(off) => {
+                        if textcoords == "offset points" || textcoords == "offset pixels" {
+                            // points → pixels 换算因子恰为 font_scale(=dpi/72)。
+                            let scale = if textcoords == "offset points" {
+                                font_scale
+                            } else {
+                                1.0
+                            };
+                            (
+                                anchor_x + off.0 * scale * x_per_pix,
+                                anchor_y + off.1 * scale * y_per_pix,
+                            )
+                        } else {
+                            to_chart(*off, textcoords)
+                        }
+                    }
+                };
                 if !text_x.is_finite() || !text_y.is_finite() {
                     continue;
                 }
+
+                let halign = match ha.to_ascii_lowercase().as_str() {
+                    "left" => HAlign::Left,
+                    "right" => HAlign::Right,
+                    _ => HAlign::Center,
+                };
+                let fam = family.as_deref();
+
                 // 先画箭头（置于文本下层，使文本压住箭尾）。仅当提供 xytext 且
                 // arrowprops 非 None 时绘制。
                 if let Some(spec) = arrow
                     && xytext.is_some()
+                    && anchor_x.is_finite()
+                    && anchor_y.is_finite()
                 {
-                    let target_x = tx(xy.0);
-                    let target_y = ty(xy.1);
-                    if target_x.is_finite() && target_y.is_finite() {
-                        draw_annotation_arrow(
-                            chart,
-                            spec,
-                            text,
-                            scale_font(*fontsize, font_scale),
-                            text_x,
-                            text_y,
-                            target_x,
-                            target_y,
-                            font_scale,
-                            x_min,
-                            x_max,
-                            y_min,
-                            y_max,
-                            col,
-                        )?;
-                    }
+                    draw_annotation_arrow(
+                        chart,
+                        spec,
+                        text,
+                        scale_font(*fontsize, font_scale),
+                        text_x,
+                        text_y,
+                        anchor_x,
+                        anchor_y,
+                        font_scale,
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                        col,
+                    )?;
                 }
                 mathtext::draw_math_chart(
                     chart,
@@ -2306,8 +2424,8 @@ where
                     text,
                     scale_font(*fontsize, font_scale),
                     rgb,
-                    None,
-                    HAlign::Center,
+                    fam,
+                    halign,
                     VAlign::Center,
                     0.0,
                 )?;

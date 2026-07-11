@@ -757,7 +757,20 @@ pub struct Axes {
     pub tick_top: bool,
     pub tick_left: bool,
     pub tick_right: bool,
+    /// tick_params(labelbottom/labeltop/labelleft/labelright=...) 控制各侧刻度**标签**是否绘制
+    /// （与 tick_bottom 等控制刻度**线**独立，对齐 matplotlib 语义）。默认全部显示。
+    pub label_bottom: bool,
+    pub label_top: bool,
+    pub label_left: bool,
+    pub label_right: bool,
     pub tick_labelsize: f64,
+    /// tick_params(color=...) 设置的刻度线颜色（None = 默认黑）。x/y 分开存储，
+    /// 由 axis='x'/'y'/'both' 决定写哪个；渲染时以手动刻度线覆盖 plotters 默认黑刻度。
+    pub x_tick_color: Option<String>,
+    pub y_tick_color: Option<String>,
+    /// tick_params(labelcolor=...) 设置的刻度标签颜色（None = 默认黑）。
+    pub x_tick_labelcolor: Option<String>,
+    pub y_tick_labelcolor: Option<String>,
     pub axis_off: bool,
     pub self_py: Option<Py<PyAny>>,
     pub xaxis_major_locator: Option<Py<PyAny>>,
@@ -840,7 +853,15 @@ impl Clone for Axes {
             tick_top: self.tick_top,
             tick_left: self.tick_left,
             tick_right: self.tick_right,
+            label_bottom: self.label_bottom,
+            label_top: self.label_top,
+            label_left: self.label_left,
+            label_right: self.label_right,
             tick_labelsize: self.tick_labelsize,
+            x_tick_color: self.x_tick_color.clone(),
+            y_tick_color: self.y_tick_color.clone(),
+            x_tick_labelcolor: self.x_tick_labelcolor.clone(),
+            y_tick_labelcolor: self.y_tick_labelcolor.clone(),
             axis_off: self.axis_off,
             self_py: None,
             xaxis_major_locator: None,
@@ -999,7 +1020,15 @@ impl Axes {
             tick_top: true,
             tick_left: true,
             tick_right: true,
+            label_bottom: true,
+            label_top: true,
+            label_left: true,
+            label_right: true,
             tick_labelsize: 12.0 * DEFAULT_FONT_SCALE,
+            x_tick_color: None,
+            y_tick_color: None,
+            x_tick_labelcolor: None,
+            y_tick_labelcolor: None,
             axis_off: false,
             self_py: None,
             xaxis_major_locator: None,
@@ -1835,6 +1864,10 @@ impl Axes {
                     self.tick_top = true;
                     self.tick_left = true;
                     self.tick_right = true;
+                    self.label_bottom = true;
+                    self.label_top = true;
+                    self.label_left = true;
+                    self.label_right = true;
                 }
                 _ => {}
             }
@@ -2318,8 +2351,9 @@ impl Axes {
         Ok(())
     }
 
-    #[doc = "添加带箭头的文本标注 (由 Rust 层实现)\n\n参数:\n    text: 标注文本\n    xy: 被标注点的坐标 (x, y)\n    xytext: 文本放置位置, 若提供且 arrowprops 非 None 则绘制箭头到 xy\n    fontsize: 字体大小 (默认 12.0)\n    color: 文本颜色\n    arrowprops: 箭头属性字典 (None 表示不画箭头; 空 dict 表示简单箭头)"]
-    #[pyo3(signature = (text, xy, xytext=None, fontsize=12.0, color="black", arrowprops=None))]
+    #[doc = "添加带箭头的文本标注 (由 Rust 层实现)\n\n参数:\n    text: 标注文本\n    xy: 被标注点的坐标 (x, y)\n    xytext: 文本放置位置, 若提供且 arrowprops 非 None 则绘制箭头到 xy\n    fontsize: 字体大小 (默认 12.0)\n    color: 文本颜色\n    arrowprops: 箭头属性字典 (None 表示不画箭头; 空 dict 表示简单箭头)\n    xycoords: xy 的坐标系 ('data' / 'axes fraction' / 'yaxis_transform' / 'xaxis_transform')\n    textcoords: xytext 的坐标系 ('data' / 'offset points' / ...); None 时与 xycoords 一致\n    ha: 水平对齐 ('left' / 'center' / 'right')\n    family: 字体族"]
+    #[pyo3(signature = (text, xy, xytext=None, fontsize=12.0, color="black", arrowprops=None, xycoords="data", textcoords=None, ha="center", family=None))]
+    #[allow(clippy::too_many_arguments)]
     pub fn annotate(
         &mut self,
         text: &str,
@@ -2328,12 +2362,18 @@ impl Axes {
         fontsize: f64,
         color: &str,
         arrowprops: Option<Bound<'_, PyAny>>,
+        xycoords: &str,
+        textcoords: Option<&str>,
+        ha: &str,
+        family: Option<String>,
     ) {
         // 仅当 arrowprops 非 None 且提供了 xytext 时才绘制箭头（matplotlib 语义）。
         let arrow = match (&arrowprops, xytext) {
             (Some(props), Some(_)) => parse_arrowprops(props, color, fontsize),
             _ => None,
         };
+        // matplotlib：textcoords 缺省时取 xycoords 的坐标系。
+        let textcoords = textcoords.unwrap_or(xycoords).to_string();
         self.elements.push(PlotElement::Annotate {
             text: text.to_string(),
             xy,
@@ -2341,6 +2381,10 @@ impl Axes {
             fontsize,
             color: color.to_string(),
             arrow,
+            xycoords: xycoords.to_string(),
+            textcoords,
+            ha: ha.to_string(),
+            family,
         });
     }
 
@@ -2525,6 +2569,18 @@ impl Axes {
         self.ytick_labels = labels;
     }
 
+    #[doc = "设置 x 轴刻度标签文本（须先经 set_xticks 固定刻度位置）。\n\n仅更新标签文本，不改动刻度位置；标签按位置与 xticks_val 对应（类别型 x 轴）。"]
+    #[pyo3(signature = (labels))]
+    pub fn set_xticklabels(&mut self, labels: Vec<String>) {
+        self.xtick_labels = Some(labels);
+    }
+
+    #[doc = "设置 y 轴刻度标签文本（须先经 set_yticks 固定刻度位置）。\n\n仅更新标签文本，不改动刻度位置；标签按位置与 yticks_val 对应（类别型 y 轴）。"]
+    #[pyo3(signature = (labels))]
+    pub fn set_yticklabels(&mut self, labels: Vec<String>) {
+        self.ytick_labels = Some(labels);
+    }
+
     pub fn twinx(&mut self, py: Python) -> PyResult<Py<Axes>> {
         let mut twin = Axes::new();
         twin.xlim = self.xlim;
@@ -2587,32 +2643,82 @@ impl Axes {
         self.element_count = 0;
     }
 
-    #[pyo3(signature = (axis="both", labelsize=None, rotation=None, bottom=None, top=None, left=None, right=None))]
+    #[pyo3(signature = (axis="both", labelsize=None, rotation=None, color=None, labelcolor=None, bottom=None, top=None, left=None, right=None, labelbottom=None, labeltop=None, labelleft=None, labelright=None))]
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     pub fn tick_params(
         &mut self,
         axis: &str,
         labelsize: Option<f64>,
         rotation: Option<f64>,
+        color: Option<String>,
+        labelcolor: Option<String>,
         bottom: Option<bool>,
         top: Option<bool>,
         left: Option<bool>,
         right: Option<bool>,
+        labelbottom: Option<bool>,
+        labeltop: Option<bool>,
+        labelleft: Option<bool>,
+        labelright: Option<bool>,
     ) {
+        // axis 决定作用于哪条轴：'x' 仅 x、'y' 仅 y、'both'（默认）两者。
+        // 对齐 matplotlib：bottom/top/labelbottom/labeltop 属 x 轴，left/right/labelleft/
+        // labelright 属 y 轴；当 axis 与之不符时忽略（matplotlib 在内部 pop 掉）。
+        let apply_x = axis == "x" || axis == "both";
+        let apply_y = axis == "y" || axis == "both";
         if let Some(v) = labelsize {
             self.tick_labelsize = v;
         }
-        if let Some(v) = bottom {
-            self.tick_bottom = v;
+        if let Some(c) = &color {
+            if apply_x {
+                self.x_tick_color = Some(c.clone());
+            }
+            if apply_y {
+                self.y_tick_color = Some(c.clone());
+            }
         }
-        if let Some(v) = top {
-            self.tick_top = v;
+        if let Some(c) = &labelcolor {
+            if apply_x {
+                self.x_tick_labelcolor = Some(c.clone());
+            }
+            if apply_y {
+                self.y_tick_labelcolor = Some(c.clone());
+            }
         }
-        if let Some(v) = left {
-            self.tick_left = v;
+        // 刻度线（marks）可见性
+        if apply_x {
+            if let Some(v) = bottom {
+                self.tick_bottom = v;
+            }
+            if let Some(v) = top {
+                self.tick_top = v;
+            }
         }
-        if let Some(v) = right {
-            self.tick_right = v;
+        if apply_y {
+            if let Some(v) = left {
+                self.tick_left = v;
+            }
+            if let Some(v) = right {
+                self.tick_right = v;
+            }
+        }
+        // 刻度标签（labels）可见性
+        if apply_x {
+            if let Some(v) = labelbottom {
+                self.label_bottom = v;
+            }
+            if let Some(v) = labeltop {
+                self.label_top = v;
+            }
+        }
+        if apply_y {
+            if let Some(v) = labelleft {
+                self.label_left = v;
+            }
+            if let Some(v) = labelright {
+                self.label_right = v;
+            }
         }
     }
 
@@ -2626,6 +2732,10 @@ impl Axes {
         self.tick_top = false;
         self.tick_left = false;
         self.tick_right = false;
+        self.label_bottom = false;
+        self.label_top = false;
+        self.label_left = false;
+        self.label_right = false;
         self.axis_off = true;
     }
 
@@ -2682,6 +2792,16 @@ impl Axes {
         axis.which = "y".to_string();
         axis.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
         Py::new(py, axis)
+    }
+
+    #[doc = "返回 x 轴混合变换的标记 (x 取 data 坐标, y 取 axes 分数)。\n\n可作为 annotate 的 xycoords 传入, 语义同 matplotlib 的 ax.get_xaxis_transform()。"]
+    pub fn get_xaxis_transform(&self) -> &'static str {
+        "xaxis_transform"
+    }
+
+    #[doc = "返回 y 轴混合变换的标记 (x 取 axes 分数, y 取 data 坐标)。\n\n可作为 annotate 的 xycoords 传入, 语义同 matplotlib 的 ax.get_yaxis_transform()。"]
+    pub fn get_yaxis_transform(&self) -> &'static str {
+        "yaxis_transform"
     }
 
     #[getter]
@@ -2893,13 +3013,22 @@ impl Axes {
             // round(2*ss)）。刻度线仍由 plotters 在相同 key points 处绘制，保证标签与刻度线
             // 水平对齐。twin 轴的 x 标签在顶部，位置不同，故不处理。
             let x_axis_on = self.spine_bottom || self.spine_top;
-            let x_labels_on = self.tick_bottom || self.tick_top;
+            let y_axis_on = self.spine_left || self.spine_right;
+            // 刻度线（marks）/ 刻度标签（labels）各侧独立可见性。plotters 仅渲染底部 x、
+            // 左侧 y（top/right 无刻度），故以 bottom/left 为准；label* 控制标签、tick* 控制线。
+            let x_labels_visible = self.label_bottom;
+            let y_labels_visible = self.label_left;
+            let x_marks_visible = self.tick_bottom;
+            let y_marks_visible = self.tick_left;
             // 用户显式设置空刻度（plt.xticks([]) / plt.yticks([])）：此时最终刻度为空，
             // 应完全不画刻度线与刻度值（包括 0），而不是回退到默认最少 2 个标签。
             let x_ticks_empty = ticks_info.xticks.is_empty();
             let y_ticks_empty = ticks_info.yticks.is_empty();
-            let do_manual_x =
-                !self.is_twin_x && !self.is_twin_y && x_axis_on && x_labels_on && !x_ticks_empty;
+            let do_manual_x = !self.is_twin_x
+                && !self.is_twin_y
+                && x_axis_on
+                && x_labels_visible
+                && !x_ticks_empty;
             // 取 plotters 实际用于底部 x 标签的 key points（与刻度线位置一致）。
             let x_key_points: Vec<f64> = if do_manual_x {
                 let n_x = ticks_info.xticks.len().max(2);
@@ -2912,20 +3041,67 @@ impl Axes {
                 Vec::new()
             };
 
+            // tick_params(labelcolor=...) 刻度标签颜色（默认黑）；x/y 各自解析。
+            let x_label_rgb = self
+                .x_tick_labelcolor
+                .as_deref()
+                .and_then(|s| parse_color(s, 0).ok())
+                .map(to_plotters_color)
+                .unwrap_or(BLACK);
+            let y_label_rgb = self
+                .y_tick_labelcolor
+                .as_deref()
+                .and_then(|s| parse_color(s, 0).ok())
+                .map(to_plotters_color)
+                .unwrap_or(BLACK);
+            // tick_params(color=...) 刻度线颜色：plotters mesh 的 axis_style 会把刻度线
+            // 与轴线、且 x/y 一并染色，无法逐轴独立控制。故对设置了颜色的一侧关闭 plotters
+            // 内置刻度线（set_tick_mark_size=0），改用手动短线覆盖（仅对该侧生效，轴线保持默认色）。
+            let x_tick_style: Option<ShapeStyle> = self
+                .x_tick_color
+                .as_deref()
+                .and_then(|s| parse_color(s, 0).ok())
+                .map(|c| to_plotters_color(c).stroke_width(frame_lw));
+            let y_tick_style: Option<ShapeStyle> = self
+                .y_tick_color
+                .as_deref()
+                .and_then(|s| parse_color(s, 0).ok())
+                .map(|c| to_plotters_color(c).stroke_width(frame_lw));
+            let do_manual_y_ticks = y_tick_style.is_some()
+                && !self.is_twin_x
+                && !self.is_twin_y
+                && (self.spine_left || self.spine_right)
+                && (self.tick_left || self.tick_right)
+                && !y_ticks_empty;
+            let y_key_points: Vec<f64> = if do_manual_y_ticks {
+                let n_y = ticks_info.yticks.len().max(2);
+                chart
+                    .plotting_area()
+                    .as_coord_spec()
+                    .y_spec()
+                    .key_points(BoldPoints(n_y))
+            } else {
+                Vec::new()
+            };
+
             let mut mesh_builder = chart.configure_mesh();
             mesh_builder
-                .x_labels(if x_ticks_empty {
-                    0
-                } else {
-                    ticks_info.xticks.len().max(2)
-                })
-                .y_labels(if y_ticks_empty {
-                    0
-                } else {
-                    ticks_info.yticks.len().max(2)
-                })
-                .x_label_style(("sans-serif", label_size).into_font().color(&BLACK))
-                .y_label_style(("sans-serif", label_size).into_font().color(&BLACK))
+                .x_labels(
+                    if x_ticks_empty || (!x_labels_visible && !x_marks_visible) {
+                        0
+                    } else {
+                        ticks_info.xticks.len().max(2)
+                    },
+                )
+                .y_labels(
+                    if y_ticks_empty || (!y_labels_visible && !y_marks_visible) {
+                        0
+                    } else {
+                        ticks_info.yticks.len().max(2)
+                    },
+                )
+                .x_label_style(("sans-serif", label_size).into_font().color(&x_label_rgb))
+                .y_label_style(("sans-serif", label_size).into_font().color(&y_label_rgb))
                 .bold_line_style(frame_style);
 
             // xlabel/ylabel 用 plotters 内置 x_desc/y_desc 自动定位，共用 axis_desc_style。
@@ -2983,23 +3159,34 @@ impl Axes {
             if !self.spine_left && !self.spine_right {
                 mesh_builder.disable_y_axis();
             }
-            if !self.tick_bottom && !self.tick_top {
-                mesh_builder.x_labels(0);
-            }
-            if !self.tick_left && !self.tick_right {
-                mesh_builder.y_labels(0);
-            }
 
-            // matplotlib 风格刻度线：向外、长度约 3.5pt（正值 = 向外）。
-            // plotters 默认刻度长为绘图区的 5%，在本项目自定义布局下渲染极短（~1px），
-            // 故显式设为固定像素（tick_px，见上文）。draw_impl 中 label_dist = 2*tick_size。
+            // matplotlib 风格刻度线：向外、长度约 3.5pt（正值 = 向外）。plotters 默认刻度长为
+            // 绘图区 5%，本项目自定义布局下极短（~1px），故显式设为固定像素 tick_px。
+            // draw_impl 中 label_dist = 2*tick_size：仅当 spine 存在却要隐藏刻度线
+            // （bottom/left=False）时把该侧尺寸置 0；spine 本身不可见时刻度线已随之消失，
+            // 仍保留 tick_px 以维持标签与边框间距（否则 label_dist=0 会让标签贴到边）。
+            let x_tick_sz = if !x_marks_visible && x_axis_on {
+                0
+            } else {
+                tick_px
+            };
+            let y_tick_sz = if !y_marks_visible && y_axis_on {
+                0
+            } else {
+                tick_px
+            };
             mesh_builder
-                .set_tick_mark_size(LabelAreaPosition::Bottom, tick_px)
-                .set_tick_mark_size(LabelAreaPosition::Left, tick_px);
+                .set_tick_mark_size(LabelAreaPosition::Bottom, x_tick_sz)
+                .set_tick_mark_size(LabelAreaPosition::Left, y_tick_sz);
 
-            // 主轴底部 x 标签改为手动绘制：用空串抑制 plotters 内置标签文本（刻度线保留）。
-            if do_manual_x {
+            // x 标签：do_manual_x 时改为手动绘制（空串抑制内置文本，刻度线保留）；
+            // labelbottom=False 时同样置空以隐藏底部 x 标签。
+            if do_manual_x || !x_labels_visible {
                 mesh_builder.x_label_formatter(&|_: &f64| String::new());
+            }
+            // labelleft=False：隐藏左侧 y 标签（y 标签由 plotters 直接绘制，置空即可）。
+            if !y_labels_visible {
+                mesh_builder.y_label_formatter(&|_: &f64| String::new());
             }
 
             // 手动绘制 mesh：禁用内置网格线（由 axes_grid 模块统一绘制）
@@ -3008,12 +3195,14 @@ impl Axes {
                 .disable_y_mesh()
                 .draw()
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
+            // mesh 绘制完成后释放 mesh_builder 对 chart 的可变借用，以便后续手动叠画
+            // 刻度标签 / 刻度线（x 手动标签、x/y 彩色刻度覆盖）。
+            drop(mesh_builder);
 
             // 手动绘制底部 x 刻度标签：相对 plotters 默认位置（label_dist = 2*tick_px）
             // 再向下偏移 2 个最终像素（渲染像素 = round(2*ss)）。锚点 (t, y_min) 映射到
             // 绘图区底边，Text 的像素偏移 (0, offset_y) 使文字顶端下移，与刻度线对齐。
             if do_manual_x {
-                drop(mesh_builder);
                 let (x_lo, x_hi) = (x_min.min(x_max), x_min.max(x_max));
                 // 若设置了主刻度 formatter（如 ConciseDateFormatter），一次性对落在数据区内
                 // 的刻度点调用 format_ticks 生成标签（其粒度依赖整体跨度），再按顺序取用。
@@ -3034,7 +3223,7 @@ impl Axes {
                 let offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
                 let text_style: TextStyle = ("sans-serif", label_size)
                     .into_font()
-                    .color(&BLACK)
+                    .color(&x_label_rgb)
                     .pos(Pos::new(HPos::Center, VPos::Top));
                 let mut vis_i = 0usize;
                 for &t in &x_key_points {
@@ -3065,6 +3254,91 @@ impl Axes {
                         ))
                         .map_err(|e| {
                             PyRuntimeError::new_err(format!("Failed to draw x tick label: {}", e))
+                        })?;
+                    // tick_params(color=...): 在 plotters 黑刻度线上叠画同几何的彩色短线覆盖之
+                    // （向外 tick_px 像素，锚点为绘图区底边）。保留 plotters 刻度尺寸不动，
+                    // 避免改变标签间距。
+                    if let Some(style) = &x_tick_style {
+                        chart
+                            .draw_series(std::iter::once(
+                                plotters::element::EmptyElement::at((t, y_min))
+                                    + plotters::element::PathElement::new(
+                                        vec![(0, 0), (0, tick_px)],
+                                        *style,
+                                    ),
+                            ))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!(
+                                    "Failed to draw x tick mark: {}",
+                                    e
+                                ))
+                            })?;
+                    }
+                }
+            }
+
+            // tick_params(color=...) 的 y 侧：在 plotters 左侧黑刻度线上叠画同几何彩色短线
+            // （向外 tick_px 像素，锚点为绘图区左边）。y 标签仍由 plotters 绘制（其颜色见
+            // y_label_style），此处仅覆盖刻度线，不改变标签间距。
+            if do_manual_y_ticks && let Some(style) = &y_tick_style {
+                let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
+                for &t in &y_key_points {
+                    if t < y_lo || t > y_hi {
+                        continue;
+                    }
+                    chart
+                        .draw_series(std::iter::once(
+                            plotters::element::EmptyElement::at((x_min, t))
+                                + plotters::element::PathElement::new(
+                                    vec![(0, 0), (-tick_px, 0)],
+                                    *style,
+                                ),
+                        ))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw y tick mark: {}", e))
+                        })?;
+                }
+            }
+
+            // 手动绘制左侧 y 刻度标签：当所有 spine 隐藏时，plotters 会 disable_y_axis
+            // 连带移除内置 y 标签；但若 labelleft 仍为真且刻度非空（如 test9 的
+            // tick_params(left=False)+spines 全隐藏但保留 yticklabels），需镜像 do_manual_x
+            // 手动补画。锚点 (x_min, t) 映射到绘图区左边，右对齐 + 垂直居中，向左偏移
+            // label_dist=2*tick_px，使标签落在预留的左边距内。
+            let do_manual_y_labels = !self.is_twin_x
+                && !self.is_twin_y
+                && !y_axis_on
+                && y_labels_visible
+                && !y_ticks_empty;
+            if do_manual_y_labels {
+                let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
+                let offset_x = tick_px * 2;
+                let text_style: TextStyle = ("sans-serif", label_size)
+                    .into_font()
+                    .color(&y_label_rgb)
+                    .pos(Pos::new(HPos::Right, VPos::Center));
+                for &t in &ticks_info.yticks {
+                    if t < y_lo || t > y_hi {
+                        continue;
+                    }
+                    let text = if has_ycat {
+                        y_cat_fmt(&t)
+                    } else if ylog {
+                        format!("{:.1e}", 10.0f64.powf(t))
+                    } else {
+                        crate::figure::axes_mesh::format_linear_tick(t)
+                    };
+                    chart
+                        .draw_series(std::iter::once(
+                            plotters::element::EmptyElement::at((x_min, t))
+                                + plotters::element::Text::new(
+                                    text,
+                                    (-offset_x, 0),
+                                    text_style.clone(),
+                                ),
+                        ))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw y tick label: {}", e))
                         })?;
                 }
             }

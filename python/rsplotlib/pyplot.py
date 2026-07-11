@@ -421,6 +421,7 @@ def _map_aliases(kwargs):
             kwargs.pop(alias)
     # 规范化 linestyle 词形 ('solid'/'dotted'/'dashed'/'dashdot') 与空值到简写，
     # 与 matplotlib 一致：既可写 linestyle='dotted' 也可写 linestyle=':'。
+    # 元组形式 (offset, onoffseq)（参数化 dash 图案）编码为 "dashes=..." 串下沉到 Rust。
     ls = kwargs.get('linestyle')
     if isinstance(ls, str):
         key = ls.strip().lower()
@@ -429,6 +430,35 @@ def _map_aliases(kwargs):
         elif key in _LINESTYLE_ALIASES:
             kwargs['linestyle'] = _LINESTYLE_ALIASES[key]
         # 已是简写 ('-' / '--' / ':' / '-.') 时保持不变
+    elif isinstance(ls, (tuple, list)):
+        enc = _encode_dash_linestyle(ls)
+        if enc is not None:
+            kwargs['linestyle'] = enc
+
+
+def _encode_dash_linestyle(ls):
+    """matplotlib 元组 linestyle ``(offset, onoffseq)`` -> ``"dashes=<offset>;<v0>,<v1>,..."`` 编码串。
+
+    - 空 / None 的 onoffseq 视为实线 ('-')。
+    - 结构非法时返回 None（交由下游忽略, 保持原值）。
+    """
+    if len(ls) != 2:
+        return None
+    offset, seq = ls
+    if seq is None:
+        return '-'
+    try:
+        seq = list(seq)
+    except TypeError:
+        return None
+    if len(seq) == 0:
+        return '-'
+    if offset is None:
+        offset = 0
+    try:
+        return "dashes=%g;%s" % (float(offset), ",".join("%g" % float(v) for v in seq))
+    except (TypeError, ValueError):
+        return None
 
 
 # linestyle 词形 -> 简写。空串 / 'None' 在 _map_aliases 中单独处理为 ' '(不画线)。
@@ -1632,15 +1662,15 @@ def annotate(text, xy, xytext=None, fontsize=None, color='black', arrowprops=Non
             xytext 绘制箭头指向 xy。支持简单箭头 (width/headwidth/headlength/
             shrink) 与花式箭头 (arrowstyle/connectionstyle/mutation_scale/
             shrinkA/shrinkB 等)。
-        **kwargs: 其他关键字参数 (如 xycoords/textcoords, 当前忽略)
+        **kwargs: 其他关键字参数 (如 xycoords/textcoords/ha/family)，转发给 Axes.annotate
     """
     text = _render_mathtext(text)
     ax = _get_axes()
     if ax is not None and hasattr(ax, 'annotate'):
-        ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
+        ax.annotate(text, xy, xytext, fontsize, color, arrowprops, **kwargs)
         return _get_figure()
     fig, ax = _rsplotlib.subplots()
-    ax.annotate(text, xy, xytext, fontsize, color, arrowprops)
+    ax.annotate(text, xy, xytext, fontsize, color, arrowprops, **kwargs)
     return fig, ax
 
 
@@ -1989,12 +2019,23 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
         - 1xN 或 Nx1: (Figure, 一维 ndarray[Axes])
         - MxN: (Figure, 二维 ndarray[Axes]), 支持 axs[i, j] 索引
     """
-    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi)
+    # width_ratios/height_ratios 可作为 subplots 的直接关键字，或经 gridspec_kw 传入
+    # （与 matplotlib 一致，直接关键字优先）。传给 Rust 侧 subplots 以按比例分配行/列尺寸。
+    gridspec_kw = kwargs.get('gridspec_kw') or {}
+    width_ratios = kwargs.get('width_ratios')
+    if width_ratios is None:
+        width_ratios = gridspec_kw.get('width_ratios')
+    height_ratios = kwargs.get('height_ratios')
+    if height_ratios is None:
+        height_ratios = gridspec_kw.get('height_ratios')
+    width_ratios = _to_list(width_ratios) if width_ratios is not None else None
+    height_ratios = _to_list(height_ratios) if height_ratios is not None else None
+
+    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi, width_ratios, height_ratios)
     fig = result[0]
 
     # gridspec_kw={'wspace':.., 'hspace':..} 与 matplotlib 一致地控制子图间距，
     # 复用 subplots_adjust 的存储路径（在渲染阶段覆盖默认/启发式间距）。
-    gridspec_kw = kwargs.get('gridspec_kw')
     if gridspec_kw:
         ws = gridspec_kw.get('wspace')
         hs = gridspec_kw.get('hspace')
@@ -2924,6 +2965,20 @@ def _patch_axes():
     _rs.Axes.set_xticks = _set_xticks
     _rs.Axes.set_yticks = _set_yticks
 
+    # set_xticklabels / set_yticklabels: 归一为字符串 list，吸收 rotation/ha/fontsize 等
+    # 未支持的样式 kwargs。须在 set_xticks/set_yticks 固定刻度位置后调用（matplotlib 语义）。
+    _orig_set_xticklabels = _rs.Axes.set_xticklabels
+    _orig_set_yticklabels = _rs.Axes.set_yticklabels
+
+    def _set_xticklabels(self, labels, **kwargs):
+        return _orig_set_xticklabels(self, [str(x) for x in _to_list(labels)])
+
+    def _set_yticklabels(self, labels, **kwargs):
+        return _orig_set_yticklabels(self, [str(x) for x in _to_list(labels)])
+
+    _rs.Axes.set_xticklabels = _set_xticklabels
+    _rs.Axes.set_yticklabels = _set_yticklabels
+
     # axis: 支持序列 [xmin,xmax,ymin,ymax] 设定轴限，及 'off'/'on'/'equal' 等字符串。
     _orig_axis = _rs.Axes.axis
 
@@ -2982,15 +3037,28 @@ def _patch_axes():
     _orig_annotate = _rs.Axes.annotate
 
     def _annotate(self, text, xy, xytext=None, fontsize=None,
-                  color="black", arrowprops=None, **kwargs):
-        # va/ha/xycoords 等后端未支持的参数被 **kwargs 吸收后丢弃。
+                  color="black", arrowprops=None, xycoords='data',
+                  textcoords=None, ha=None, family=None, **kwargs):
+        # 支持坐标系 (xycoords/textcoords)、水平对齐 (ha/horizontalalignment)、
+        # 字体族 (family/fontfamily)；其余未支持参数 (如 va) 被 **kwargs 吸收后丢弃。
         if isinstance(text, str):
             text = _render_mathtext(text)
         # 未显式指定 fontsize 时，默认字号随其余默认字号一并放大 DEFAULT_FONT_SCALE 倍；
         # 用户显式传入 fontsize 则保持原值不放大。
         if fontsize is None:
             fontsize = _DEFAULT_ANNOTATE_FONTSIZE
-        return _orig_annotate(self, text, xy, xytext, fontsize, color, arrowprops)
+        if ha is None:
+            ha = kwargs.get('horizontalalignment', 'center')
+        if family is None:
+            family = kwargs.get('fontfamily', None)
+        # xycoords 可能是 get_xaxis_transform / get_yaxis_transform 返回的标记字符串；
+        # 若传入的是其它非字符串的 transform 对象则回退到 'data'。
+        if not isinstance(xycoords, str):
+            xycoords = 'data'
+        if textcoords is not None and not isinstance(textcoords, str):
+            textcoords = None
+        return _orig_annotate(self, text, xy, xytext, fontsize, color,
+                              arrowprops, xycoords, textcoords, ha, family)
 
     _rs.Axes.annotate = _annotate
 

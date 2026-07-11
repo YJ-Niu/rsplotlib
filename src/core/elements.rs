@@ -202,6 +202,16 @@ pub enum PlotElement {
         color: String,
         /// 箭头参数；None 表示不画箭头（仅放置文本）。
         arrow: Option<ArrowSpec>,
+        /// `xy` 的坐标系："data" / "axes fraction" / "yaxis_transform"
+        /// (x 轴取 axes 分数, y 轴取 data) / "xaxis_transform" (x 取 data, y 取 axes 分数)。
+        xycoords: String,
+        /// `xytext` 的坐标系："data" / "offset points" / "axes fraction" 等；
+        /// 未显式指定时与 `xycoords` 一致 (matplotlib 语义)。
+        textcoords: String,
+        /// 文本水平对齐："left" / "center" / "right"。
+        ha: String,
+        /// 字体族 (family / fontfamily)，None 表示用默认族。
+        family: Option<String>,
     },
     Stack {
         x: Vec<f64>,

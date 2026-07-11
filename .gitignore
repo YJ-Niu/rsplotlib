@@ -32,7 +32,7 @@ test/
 test*.py
 *.png
 main*.py
-debug.txt
+debug.md
 out/
 wheelhouse/
 N237S NB.csv

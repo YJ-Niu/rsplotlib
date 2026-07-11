@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use crate::figure::axes::Axes;
 use crate::utils::font_stack;
-use crate::utils::pyfuncs::{BASE_HSPACE, BASE_WSPACE, grid_position};
+use crate::utils::pyfuncs::{BASE_HSPACE, BASE_WSPACE, track_edges};
 // colors not needed directly in this module
 
 /// 默认图形尺寸（英寸），与 matplotlib 默认一致 (12.0, 9.0)
@@ -69,6 +69,10 @@ pub struct Figure {
     /// 显式值优先，constrained 智能边距不再覆盖，与 matplotlib「显式 subplotpars 关闭
     /// constrained_layout」的行为一致。
     pub margins_user_set: bool,
+    /// 规则网格各列宽度相对比例（matplotlib width_ratios）；None 时等分。长度应为 ncols。
+    pub width_ratios: Option<Vec<f64>>,
+    /// 规则网格各行高度相对比例（matplotlib height_ratios）；None 时等分。长度应为 nrows。
+    pub height_ratios: Option<Vec<f64>>,
 }
 
 impl Default for Figure {
@@ -104,6 +108,8 @@ impl Figure {
             subplot_hspace: None,
             constrained_layout: false,
             margins_user_set: false,
+            width_ratios: None,
+            height_ratios: None,
         }
     }
 
@@ -732,9 +738,8 @@ impl Figure {
                 let col = i % self.ncols;
                 let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
                 let tick_label_h = tick_font_size.ceil() as u32;
-                let y_shown = (ax.tick_left || ax.tick_right)
-                    && (ax.spine_left || ax.spine_right)
-                    && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+                let y_shown =
+                    ax.label_left && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
                 if col > 0 && y_shown {
                     let labels = y_tick_label_strings(py, &ax, y_min, y_max);
                     let y_tick_area = measure_max_text_width(&labels, tick_font_size) + label_dist;
@@ -831,20 +836,22 @@ impl Figure {
             )
         };
 
+        // 规则网格按 width_ratios/height_ratios 沿各列/行分配轨道尺寸（ratios 为 None 时
+        // 退化为等分，结果与 grid_position 完全一致）。渲染循环对 is_regular_grid 用这里
+        // 预算的边缘，取代此前一律均分的 grid_position，从而让比例真正生效。
+        let col_edges = track_edges(self.ncols, self.width_ratios.as_deref(), grid_wspace);
+        let row_edges = track_edges(self.nrows, self.height_ratios.as_deref(), grid_hspace);
+
         for (i, ax_py) in self.axes_list.iter().enumerate() {
             let ax = ax_py.borrow(py);
 
             let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
 
             let (left, right, bottom, top) = if is_regular_grid {
-                grid_position(
-                    i / self.ncols,
-                    i % self.ncols,
-                    self.nrows,
-                    self.ncols,
-                    grid_wspace,
-                    grid_hspace,
-                )
+                let (col_start, col_size) = col_edges[i % self.ncols];
+                let (row_start, row_size) = row_edges[i / self.ncols];
+                let top = 1.0 - row_start;
+                (col_start, col_start + col_size, top - row_size, top)
             } else if i < self.axes_positions.len() {
                 self.axes_positions[i]
             } else {
@@ -962,13 +969,13 @@ impl Figure {
             let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
             let label_dist = tick_px * 2;
 
-            // 是否真正显示刻度值：刻度开启 + spine 存在 + 未被 plt.{x,y}ticks([]) 显式清空。
-            let y_ticklabels_shown = (ax.tick_left || ax.tick_right)
-                && (ax.spine_left || ax.spine_right)
-                && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
-            let x_ticklabels_shown = (ax.tick_bottom || ax.tick_top)
-                && (ax.spine_bottom || ax.spine_top)
-                && !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
+            // 是否真正显示刻度值：由 labelleft/labelbottom 控制（与刻度线 tick_*、spine 可见性
+            // 独立，对齐 matplotlib——隐藏 spine/刻度线仍可显示刻度标签）；未被 plt.{x,y}ticks([])
+            // 显式清空时才显示。左侧 y 标签占左边距，故按 label_left；底部 x 标签同理按 label_bottom。
+            let y_ticklabels_shown =
+                ax.label_left && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+            let x_ticklabels_shown =
+                ax.label_bottom && !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
 
             // y 刻度值从轴线向外占用的空间：最长刻度值的实际渲染宽度（位数越多 / 字号越大越宽）
             // + 离轴距离；无刻度值时为 0，使坐标轴标签紧贴坐标轴。
@@ -1559,9 +1566,7 @@ fn subplot_y_label_area(
     let tick_label_size = tick_font_size.ceil() as u32;
     let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
     let label_dist = tick_px * 2;
-    let y_shown = (ax.tick_left || ax.tick_right)
-        && (ax.spine_left || ax.spine_right)
-        && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
+    let y_shown = ax.label_left && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
     let y_tick_area = if y_shown {
         let labels = y_tick_label_strings(py, ax, y_min, y_max);
         measure_max_text_width(&labels, tick_font_size) + label_dist
