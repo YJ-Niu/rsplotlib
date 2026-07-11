@@ -18,6 +18,11 @@ fn install_default_sans(font_data: Vec<u8>) -> bool {
     let face_copy = font_data.clone();
     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
     if register_font("sans-serif", plotters::style::FontStyle::Normal, font_ref).is_ok() {
+        crate::utils::glyph_cache::register_ab_glyph(
+            "sans-serif",
+            plotters::style::FontStyle::Normal,
+            font_ref,
+        );
         crate::utils::font_stack::set_default_face(face_copy);
         true
     } else {
@@ -45,6 +50,11 @@ fn install_math_fallback(candidates: &[&str]) -> bool {
         // family 名需在两侧一致：plotters 绘制时按此名查表，选择器也返回此名。
         let leaked_family: &'static str = Box::leak(family.clone().into_boxed_str());
         if register_font(leaked_family, plotters::style::FontStyle::Normal, font_ref).is_ok() {
+            crate::utils::glyph_cache::register_ab_glyph(
+                leaked_family,
+                plotters::style::FontStyle::Normal,
+                font_ref,
+            );
             crate::utils::font_stack::set_math_face(family, face_copy);
             return true;
         }
@@ -66,6 +76,11 @@ fn install_named_font(family: &str, candidates: &[&str]) -> bool {
         let face_copy = font_data.clone();
         let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
         if register_font(family, plotters::style::FontStyle::Normal, font_ref).is_ok() {
+            crate::utils::glyph_cache::register_ab_glyph(
+                family,
+                plotters::style::FontStyle::Normal,
+                font_ref,
+            );
             crate::utils::font_stack::register_named_family(family, face_copy);
             return true;
         }

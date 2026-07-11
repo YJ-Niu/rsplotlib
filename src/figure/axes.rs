@@ -3,6 +3,7 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::ShapeStyle;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
+use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyTuple};
@@ -97,11 +98,24 @@ fn bytes_to_f64_vec(typestr: &str, data: &[u8]) -> Option<Vec<f64>> {
     }
     let be = tb[0] == b'>';
     let n = data.len() / size;
+
+    // 快路径：本机小端 f64（plot/scatter 最常见的 `<f8`）字节布局与 `Vec<f64>` 完全一致，
+    // 用单次 memcpy 取代 N 次 from_le_bytes 逐元素重建（1M 点提取约 5ms → 1ms）。
+    // NaN 等特殊位型按位复制，语义与逐元素路径一致。
+    if !be && kind == b'f' && size == 8 && cfg!(target_endian = "little") {
+        let mut out = vec![0f64; n];
+        // SAFETY: out 有 n*8 字节可写空间，data 恰为 n*8 字节，两者皆按 u8 视图且长度相等。
+        let dst = unsafe { std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<u8>(), n * 8) };
+        dst.copy_from_slice(data);
+        return Some(out);
+    }
+
     let mut out = Vec::with_capacity(n);
     macro_rules! decode {
         ($t:ty, $sz:literal) => {{
-            for i in 0..n {
-                let arr: [u8; $sz] = data[i * $sz..i * $sz + $sz].try_into().ok()?;
+            // chunks_exact 保证每块恰为 $sz 字节，try_into 不会失败，便于自动向量化。
+            for chunk in data.chunks_exact($sz) {
+                let arr: [u8; $sz] = chunk.try_into().ok()?;
                 let v = if be {
                     <$t>::from_be_bytes(arr)
                 } else {
@@ -127,13 +141,37 @@ fn bytes_to_f64_vec(typestr: &str, data: &[u8]) -> Option<Vec<f64>> {
     Some(out)
 }
 
-/// 通过 `__array_interface__` 直接读取数组的原始缓冲区（C 序连续），避免
-/// `.tolist()` 生成数百万 Python 浮点对象的开销。
+/// 通过 PEP 3118 缓冲协议零拷贝读取 float64 数组（C 序连续），避免
+/// `__array_interface__` 触发整块缓冲区序列化成 bytes 的开销。
 ///
-/// 仅当对象暴露 `__array_interface__`、`data` 为 `bytes`、dtype 可识别、且元素数
-/// 与 shape 吻合时返回 `Some((shape, flat_c_order))`；否则返回 None，调用方回退。
-/// 注意：读取 `__array_interface__` 会复制整个缓冲区，故每次转换只应调用一次。
+/// 仅当对象暴露与 f64 兼容的缓冲区（rsnumpy 的 float64 数组经 PEP 688 `__buffer__`、
+/// 真 numpy 的 float64 数组、Python 3.12+ 识别）且为 C 序连续时返回
+/// `Some((shape, flat_c_order))`。int/bool/datetime 数组（rsnumpy 只对 float64 暴露
+/// 缓冲）、Python list、非连续缓冲、Python ≤ 3.11 下 `get` 均失败，返回 None，由调用方
+/// 回退到 `__array_interface__` bytes 路径（其 `bytes_to_f64_vec` 覆盖 int/bool 等 dtype）。
+fn buffer_flat_f64(obj: &Bound<'_, PyAny>) -> Option<(Vec<usize>, Vec<f64>)> {
+    let buf = PyBuffer::<f64>::get(obj).ok()?;
+    if !buf.is_c_contiguous() {
+        return None;
+    }
+    let shape: Vec<usize> = buf.shape().to_vec();
+    // to_vec 走单次 PyBuffer_ToContiguous memcpy，不产生 Python 中间对象。
+    let flat = buf.to_vec(obj.py()).ok()?;
+    Some((shape, flat))
+}
+
+/// 直接读取数组的原始缓冲区（C 序连续），避免 `.tolist()` 生成数百万 Python
+/// 浮点对象的开销。
+///
+/// 优先走 PEP 3118 缓冲协议（[`buffer_flat_f64`]，float64 零拷贝）；不支持缓冲的
+/// dtype（int/bool/datetime）回退到 `__array_interface__`：当 `data` 为 `bytes`、
+/// dtype 可识别、且元素数与 shape 吻合时返回 `Some((shape, flat_c_order))`，否则
+/// 返回 None，调用方再回退到 `.tolist()`。
+/// 注意：`__array_interface__` 回退分支会复制整个缓冲区，故每次转换只应调用一次。
 fn array_interface_flat(obj: &Bound<'_, PyAny>) -> Option<(Vec<usize>, Vec<f64>)> {
+    if let Some(res) = buffer_flat_f64(obj) {
+        return Some(res);
+    }
     let ai = obj.getattr("__array_interface__").ok()?;
     let dict = ai.cast::<PyDict>().ok()?;
     let shape: Vec<usize> = dict.get_item("shape").ok()??.extract().ok()?;
@@ -493,6 +531,7 @@ fn resolve_and_register_family(py: Python<'_>, family: Option<String>) -> Option
         {
             let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
             let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
+            crate::utils::glyph_cache::register_ab_glyph(&family_name, FontStyle::Normal, font_ref);
             return Some(family_name);
         }
         None
@@ -1988,6 +2027,11 @@ impl Axes {
             {
                 let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
                 let _ = plotters::style::register_font(&family_name, FontStyle::Normal, font_ref);
+                crate::utils::glyph_cache::register_ab_glyph(
+                    &family_name,
+                    FontStyle::Normal,
+                    font_ref,
+                );
                 return Some(family_name);
             }
             None
@@ -2176,13 +2220,13 @@ impl Axes {
         alpha: f64,
     ) -> PyResult<()> {
         let x_vec = py_to_vec_f64(&x)?;
-        // 从 *args 收集 y 数据：每个 arg 应该是 Vec<f64>
+        // 从 *args 收集 y 数据：每个 arg 可为一维序列（单条）或二维数组（多条）。
+        // py_to_vec_vec_f64 走缓冲快路径：float64 数组零拷贝，避免 .tolist() 物化；
+        // 1D 返回单条、2D 按行拆多条，Python list 亦回退支持。无法解析的 arg 静默跳过。
         let mut y_series: Vec<Vec<f64>> = Vec::new();
         for arg in args.iter() {
-            if let Ok(single) = arg.extract::<Vec<f64>>() {
-                y_series.push(single);
-            } else if let Ok(list_of_lists) = arg.extract::<Vec<Vec<f64>>>() {
-                y_series.extend(list_of_lists);
+            if let Ok(series) = py_to_vec_vec_f64(&arg) {
+                y_series.extend(series);
             }
         }
 

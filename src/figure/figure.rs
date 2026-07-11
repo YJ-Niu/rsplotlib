@@ -440,6 +440,7 @@ impl Figure {
                 BitMapBackend::with_buffer_and_format(&mut hi, (sw, sh)).map_err(|e| {
                     PyRuntimeError::new_err(format!("Failed to create bitmap backend: {}", e))
                 })?;
+            let backend = crate::utils::glyph_cache::GlyphCacheBackend::new(backend);
             // 传 actual_w/h = 超采样尺寸（render_to_backend 据此算出相对 self.width 的总缩放
             // 比例并放大各布局常量），font_scale 也乘以 ss，让字体/线宽在放大画布上同比放大。
             self.render_to_backend(py, backend, sw, sh, true, font_scale * ss as f64)?;

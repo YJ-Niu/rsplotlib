@@ -49,20 +49,44 @@ def _to_list_recursive(obj):
     return obj
 
 
+def _buffer_kind(obj):
+    """返回 obj 的 dtype kind 字符（numpy 约定 'f'/'i'/'u'/'b'/'M'/'S'/'U'/'c'…），
+    无法判定时返回 None。
+
+    优先读廉价的 obj.dtype.kind：rsnumpy 的 __array_interface__ 属性每次访问都会即时把
+    整个缓冲区序列化成 bytes（百万点约 2.6ms/次，随后被丢弃），而 dtype 访问是 O(1)。
+    仅当对象没有 dtype（如 Python list、标量、或 numpy 之外仅实现数组接口的第三方缓冲）
+    时，才回退读取 __array_interface__ 的 typestr。真实 numpy 的 __array_interface__ 为
+    指针形式、开销极小，不受此影响。
+    """
+    dt = None
+    try:
+        dt = getattr(obj, 'dtype', None)
+    except Exception:
+        # rsnumpy 对 datetime64[h]/timedelta64 等 dtype 的 .dtype 属性会抛 TypeError
+        # （非 AttributeError，getattr 默认值挡不住）。此处按"无法判定"处理，落到
+        # __array_interface__ 回退——这些非数值 dtype 本就应返回非 fiub kind。
+        dt = None
+    if dt is not None:
+        kind = getattr(dt, 'kind', None)
+        if isinstance(kind, str) and len(kind) == 1:
+            return kind
+    ai = getattr(obj, '__array_interface__', None)
+    if isinstance(ai, dict):
+        typestr = ai.get('typestr', '')
+        return typestr[1:2] if len(typestr) >= 2 else None
+    return None
+
+
 def _is_numeric_buffer(obj):
-    """obj 是否为暴露 __array_interface__ 的纯数值缓冲数组（float/int/uint/bool）。
+    """obj 是否为纯数值缓冲数组（float/int/uint/bool）。
 
     这类数组可零拷贝下沉给 Rust，且不可能是字符串类别或日期，故可跳过 .tolist()
-    全量物化（plot/scatter 热路径最大收益）。typestr 形如 '<f8'/'|b1'/'<M8[h]'/'<U3'，
-    第 2 个字符为 kind：datetime64('M')、字符串('U'/'S')、复数('c')、timedelta('m')、
-    object('O') 均需 Python 侧特殊处理，返回 False 交回原有 .tolist() 路径。
+    全量物化（plot/scatter 热路径最大收益）。dtype kind 为 datetime64('M')、字符串
+    ('U'/'S')、复数('c')、timedelta('m')、object('O') 均需 Python 侧特殊处理，返回
+    False 交回原有 .tolist() 路径。
     """
-    ai = getattr(obj, '__array_interface__', None)
-    if not isinstance(ai, dict):
-        return False
-    typestr = ai.get('typestr', '')
-    kind = typestr[1:2] if len(typestr) >= 2 else ''
-    return kind in ('f', 'i', 'u', 'b')
+    return _buffer_kind(obj) in ('f', 'i', 'u', 'b')
 
 
 def _numeric_buffer_1d_len(obj):
@@ -71,14 +95,13 @@ def _numeric_buffer_1d_len(obj):
     用于 scatter 数值 c 的快路径：一维数值缓冲不可能是颜色字符串或 RGB(A) 行数组，
     可零拷贝直传 Rust 经 colormap 上色，跳过 .tolist() / 逐元素类别检查 / [float(v)] 物化。
     """
-    ai = getattr(obj, '__array_interface__', None)
-    if not isinstance(ai, dict):
+    if _buffer_kind(obj) not in ('f', 'i', 'u', 'b'):
         return None
-    typestr = ai.get('typestr', '')
-    kind = typestr[1:2] if len(typestr) >= 2 else ''
-    if kind not in ('f', 'i', 'u', 'b'):
-        return None
-    shape = ai.get('shape')
+    shape = getattr(obj, 'shape', None)
+    if shape is None:
+        ai = getattr(obj, '__array_interface__', None)
+        if isinstance(ai, dict):
+            shape = ai.get('shape')
     if not (isinstance(shape, tuple) and len(shape) == 1):
         return None
     return shape[0]
@@ -972,6 +995,28 @@ def _parse_fmt(fmt):
     return result
 
 
+def _implicit_x(y):
+    """plot(y) 的隐式横坐标 = [0, 1, ..., len(y)-1]。
+
+    优先用 rsnumpy.arange(n, dtype=float) 生成 float64 数组：可经 PEP 3118 缓冲协议
+    零拷贝下沉 Rust，并让 _categorical/_maybe_dates_to_num/_to_seq 走数值缓冲快路径，
+    跳过对 list(range(n)) 的逐元素扫描与百万级 Python int 提取（大数据热路径）。
+    值 0.0..n-1 与 range 完全一致（n ≤ 2^53 精确），渲染输出逐字节不变。
+
+    rsnumpy 不可用（ImportError）或 arange 异常时回退到 list(range(n))；y 无 len 时
+    沿用原逻辑（可迭代取 list(y)，否则空）。
+    """
+    try:
+        n = len(y)
+    except Exception:
+        return list(y) if hasattr(y, '__iter__') else []
+    try:
+        import rsnumpy as _rsnp
+        return _rsnp.arange(n, dtype=float)
+    except Exception:
+        return list(range(n))
+
+
 def _parse_plot_args(args, kwargs):
     """解析 plot() 的位置参数为 [(x, y, fmt_or_none), ...] 对列表 + kwargs
 
@@ -995,10 +1040,7 @@ def _parse_plot_args(args, kwargs):
 
         if len(group) == 1:
             y = group[0]
-            try:
-                x = list(range(len(y)))
-            except Exception:
-                x = list(y) if hasattr(y, '__iter__') else []
+            x = _implicit_x(y)
             pairs.append((x, y, fmt))
         else:
             pairs.append((group[0], group[1], fmt))
@@ -1415,10 +1457,10 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0, **kwargs):
         colors: 每个数据集的颜色列表
         alpha: 透明度 (默认 1.0)
     """
-    x = _to_list(x)
-    y_data = [list(a) for a in args if a is not None]
+    x = _to_seq(x)
+    y_data = [_to_seq(a) for a in args if a is not None]
     if not y_data and 'y' in kwargs:
-        y_data = [_to_list(kwargs['y'])]
+        y_data = [_to_seq(kwargs['y'])]
     return _route_to_ax('stackplot', _rsplotlib.stackplot, x, *y_data,
                         labels=labels, colors=colors, alpha=alpha)
 

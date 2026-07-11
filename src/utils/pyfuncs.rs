@@ -50,6 +50,7 @@ pub fn register_sans_serif_font(
     let font_ref: &'static [u8] = Box::leak(font_data.into_boxed_slice());
     register_font(&family, FontStyle::Normal, font_ref)
         .map_err(|_| PyValueError::new_err(format!("Failed to register font from '{}'", path)))?;
+    crate::utils::glyph_cache::register_ab_glyph(&family, FontStyle::Normal, font_ref);
 
     // 推入字体栈（重新读取，因为 font_data 已被 Box::leak 消耗）
     let font_data2 = std::fs::read(&path)

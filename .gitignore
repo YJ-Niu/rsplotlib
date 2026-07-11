@@ -32,6 +32,7 @@ test/
 test*.py
 *.png
 main*.py
+.trae/
 debug.md
 out/
 wheelhouse/

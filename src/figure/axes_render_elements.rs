@@ -783,6 +783,200 @@ fn compute_dash_segments(
     out
 }
 
+/// 折线线段简化（每像素列 min/max 聚合，即 M4 抽稀）。
+///
+/// 当折线点数远多于绘图区横向像素数时，同一像素列内往往堆叠成百上千个点，逐点画
+/// 抗锯齿线段是大数据折线渲染的主要开销（且不可见）。此函数按屏幕像素列分桶，每列
+/// 保留 first / last / min-y / max-y 至多四个**真实数据点**，把绘制线段数从 O(N)
+/// 降到 O(像素宽)，同时完整保留竖直包络与逐列真实峰谷——输出与全量渲染像素级几乎
+/// 一致（对比朴素隔点抽稀会丢失噪声带并产生走样）。
+///
+/// 仅在以下条件下抽稀，否则返回 `None`（调用方保持原折线）：
+/// - 点数至少为像素列数的 2 倍（否则无收益）；
+/// - x 单调（递增或递减）——保证按列分桶不破坏折线连通性；参数曲线（如 Lissajous）
+///   x 非单调，跳过以免错连。
+///
+/// 列映射用图表的 `[x_min, x_max]` 与像素宽（而非线段自身范围），使仅占少数屏幕像素
+/// 的线段只落入对应少数列，不会被过度细分。位图后端此时为超采样尺寸（宽度已 ×SSAA），
+/// 故抽稀保真到超采样分辨率，缩回后画质不损。
+fn decimate_min_max(
+    points: &[(f64, f64)],
+    x_min: f64,
+    x_max: f64,
+    plot_w_px: f64,
+) -> Option<Vec<(f64, f64)>> {
+    let n = points.len();
+    let cols = plot_w_px.floor().max(1.0) as usize;
+    if plot_w_px <= 0.0 || n < cols.saturating_mul(2).max(64) {
+        return None;
+    }
+    let inc = points[n - 1].0 >= points[0].0;
+    let monotonic = points.windows(2).all(|w| {
+        if inc {
+            w[1].0 >= w[0].0
+        } else {
+            w[1].0 <= w[0].0
+        }
+    });
+    if !monotonic {
+        return None;
+    }
+    let span = x_max - x_min;
+    if !span.is_finite() || span == 0.0 {
+        return None;
+    }
+    let col_of = |x: f64| -> i64 {
+        ((x - x_min) / span * plot_w_px)
+            .floor()
+            .clamp(-1.0, plot_w_px) as i64
+    };
+    // 输出某一像素列聚合出的 1~4 个代表点，按行进方向（x 序）排列并跳过相邻重复点。
+    let emit = |out: &mut Vec<(f64, f64)>,
+                first: (f64, f64),
+                last: (f64, f64),
+                lo: (f64, f64),
+                hi: (f64, f64)| {
+        let mut pts = [first, lo, hi, last];
+        if inc {
+            pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        } else {
+            pts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        for p in pts {
+            if out.last().is_none_or(|l| l.0 != p.0 || l.1 != p.1) {
+                out.push(p);
+            }
+        }
+    };
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(cols * 4 + 8);
+    let mut col = col_of(points[0].0);
+    let (mut first, mut last, mut lo, mut hi) = (points[0], points[0], points[0], points[0]);
+    for &p in &points[1..] {
+        let c = col_of(p.0);
+        if c != col {
+            emit(&mut out, first, last, lo, hi);
+            col = c;
+            first = p;
+            last = p;
+            lo = p;
+            hi = p;
+        } else {
+            last = p;
+            if p.1 < lo.1 {
+                lo = p;
+            }
+            if p.1 > hi.1 {
+                hi = p;
+            }
+        }
+    }
+    emit(&mut out, first, last, lo, hi);
+    if out.len() >= 2 { Some(out) } else { None }
+}
+
+/// 融合版大数据折线抽稀：直接读取原始 `x`/`y` 并施加 `tx`/`ty` 变换，边扫描边按像素列
+/// min/max 分桶。相比「先构建整段 `Vec<(f64,f64)>`（1M 点约 16MB）再 `decimate_min_max`」
+/// 省掉中间段的物化与额外的单调性、分桶两趟扫描，大数据单调折线的 savefig 渲染显著更快。
+///
+/// 仅当「点数 ≥ 阈值、x 单调、全部有限（无 NaN 断点）」时返回 `Some`，其输出与
+/// 「构建整段 + `decimate_min_max`」逐点（乃至逐字节）完全一致；任一条件不满足即返回
+/// `None`，调用方回退到原始「构建段 + 逐段 decimate」路径，行为与像素输出均不变。
+fn decimate_min_max_fused<FX: Fn(f64) -> f64, FY: Fn(f64) -> f64>(
+    x: &[f64],
+    y: &[f64],
+    tx: &FX,
+    ty: &FY,
+    y_half_px: f64,
+    x_min: f64,
+    x_max: f64,
+    plot_w_px: f64,
+) -> Option<Vec<(f64, f64)>> {
+    let n = x.len();
+    if n != y.len() {
+        return None;
+    }
+    let cols = plot_w_px.floor().max(1.0) as usize;
+    if plot_w_px <= 0.0 || n < cols.saturating_mul(2).max(64) {
+        return None;
+    }
+    let span = x_max - x_min;
+    if !span.is_finite() || span == 0.0 {
+        return None;
+    }
+    // 第 0 点必须有限（否则原路径会把它当断点并分段，此处交由回退路径处理）。
+    let px0 = tx(x[0]);
+    let py0 = ty(y[0]);
+    if !px0.is_finite() || !py0.is_finite() {
+        return None;
+    }
+    // inc 由首末（变换后）x 决定，与原路径「段内首末点」判定一致；末点亦须有限。
+    let fxn = tx(x[n - 1]);
+    if !fxn.is_finite() {
+        return None;
+    }
+    let inc = fxn >= px0;
+    let col_of = |xx: f64| -> i64 {
+        ((xx - x_min) / span * plot_w_px)
+            .floor()
+            .clamp(-1.0, plot_w_px) as i64
+    };
+    let emit = |out: &mut Vec<(f64, f64)>,
+                first: (f64, f64),
+                last: (f64, f64),
+                lo: (f64, f64),
+                hi: (f64, f64)| {
+        let mut pts = [first, lo, hi, last];
+        if inc {
+            pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        } else {
+            pts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        for p in pts {
+            if out.last().is_none_or(|l| l.0 != p.0 || l.1 != p.1) {
+                out.push(p);
+            }
+        }
+    };
+    let p0 = (px0, py0 - y_half_px);
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(cols * 4 + 8);
+    let mut col = col_of(p0.0);
+    let (mut first, mut last, mut lo, mut hi) = (p0, p0, p0, p0);
+    let mut prev_x = p0.0;
+    for i in 1..n {
+        let txv = tx(x[i]);
+        let tyv = ty(y[i]);
+        if !txv.is_finite() || !tyv.is_finite() {
+            return None; // 含断点：回退到分段路径以保持一致
+        }
+        // 单调性校验，与原 decimate 的 windows(2).all(...) 等价。
+        let violated = if inc { txv < prev_x } else { txv > prev_x };
+        if violated {
+            return None;
+        }
+        prev_x = txv;
+        let p = (txv, tyv - y_half_px);
+        let c = col_of(p.0);
+        if c != col {
+            emit(&mut out, first, last, lo, hi);
+            col = c;
+            first = p;
+            last = p;
+            lo = p;
+            hi = p;
+        } else {
+            last = p;
+            if p.1 < lo.1 {
+                lo = p;
+            }
+            if p.1 > hi.1 {
+                hi = p;
+            }
+        }
+    }
+    emit(&mut out, first, last, lo, hi);
+    if out.len() >= 2 { Some(out) } else { None }
+}
+
 /// 统一的折线渲染入口：实线与每一段 dash 都经此绘制，保证任意斜率线宽一致、沿线方向。
 ///
 /// - 位图后端：走逐像素覆盖率抗锯齿 `draw_thick_polyline_aa`（内部含 round join 与端点处理）；
@@ -1171,10 +1365,24 @@ where
                     }
                 };
                 if !x.is_empty() && x.len() == y.len() {
-                    // 构建连续有效数据段（被 None 分隔）
+                    let plot_w_px = chart.plotting_area().dim_in_pixel().0 as f64;
+                    // 大数据折线线段简化：点数远多于横向像素列时，按像素列 min/max 抽稀，
+                    // 把绘制线段数从 O(N) 降到 O(像素宽)（保留竖直包络，输出像素级几乎一致）。
+                    // marker 分支用原始 x/y 全量绘制，不受此影响。
                     let mut segments: Vec<Vec<(f64, f64)>> = Vec::new();
+                    // 快路径：大数据单调、无断点时直接从原始 x/y 抽稀，跳过物化整段中间
+                    // Vec（1M 点约 16MB）与额外的单调/分桶两趟扫描；输出逐点等同慢路径。
+                    if let Some(reduced) =
+                        decimate_min_max_fused(x, y, &tx, &ty, y_half_px, x_min, x_max, plot_w_px)
                     {
-                        let mut current: Vec<(f64, f64)> = Vec::new();
+                        segments.push(reduced);
+                    } else {
+                        // 慢路径：构建连续有效数据段（被 None 分隔），再逐段抽稀。含 NaN
+                        // 断点、非单调、点数不足等情形走此路径，行为与像素输出保持不变。
+                        // 首段预分配到点数上界，消除大数据折线逐点 push 时的反复扩容（0→N
+                        // 约 20 次翻倍 realloc，累计拷贝 ~2N 元素）。断点后的后续段罕见，任其
+                        // 自然增长，避免多段场景下每段都按 N 过量预留。
+                        let mut current: Vec<(f64, f64)> = Vec::with_capacity(x.len());
                         for (xv, yv) in x.iter().zip(y.iter()) {
                             let txv = tx(*xv);
                             let tyv = ty(*yv);
@@ -1191,6 +1399,11 @@ where
                         }
                         if current.len() >= 2 {
                             segments.push(current);
+                        }
+                        for seg in segments.iter_mut() {
+                            if let Some(reduced) = decimate_min_max(seg, x_min, x_max, plot_w_px) {
+                                *seg = reduced;
+                            }
                         }
                     }
                     if linestyle != " " {
