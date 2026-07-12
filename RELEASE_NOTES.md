@@ -8,11 +8,27 @@ based on [Keep a Changelog](https://keepachangelog.com/), and the project follow
 
 ---
 
+## v0.2.9 — 2026-07-12
+
+Rendering performance and CI maintenance. No API changes.
+
+### Performance
+
+- **Multi-threaded image rendering**: `imshow` row rendering and image
+  down-sampling now run across multiple threads (bounded by available cores).
+
+### Maintenance
+
+- Adjusted the CI test matrix and aligned the `clippy` lint configuration
+  across workflows.
+
+---
+
 ## v0.2.8 — 2026-07-11
 
 Performance-focused release. Large-dataset rendering paths were rewritten to avoid
-materializing millions of Python objects, and image rendering was parallelized.
-All optimizations are automatic and require no API changes.
+materializing millions of Python objects. All optimizations are automatic and
+require no API changes.
 
 ### Performance
 
@@ -26,8 +42,6 @@ All optimizations are automatic and require no API changes.
   preserving visual shape while cutting render time.
 - **Glyph cache**: rendered glyph coverage is cached by `(font, char, size)`,
   speeding up text-heavy figures.
-- **Multi-threaded image rendering**: `imshow` row rendering and image
-  down-sampling now run across multiple threads (bounded by available cores).
 
 ---
 
