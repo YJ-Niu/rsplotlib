@@ -850,4 +850,4 @@ MIT License - See the [LICENSE](LICENSE) file for details.
 
 ---
 
-_Last updated: 2026-07-11 / Version v0.2.8_
+_Last updated: 2026-07-12 / Version v0.2.9_
