@@ -46,6 +46,21 @@
 - **统计图表**：直方图、箱线图、饼图、误差棒图、茎叶图、阶梯图
 - **高级图表**：堆叠面积图、热力图/图像显示、填充区域图
 
+### 颜色映射与颜色条
+
+- **50+ 内置颜色映射**：`viridis`、`plasma`、`inferno`、`magma`、`cividis`、`jet`、`coolwarm`、`RdBu`、`Blues`、`Greens`、`Reds`、`hot`、`cool`、`gray`、`terrain`、`twilight` 等，任意名称加 `_r` 后缀即可反转（如 `viridis_r`）
+- **颜色条 Colorbar**：`plt.colorbar()` / `fig.colorbar()`，Rust 渲染，支持 `location`、`orientation`、`shrink`、`aspect`、`pad`、`fraction`、`label`、`extend`、`ticks`、`format`
+- **颜色归一化**：`LogNorm` / `Normalize`（来自 `rsplotlib.colors`），通过 `norm=` 参数使用
+
+### 图像输入 / 输出
+
+- **`imshow`**：支持二维数据（经颜色映射，可用对数归一化）与 RGB/RGBA 图像，支持 `alpha`、`origin`、`interpolation` 控制
+- **`imread` / `imsave`**：读写 PNG/JPEG 图像
+
+### 数学公式渲染
+
+- **LaTeX 风格 `$...$`**：上下标、`\frac`、`\sqrt[n]{}`、希腊字母、重音与字体样式命令，在标题、轴标签、`text`、`annotate`、图例、柱状图标签中生效
+
 ### 辅助元素
 
 - **参考线**：水平参考线 (`axhline`)、垂直参考线 (`axvline`)
@@ -332,24 +347,27 @@ plt.savefig('module_level.png')
 
 ### 绘图函数
 
-| 函数             | 说明                        | 模块级接口 | Axes 接口 |
-| ---------------- | --------------------------- | ---------- | --------- |
-| `plot()`         | 折线图                      | ✅         | ✅        |
-| `scatter()`      | 散点图（支持颜色/大小数组） | ✅         | ✅        |
-| `bar()`          | 柱状图                      | ✅         | ✅        |
-| `barh()`         | 水平柱状图                  | ✅         | ✅        |
-| `hist()`         | 直方图                      | ✅         | ✅        |
-| `pie()`          | 饼图                        | ✅         | ✅        |
-| `boxplot()`      | 箱线图                      | ✅         | ✅        |
-| `fill_between()` | 曲线间填充                  | ✅         | ✅        |
-| `errorbar()`     | 误差棒图                    | ✅         | ✅        |
-| `stem()`         | 茎叶图                      | ✅         | ✅        |
-| `step()`         | 阶梯图                      | ✅         | ✅        |
-| `imshow()`       | 图像/热力图                 | ✅         | ✅        |
-| `stackplot()`    | 堆叠面积图                  | ✅         | ✅        |
-| `semilogx()`     | x 轴对数坐标折线图          | ✅         | ✅        |
-| `semilogy()`     | y 轴对数坐标折线图          | ✅         | ✅        |
-| `loglog()`       | 双对数坐标折线图            | ✅         | ✅        |
+| 函数             | 说明                        | 模块级接口    | Axes 接口 |
+| ---------------- | --------------------------- | ------------- | --------- |
+| `plot()`         | 折线图                      | ✅            | ✅        |
+| `scatter()`      | 散点图（支持颜色/大小数组） | ✅            | ✅        |
+| `bar()`          | 柱状图                      | ✅            | ✅        |
+| `barh()`         | 水平柱状图                  | ✅            | ✅        |
+| `hist()`         | 直方图                      | ✅            | ✅        |
+| `pie()`          | 饼图                        | ✅            | ✅        |
+| `boxplot()`      | 箱线图                      | ✅            | ✅        |
+| `fill_between()` | 曲线间填充                  | ✅            | ✅        |
+| `errorbar()`     | 误差棒图                    | ✅            | ✅        |
+| `stem()`         | 茎叶图                      | ✅            | ✅        |
+| `step()`         | 阶梯图                      | ✅            | ✅        |
+| `imshow()`       | 图像/热力图                 | ✅            | ✅        |
+| `stackplot()`    | 堆叠面积图                  | ✅            | ✅        |
+| `semilogx()`     | x 轴对数坐标折线图          | ✅            | ✅        |
+| `semilogy()`     | y 轴对数坐标折线图          | ✅            | ✅        |
+| `loglog()`       | 双对数坐标折线图            | ✅            | ✅        |
+| `colorbar()`     | 为 mappable 添加颜色条      | ✅（plt/fig） | ❌        |
+| `imread()`       | 读取 PNG/JPEG 图像为数组    | ✅            | ❌        |
+| `imsave()`       | 将数组写出为 PNG/JPEG       | ✅            | ❌        |
 
 ### 辅助元素
 
@@ -531,6 +549,66 @@ ax.vlines(x, color=None, linestyle=None, linewidth=None)
 
 - `y` / `x` (list/array): 位置列表
 
+### Axes.imshow / plt.imshow
+
+将二维数据显示为热力图，或渲染 RGB/RGBA 图像。
+
+```python
+ax.imshow(x, cmap=None, norm=None, aspect=None, interpolation=None,
+          alpha=None, vmin=None, vmax=None, origin=None, extent=None)
+```
+
+**参数：**
+
+- `x` (二维数组或 HxWx3/4 图像): 标量场或 RGB(A) 图像
+- `cmap` (str): 二维数据的颜色映射名（默认 `'viridis'`），加 `_r` 反转
+- `norm` (`Normalize` / `LogNorm` / `'linear'` / `'log'`): 数值到颜色的映射
+- `interpolation` (str): `'none'` / `'nearest'` 为块状缩放，其余为平滑模式
+- `origin` (str): `'upper'`（默认）或 `'lower'`
+- `vmin` / `vmax` (float): 数值范围裁剪；`alpha` (float): 不透明度
+- 注意：`extent` 为兼容签名而接受，但当前被忽略
+
+```python
+im = ax.imshow([[1, 2], [3, 4]], cmap='plasma', origin='lower')
+```
+
+### colorbar
+
+为 mappable（如 `imshow` / `scatter` 的返回值）添加颜色条。
+
+```python
+plt.colorbar(mappable=None, ax=None, **kwargs)
+fig.colorbar(mappable=None, ax=None, **kwargs)
+```
+
+**生效的关键字参数：** `location`、`orientation`、`shrink`、`aspect`、`pad`、
+`fraction`、`label`、`extend`、`ticks`、`format`。其余 matplotlib 关键字虽被接受，
+但当前不生效。
+
+```python
+im = plt.imshow([[1, 2], [3, 4]], cmap='viridis')
+plt.colorbar(im, label='数值', shrink=0.8)
+```
+
+### 颜色归一化（LogNorm）
+
+```python
+from rsplotlib.colors import LogNorm
+plt.imshow(data, cmap='viridis', norm=LogNorm())
+plt.colorbar()
+```
+
+### 数学公式（`$...$`）
+
+所有承载文本的接口都支持美元符号之间的 LaTeX 风格公式，包括标题、轴标签、
+`text`、`annotate`、图例标签与柱状图标签。
+
+```python
+plt.title(r'$\alpha^2 + \frac{1}{2}\sqrt{x}$')
+```
+
+支持：上下标、`\frac`、`\sqrt[n]{}`、希腊字母、重音与字体样式命令。
+
 ---
 
 ## 性能优势
@@ -558,13 +636,17 @@ rsplotlib 在架构设计上通过"分层下沉"策略实现性能优化：
 
 ### 性能关键路径下沉到 Rust
 
-| 功能                        | 传统实现                            | rsplotlib 实现                  |
-| --------------------------- | ----------------------------------- | ------------------------------- |
-| `scatter(c=colors)`         | Python 层遍历每个点                 | Rust 层 `ScatterMulti` 统一渲染 |
-| `scatter(s=sizes)`          | Python 层遍历每个点                 | Rust 层统一大小数组处理         |
-| `hlines([y1, y2, y3, ...])` | Python `for` 循环多次调用 `axhline` | Rust 层单次调用批量处理         |
-| `vlines([x1, x2, x3, ...])` | Python `for` 循环多次调用 `axvline` | Rust 层单次调用批量处理         |
-| `savefig(dpi=300)`          | 无 DPI 支持 / Python 层缩放         | Rust 层直接写入 PNG DPI 元数据  |
+| 功能                             | 传统实现                            | rsplotlib 实现                  |
+| -------------------------------- | ----------------------------------- | ------------------------------- |
+| `scatter(c=colors)`              | Python 层遍历每个点                 | Rust 层 `ScatterMulti` 统一渲染 |
+| `scatter(s=sizes)`               | Python 层遍历每个点                 | Rust 层统一大小数组处理         |
+| `hlines([y1, y2, y3, ...])`      | Python `for` 循环多次调用 `axhline` | Rust 层单次调用批量处理         |
+| `vlines([x1, x2, x3, ...])`      | Python `for` 循环多次调用 `axvline` | Rust 层单次调用批量处理         |
+| `savefig(dpi=300)`               | 无 DPI 支持 / Python 层缩放         | Rust 层直接写入 PNG DPI 元数据  |
+| `hist()` / `boxplot()`（大数据） | Python 层物化每个数值               | 零拷贝缓冲区下沉到 Rust         |
+| 百万级点折线                     | 渲染每一段线段                      | 自动 min/max（M4）抽稀          |
+| 大图 `imshow`                    | 单线程逐像素                        | 多线程按行渲染                  |
+| 重复文本渲染                     | 每个字形重复栅格化                  | 按 (字体, 字符, 字号) 缓存字形  |
 
 ### 为什么选择 Rust + Python 混合架构
 
@@ -693,6 +775,9 @@ def axhspan(ymin, ymax, **kwargs):
 - 当前版本不支持 3D 绘图
 - 不支持动画/交互式图表
 - `contour` / `violinplot` / `hexbin` 为占位实现
+- `imshow(extent=...)` 为兼容签名而接受，但当前被忽略
+- `colorbar()` 仅部分 matplotlib 关键字生效（见 [colorbar](#colorbar)）
+- `data=` 当前仅 `scatter` 支持（`plot` 不支持）
 
 ---
 
@@ -750,7 +835,8 @@ MIT License — 详见 [LICENSE](LICENSE) 文件。
 ## 相关链接
 
 - **GitHub**: https://github.com/YJ-Niu/rsplotlib
+- **发行说明**: [RELEASE_NOTES_zh.md](RELEASE_NOTES_zh.md)
 
 ---
 
-_最后更新：2026-07-03 · 版本 v0.1.9_
+_最后更新：2026-07-11 · 版本 v0.2.8_

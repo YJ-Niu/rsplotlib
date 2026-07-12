@@ -14,21 +14,20 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
   test:
     name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # 覆盖最低支持版本 3.10、当前主力 3.13 与最新 3.14，三大平台全跑。
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.13", "3.14"]
-        # 补测最低支持版本 3.8；macOS(arm64) 对 3.8 支持不稳定，故仅在 Linux/Windows 上测。
-        include:
-          - os: ubuntu-latest
-            python-version: "3.10"
-          - os: windows-latest
-            python-version: "3.10"
     steps:
       - uses: actions/checkout@v4
 
@@ -79,4 +78,4 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
