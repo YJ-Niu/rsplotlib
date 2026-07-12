@@ -48,6 +48,21 @@
 - **Statistical Charts**: Histograms, box plots, pie charts, error bars, stem plots, step plots
 - **Advanced Charts**: Stacked area plots, heatmap/image display, fill-between regions
 
+### Colormaps & Colorbar
+
+- **50+ Built-in Colormaps**: `viridis`, `plasma`, `inferno`, `magma`, `cividis`, `jet`, `coolwarm`, `RdBu`, `Blues`, `Greens`, `Reds`, `hot`, `cool`, `gray`, `terrain`, `twilight`, and more - any name reversible with a `_r` suffix (e.g. `viridis_r`)
+- **Colorbar**: `plt.colorbar()` / `fig.colorbar()`, Rust-rendered, with `location`, `orientation`, `shrink`, `aspect`, `pad`, `fraction`, `label`, `extend`, `ticks`, `format`
+- **Color Normalization**: `LogNorm` / `Normalize` (from `rsplotlib.colors`) via the `norm=` argument
+
+### Image Input / Output
+
+- **`imshow`**: 2D data (via colormap, log-norm capable) and RGB/RGBA images, with `alpha`, `origin`, and `interpolation` control
+- **`imread` / `imsave`**: read and write PNG/JPEG images
+
+### Math Text Rendering
+
+- **LaTeX-style `$...$`**: superscripts/subscripts, `\frac`, `\sqrt[n]{}`, Greek letters, accents, and font-style commands - active in titles, axis labels, `text`, `annotate`, legend, and bar labels
+
 ### Annotation & Reference Elements
 
 - **Reference Lines**: Horizontal (`axhline`), vertical (`axvline`)
@@ -352,6 +367,9 @@ plt.savefig('module_level.png')
 | `semilogx()`     | X-axis log-scale line plot                | Yes          | Yes         |
 | `semilogy()`     | Y-axis log-scale line plot                | Yes          | Yes         |
 | `loglog()`       | Log-log scale line plot                   | Yes          | Yes         |
+| `colorbar()`     | Colorbar for a mappable                   | Yes (plt/fig)| No          |
+| `imread()`       | Read a PNG/JPEG image into an array       | Yes          | No          |
+| `imsave()`       | Write an array to PNG/JPEG                 | Yes          | No          |
 
 ### Annotation Elements
 
@@ -536,6 +554,67 @@ ax.vlines(x, color=None, linestyle=None, linewidth=None)
 
 - `y` / `x` (list/array): Position list
 
+### Axes.imshow / plt.imshow
+
+Display 2D data as a heatmap or render an RGB/RGBA image.
+
+```python
+ax.imshow(x, cmap=None, norm=None, aspect=None, interpolation=None,
+          alpha=None, vmin=None, vmax=None, origin=None, extent=None)
+```
+
+**Parameters:**
+
+- `x` (2D array or HxWx3/4 image): scalar field or RGB(A) image
+- `cmap` (str): colormap name for 2D data (default `'viridis'`); append `_r` to reverse
+- `norm` (`Normalize` / `LogNorm` / `'linear'` / `'log'`): value-to-color mapping
+- `interpolation` (str): `'none'` / `'nearest'` for block scaling, or a smooth mode
+- `origin` (str): `'upper'` (default) or `'lower'`
+- `vmin` / `vmax` (float): value range clamp; `alpha` (float): opacity
+- Note: `extent` is accepted for compatibility but currently ignored.
+
+```python
+im = ax.imshow([[1, 2], [3, 4]], cmap='plasma', origin='lower')
+```
+
+### colorbar
+
+Add a colorbar for a mappable (e.g. the return value of `imshow` / `scatter`).
+
+```python
+plt.colorbar(mappable=None, ax=None, **kwargs)
+fig.colorbar(mappable=None, ax=None, **kwargs)
+```
+
+**Effective keyword arguments:** `location`, `orientation`, `shrink`, `aspect`,
+`pad`, `fraction`, `label`, `extend`, `ticks`, `format`. Other matplotlib kwargs
+are accepted but currently have no effect.
+
+```python
+im = plt.imshow([[1, 2], [3, 4]], cmap='viridis')
+plt.colorbar(im, label='value', shrink=0.8)
+```
+
+### Color Normalization (LogNorm)
+
+```python
+from rsplotlib.colors import LogNorm
+plt.imshow(data, cmap='viridis', norm=LogNorm())
+plt.colorbar()
+```
+
+### Math Text (`$...$`)
+
+Any text-bearing API accepts LaTeX-style math between dollar signs, including
+titles, axis labels, `text`, `annotate`, legend labels, and bar labels.
+
+```python
+plt.title(r'$\alpha^2 + \frac{1}{2}\sqrt{x}$')
+```
+
+Supported: superscripts/subscripts, `\frac`, `\sqrt[n]{}`, Greek letters,
+accents, and font-style commands.
+
 ---
 
 ## Performance Advantages
@@ -572,9 +651,13 @@ rsplotlib achieves performance optimization through a layered-down architecture 
 | --------------------------- | ---------------------------------------------- | ------------------------------------- |
 | `scatter(c=colors)`         | Python iterates over every point               | Rust `ScatterMulti` unified rendering |
 | `scatter(s=sizes)`          | Python iterates over every point               | Rust unified size array processing    |
-| `hlines([y1, y2, y3, ...])` | Python `for` loop calling `axhline` repeatedly | Single Rust call, batch processing    |
-| `vlines([x1, x2, x3, ...])` | Python `for` loop calling `axvline` repeatedly | Single Rust call, batch processing    |
+| `hlines([y1, y2, y3, ...])` | Python `for` loop calling `axhline` repeatedly | Single Rust call, batch processing |
+| `vlines([x1, x2, x3, ...])` | Python `for` loop calling `axvline` repeatedly | Single Rust call, batch processing |
 | `savefig(dpi=300)`          | No DPI support / Python scaling                | Rust writes PNG DPI metadata directly |
+| `hist()` / `boxplot()` (large data) | Python materializes every value        | Zero-copy buffer push-down to Rust    |
+| Line plot with millions of points  | Renders every segment                   | Automatic min/max (M4) decimation     |
+| `imshow` on large images    | Single-threaded pixel loop                     | Multi-threaded row rendering          |
+| Repeated text rendering     | Re-rasterize each glyph                        | Glyph cache keyed by (font, char, size) |
 
 ### Why a Rust + Python Hybrid Architecture?
 
@@ -703,6 +786,9 @@ PRs are welcome! Please include:
 - 3D plotting is not supported in the current version
 - Animated/interactive charts are not supported
 - `contour` / `violinplot` / `hexbin` are placeholder implementations
+- `imshow(extent=...)` is accepted for signature compatibility but currently ignored
+- `colorbar()` honors only a subset of matplotlib kwargs (see [colorbar](#colorbar))
+- `data=` is currently supported by `scatter` only (not `plot`)
 
 ---
 
@@ -760,7 +846,8 @@ MIT License - See the [LICENSE](LICENSE) file for details.
 ## Related Links
 
 - **GitHub**: https://github.com/YJ-Niu/rsplotlib
+- **Release Notes**: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ---
 
-_Last updated: 2026-07-03 / Version v0.1.9_
+_Last updated: 2026-07-11 / Version v0.2.8_
