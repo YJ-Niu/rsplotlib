@@ -239,6 +239,10 @@ fn rounded_rect_points(x1: f64, y1: f64, x2: f64, y2: f64, rx: f64, ry: f64) -> 
 /// - `font_scale`: 字体缩放系数
 /// - `x_min`, `x_max`, `y_min`, `y_max`: 数据范围（log 刻度下为 log10 变换后的值）
 /// - `xlog`, `ylog`: 对应轴是否为对数刻度
+/// - `facecolor`: 图例框背景色，`None` 时用默认白色
+/// - `framealpha`: 图例框背景不透明度，`None` 时用默认 0.85
+/// - `edgecolor`: 图例框边框色，`None` 时用默认浅灰
+/// - `fontsize`: 图例文字基础字号（point），`None` 时用默认 11.0
 #[allow(clippy::too_many_arguments)]
 pub fn draw_legend<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
@@ -252,6 +256,10 @@ pub fn draw_legend<DB: DrawingBackend>(
     y_max: f64,
     xlog: bool,
     ylog: bool,
+    facecolor: Option<RgbColor>,
+    framealpha: Option<f64>,
+    edgecolor: Option<RgbColor>,
+    fontsize: Option<f64>,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
@@ -279,8 +287,10 @@ where
             y_range * 0.001
         };
 
-        // 图例文字像素字号（与下方文字绘制保持一致）。
-        let label_fs = scale_font(11.0 * DEFAULT_FONT_SCALE, font_scale);
+        // 图例文字像素字号（与下方文字绘制保持一致）。基础字号可由调用方覆盖
+        // （如 stylely 缩放），默认 11.0 point。
+        let base_fs = fontsize.unwrap_or(11.0);
+        let label_fs = scale_font(base_fs * DEFAULT_FONT_SCALE, font_scale);
 
         // 横向布局（像素）：左内边距 | 线条/marker 样本 | 间隙 | 文字 | 右内边距。
         // 宽度按最宽标签自适应，避免长文字溢出图例框。
@@ -409,8 +419,13 @@ where
             }
         };
 
-        let bg_fill: ShapeStyle = RGBColor(255, 255, 255).mix(0.85).filled();
-        let bg_border: ShapeStyle = RGBColor(180, 180, 180).stroke_width(1);
+        // 图例框背景/边框样式：默认沿用半透明白底 + 浅灰边框；
+        // 调用方（如 stylely 捕获的样式）可覆盖为任意颜色与不透明度。
+        let fc = facecolor.unwrap_or(RgbColor(255, 255, 255));
+        let alpha = framealpha.unwrap_or(0.85).clamp(0.0, 1.0);
+        let ec = edgecolor.unwrap_or(RgbColor(180, 180, 180));
+        let bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
+        let bg_border: ShapeStyle = to_plotters_color(ec).stroke_width(1);
 
         // 圆角半径：以像素为基准，再按数据/像素比例换算到数据坐标，
         // 使 x、y 两个方向的圆角在视觉上一致（圆弧而非椭圆弧）。

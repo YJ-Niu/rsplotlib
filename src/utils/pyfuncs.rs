@@ -187,9 +187,18 @@ pub fn grid(
 }
 
 #[pyfunction]
-#[pyo3(signature = (loc="best"))]
-pub fn legend(py: Python, loc: &str) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).legend(loc);
+#[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]
+pub fn legend(
+    py: Python,
+    loc: &str,
+    facecolor: Option<String>,
+    framealpha: Option<f64>,
+    edgecolor: Option<String>,
+    fontsize: Option<f64>,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .legend(loc, facecolor, framealpha, edgecolor, fontsize);
     Ok(())
 }
 

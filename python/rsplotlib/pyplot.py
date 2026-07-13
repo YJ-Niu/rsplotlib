@@ -1909,8 +1909,37 @@ def legend(loc='best', **kwargs):
         loc: 图例位置 ('best', 'upper right', 'upper left', 'lower left',
               'lower right', 'upper center', 'lower center',
               'center left', 'center right', 'center')
+        facecolor: 图例框背景色 (颜色名或 '#RRGGBB')，默认沿用半透明白底
+        framealpha: 图例框背景不透明度 (0-1)，默认 0.85
+        edgecolor: 图例框边框色，默认浅灰
+        fontsize: 图例文字字号 (point)，默认 11.0
     """
-    return _rsplotlib.legend(loc)
+    facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
+    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize)
+
+
+def _legend_frame_kwargs(kwargs):
+    """从 kwargs 提取并规范化图例框样式 (facecolor, framealpha, edgecolor, fontsize)。
+
+    非字符串颜色一律忽略 (置 None)，交由后端使用默认值。
+    """
+    facecolor = kwargs.get('facecolor')
+    edgecolor = kwargs.get('edgecolor')
+    framealpha = kwargs.get('framealpha')
+    fontsize = kwargs.get('fontsize')
+    if not isinstance(facecolor, str):
+        facecolor = None
+    if not isinstance(edgecolor, str):
+        edgecolor = None
+    try:
+        framealpha = None if framealpha is None else float(framealpha)
+    except (TypeError, ValueError):
+        framealpha = None
+    try:
+        fontsize = None if fontsize is None else float(fontsize)
+    except (TypeError, ValueError):
+        fontsize = None
+    return facecolor, framealpha, edgecolor, fontsize
 
 
 def xlim(left=None, right=None, **kwargs):
@@ -2992,6 +3021,7 @@ def _patch_axes():
         loc = kwargs.pop('loc', 'best')
         handles = kwargs.pop('handles', None)
         labels = kwargs.pop('labels', None)
+        facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
         if len(args) == 2:
             handles, labels = args[0], args[1]
         elif len(args) == 1:
@@ -3018,8 +3048,9 @@ def _patch_axes():
                 if not (isinstance(marker, str) and marker.strip() not in ('', 'none')):
                     marker = None
                 entries.append((_render_mathtext(str(lbl)), color, ls, marker, lw))
-            return self.set_legend_entries(entries, loc)
-        return _orig_legend(self, loc)
+            return self.set_legend_entries(
+                entries, loc, facecolor, framealpha, edgecolor, fontsize)
+        return _orig_legend(self, loc, facecolor, framealpha, edgecolor, fontsize)
 
     _rs.Axes.legend = _legend
 

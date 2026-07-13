@@ -766,6 +766,10 @@ pub struct Axes {
     pub legend_loc: Option<String>,
     pub element_count: usize,
     pub legend_labels: Vec<(String, RgbColor, String, Option<String>, f64)>,
+    pub legend_facecolor: Option<String>,
+    pub legend_framealpha: Option<f64>,
+    pub legend_edgecolor: Option<String>,
+    pub legend_fontsize: Option<f64>,
     pub xscale: String,
     pub yscale: String,
     pub xticks_val: Option<Vec<f64>>,
@@ -862,6 +866,10 @@ impl Clone for Axes {
             legend_loc: self.legend_loc.clone(),
             element_count: self.element_count,
             legend_labels: self.legend_labels.clone(),
+            legend_facecolor: self.legend_facecolor.clone(),
+            legend_framealpha: self.legend_framealpha,
+            legend_edgecolor: self.legend_edgecolor.clone(),
+            legend_fontsize: self.legend_fontsize,
             xscale: self.xscale.clone(),
             yscale: self.yscale.clone(),
             xticks_val: self.xticks_val.clone(),
@@ -1029,6 +1037,10 @@ impl Axes {
             legend_loc: None,
             element_count: 0,
             legend_labels: Vec::new(),
+            legend_facecolor: None,
+            legend_framealpha: None,
+            legend_edgecolor: None,
+            legend_fontsize: None,
             xscale: "linear".to_string(),
             yscale: "linear".to_string(),
             xticks_val: None,
@@ -1866,18 +1878,41 @@ impl Axes {
         }
     }
 
-    #[pyo3(signature = (loc="best"))]
-    pub fn legend(&mut self, loc: &str) {
+    #[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]
+    pub fn legend(
+        &mut self,
+        loc: &str,
+        facecolor: Option<String>,
+        framealpha: Option<f64>,
+        edgecolor: Option<String>,
+        fontsize: Option<f64>,
+    ) {
         self.legend_loc = Some(loc.to_string());
+        if facecolor.is_some() {
+            self.legend_facecolor = facecolor;
+        }
+        if framealpha.is_some() {
+            self.legend_framealpha = framealpha;
+        }
+        if edgecolor.is_some() {
+            self.legend_edgecolor = edgecolor;
+        }
+        if fontsize.is_some() {
+            self.legend_fontsize = fontsize;
+        }
     }
 
     /// 用显式的 (label, color, linestyle, marker, linewidth) 条目替换图例内容并显示。
     /// 供 Python 端 `ax.legend(handles, labels)` 使用：从 handles 取样式、labels 取文本。
-    #[pyo3(signature = (entries, loc="best"))]
+    #[pyo3(signature = (entries, loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]
     pub fn set_legend_entries(
         &mut self,
         entries: Vec<(String, String, String, Option<String>, f64)>,
         loc: &str,
+        facecolor: Option<String>,
+        framealpha: Option<f64>,
+        edgecolor: Option<String>,
+        fontsize: Option<f64>,
     ) {
         self.legend_labels = entries
             .into_iter()
@@ -1887,6 +1922,18 @@ impl Axes {
             })
             .collect();
         self.legend_loc = Some(loc.to_string());
+        if facecolor.is_some() {
+            self.legend_facecolor = facecolor;
+        }
+        if framealpha.is_some() {
+            self.legend_framealpha = framealpha;
+        }
+        if edgecolor.is_some() {
+            self.legend_edgecolor = edgecolor;
+        }
+        if fontsize.is_some() {
+            self.legend_fontsize = fontsize;
+        }
     }
 
     #[pyo3(signature = (_v=None))]
@@ -2684,6 +2731,10 @@ impl Axes {
     pub fn cla(&mut self) {
         self.elements.clear();
         self.legend_labels.clear();
+        self.legend_facecolor = None;
+        self.legend_framealpha = None;
+        self.legend_edgecolor = None;
+        self.legend_fontsize = None;
         self.element_count = 0;
     }
 
@@ -3536,6 +3587,14 @@ impl Axes {
         if let Some(loc) = &self.legend_loc.clone()
             && !self.legend_labels.is_empty()
         {
+            let legend_facecolor = self
+                .legend_facecolor
+                .as_deref()
+                .map(|c| parse_color(c, 0).unwrap_or(RgbColor(255, 255, 255)));
+            let legend_edgecolor = self
+                .legend_edgecolor
+                .as_deref()
+                .map(|c| parse_color(c, 0).unwrap_or(RgbColor(180, 180, 180)));
             crate::figure::axes_legend::draw_legend(
                 chart,
                 Some(loc),
@@ -3548,6 +3607,10 @@ impl Axes {
                 y_max,
                 xlog,
                 ylog,
+                legend_facecolor,
+                self.legend_framealpha,
+                legend_edgecolor,
+                self.legend_fontsize,
             )?;
         }
 
