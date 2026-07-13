@@ -18,6 +18,29 @@ def _get_rcparams():
     return mpl.rcParams
 
 
+# 模块级 rcParams，与 mpl.rcParams 为同一单例，供 plt.rcParams 使用
+rcParams = mpl.rcParams
+
+
+def rc(group, **kwargs):
+    """设置全局 rcParams（matplotlib.rc 兼容）。
+
+    - ``rc('lines', linewidth=2, color='r')`` 等价于设置
+      ``rcParams['lines.linewidth'] = 2`` 与 ``rcParams['lines.color'] = 'r'``。
+    - ``group`` 也可为分组名的列表/元组，如 ``('xtick', 'ytick')``。
+    - 传入 dict 时按 ``{完整键: 值}`` 直接更新 rcParams（空 dict 为空操作）。
+    """
+    if isinstance(group, dict):
+        for key, value in group.items():
+            rcParams[key] = value
+        return
+    if isinstance(group, str):
+        group = (group,)
+    for g in group:
+        for name, value in kwargs.items():
+            rcParams[f'{g}.{name}'] = value
+
+
 # ==================== 内部辅助函数 ====================
 
 def _to_list(obj):
@@ -2445,9 +2468,26 @@ def show(**kwargs):
     return _rsplotlib.show()
 
 
+def isinteractive():
+    """交互模式状态。rsplotlib 使用非交互 (Agg) 后端，恒为 False（与 matplotlib 非交互模式一致）。"""
+    return False
+
+
+def draw(*args, **kwargs):
+    """重绘当前 figure。非交互后端下为空操作（实际渲染在 savefig/show 时进行）。"""
+    return None
+
+
 def gca(**kwargs):
-    """获取当前 Axes。"""
-    return _rsplotlib.gca()
+    """获取当前 Axes；无当前 figure/axes 时自动新建（与 matplotlib 一致）。"""
+    try:
+        return _rsplotlib.gca()
+    except Exception:
+        pass
+    fig = _get_figure()
+    if fig is None:
+        fig = figure()
+    return fig.add_subplot()
 
 
 def gcf(**kwargs):
@@ -3057,6 +3097,13 @@ def _patch_axes():
         return _orig_axis(self, None)
 
     _rs.Axes.axis = _axis
+
+    # autoscale(enable=True, axis='both', tight=None): rsplotlib 默认按数据自动计算
+    # 坐标范围，启用自动缩放即默认行为；关闭 (enable=False) 当前不支持冻结范围，按空操作处理。
+    def _autoscale(self, enable=True, axis='both', tight=None):
+        return None
+
+    _rs.Axes.autoscale = _autoscale
 
     # 文本类方法：把 matplotlib mathtext ($...$) 转成 Unicode 后再下沉到 Rust。
     # OO API (ax.set_xlabel / ax.text ...) 不经过模块级 plt.* 函数，需在此单独接入。
