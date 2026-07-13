@@ -28,11 +28,10 @@ Thumbs.db
 
 # Data / plots
 testing/
-test/
+test_plot/
 test*.py
 *.png
 main*.py
-data/
 .trae/
 debug.md
 out/
@@ -43,3 +42,4 @@ plots*.py
 .venv
 .env
 .env.local
+.flake8
