@@ -1403,7 +1403,8 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0):
         plt.grid(True, **grid_kw)
 
 
-def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle'):
+def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',
+            font_scale: float = 3.0):
     """
     Loads the rc-params from the specified file (file must be located in skrf/data).
 
@@ -1414,6 +1415,10 @@ def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle'):
         by default {}
     style_file : str, optional
         style file, by default 'skrf.mplstyle'
+    font_scale : float, optional
+        multiplier applied to the style's font and tick-label sizes, by default
+        3.0. The style file's base sizes render small at the rsplotlib backend's
+        resolution, so they are enlarged for readability.
 
     Notes
     -----
@@ -1435,8 +1440,7 @@ def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle'):
     style = _read_mplstyle(os.path.join(pwd, style_file))
     if rc_dict:
         style.update(rc_dict)
-
-    _apply_style(plt, style)
+    _apply_style(plt, style, font_scale)
 
 
 # Network Set Plotting Commands
