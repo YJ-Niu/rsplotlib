@@ -421,9 +421,20 @@ where
 
         // 图例框背景/边框样式：默认沿用半透明白底 + 浅灰边框；
         // 调用方（如 stylely 捕获的样式）可覆盖为任意颜色与不透明度。
+        // 当背景色接近白色且未指定边框色时，自动使用稍深的灰色以确保可见性。
         let fc = facecolor.unwrap_or(RgbColor(255, 255, 255));
         let alpha = framealpha.unwrap_or(0.85).clamp(0.0, 1.0);
-        let ec = edgecolor.unwrap_or(RgbColor(180, 180, 180));
+        let ec = if let Some(c) = edgecolor {
+            c
+        } else {
+            let luminance =
+                (fc.0 as f64 * 0.299 + fc.1 as f64 * 0.587 + fc.2 as f64 * 0.114) / 255.0;
+            if luminance > 0.9 {
+                RgbColor(153, 153, 153)
+            } else {
+                RgbColor(180, 180, 180)
+            }
+        };
         let bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
         let bg_border: ShapeStyle = to_plotters_color(ec).stroke_width(1);
 

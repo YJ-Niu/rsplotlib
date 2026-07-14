@@ -1050,7 +1050,7 @@ impl Axes {
             is_twin_x: false,
             is_twin_y: false,
             twin_axes: Vec::new(),
-            facecolor: "white".to_string(),
+            facecolor: "#FEFEFE".to_string(),
             spine_top: true,
             spine_bottom: true,
             spine_left: true,
@@ -1096,6 +1096,22 @@ impl Axes {
             secondary_x: None,
             secondary_y: None,
         }
+    }
+
+    /// matplotlib 兼容：返回本坐标轴上所有折线（plot 生成的 Line2D）句柄列表。
+    /// 与 matplotlib 语义一致，仅收集 Line 元素（不含 scatter/bar/fill 等）。
+    fn get_lines(&self, py: Python<'_>) -> PyResult<Vec<Py<Line2D>>> {
+        let mut out = Vec::new();
+        for (index, elem) in self.elements.iter().enumerate() {
+            if let PlotElement::Line { .. } = elem {
+                let line = Line2D {
+                    parent: self.self_py.as_ref().map(|p| p.clone_ref(py)),
+                    index,
+                };
+                out.push(Py::new(py, line)?);
+            }
+        }
+        Ok(out)
     }
 
     #[pyo3(signature = (x, y, fmt=None, label=None, color=None, linestyle="-", marker=None, linewidth=1.5, lw=None, c=None, ls=None, markersize=None, markeredgewidth=None, markerfacecolor=None, markeredgecolor=None, solid_capstyle=None))]

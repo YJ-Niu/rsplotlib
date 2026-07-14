@@ -93,6 +93,10 @@ def _legend(target, *args, **kwargs):
     """
     for key, value in _STYLE_LEGEND_KW.items():
         kwargs.setdefault(key, value)
+    if 'edgecolor' not in kwargs:
+        kwargs['edgecolor'] = '#999999'
+    if 'facecolor' not in kwargs:
+        kwargs['facecolor'] = '#f5f5f5'
     return target.legend(*args, **kwargs)
 
 
@@ -380,8 +384,7 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
     ax.plot([-smithR, smithR], [0, 0], color='k', lw=0.5)
     ax.grid(False)
     # Set axis limits by plotting white points so zooming works properly
-    ax.plot(smithR*np.array([-1.1, 1.1]), smithR *
-            np.array([-1.1, 1.1]), 'w.', markersize=0)
+    ax.plot(smithR*np.array([-1.1, 1.1]), smithR * np.array([-1.1, 1.1]), 'w.', markersize=0)
     ax.axis('image')  # Combination of 'equal' and 'tight'
 
     if not border:
@@ -389,7 +392,6 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
         ax.set_yticks([])
         for _name, spine in ax.spines.items():
             spine.set_color('none')
-
     if draw_labels:
         # Clear axis
         ax.set_xticks([])
@@ -406,9 +408,6 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
 
             # Annotate real part
             for value in rLightList:
-                # Set radius of real part's label; offset slightly left (Z
-                # chart, y_flip_sign == 1) or right (Y chart, y_flip_sign == -1)
-                # so label doesn't overlap chart's circles
                 rho = (value - 1)/(value + 1) - y_flip_sign*0.01
                 if y_flip_sign == 1:
                     halignstyle = "right"
@@ -418,18 +417,21 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
                     value = 1/value
                 ax.annotate(
                     str(value * ref_imm),
-                    xy=(rho * smithR, 0.01),
-                    xytext=(rho * smithR, 0.01),
-                    ha=halignstyle, va="baseline")
+                    xy=(rho * smithR, 0),
+                    xytext=(rho * smithR, 0),
+                    ha=halignstyle, va="top", fontsize=14)
 
             # Annotate imaginary part
-            radialScaleFactor = 1.01  # Scale radius of label position by this
+            if len(xLightList) == 10:
+                radialScaleFactor = [1.02, 1.03, 1.04, 1.05, 1.06, 1.07, 1.08, 1.1, 1.08, 1.07]  # Scale radius of label position by this
+            else:
+                radialScaleFactor = [min(1.02 + i*0.01, 1.1) for i in range(len(xLightList))]
             # factor. Making it >1 places the label
             # outside the Smith chart's circle
-            for value in xLightList:
+            for i, value in enumerate(xLightList):
                 # Transforms from complex to cartesian
                 S = (1j*value - 1) / (1j*value + 1)
-                S *= smithR * radialScaleFactor
+                S *= smithR * radialScaleFactor[i]
                 rhox = S.real
                 rhoy = S.imag * y_flip_sign
 
@@ -451,19 +453,19 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
                 ax.annotate(
                     str(value * ref_imm) + 'j', xy=(rhox, rhoy),
                     xytext=(rhox, rhoy),
-                    ha=halignstyle, va=valignstyle)
+                    ha=halignstyle, va=valignstyle, fontsize=14)
 
             # Annotate 0 and inf
             if y_flip_sign == 1:  # z and zy charts
                 label_left, label_right = '0.0', r'$\infty$'
             else:  # y and yz charts
                 label_left, label_right = r'$\infty$', '0.0'
-            ax.annotate(label_left, xy=(-1.02, 0), xytext=(-1.02, 0),
-                        ha="right", va="center")
+            ax.annotate(label_left, xy=(-1.04, -0.03), xytext=(-1.04, -0.03),
+                        ha="right", va="center", fontsize=14)
             ax.annotate(
                 label_right, xy=(
-                    radialScaleFactor, 0), xytext=(
-                    radialScaleFactor, 0), ha="left", va="center")
+                    1.08, -0.03), xytext=(
+                    1.08, -0.03), ha="left", va="center", fontsize=14)
 
             # annotate vswr circles
             for vswr in vswrVeryLightList:
@@ -471,7 +473,7 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
 
                 ax.annotate(str(vswr), xy=(0, rhoy*smithR),
                             xytext=(0, rhoy*smithR), ha="center", va="bottom",
-                            color='grey', size='smaller')
+                            color='grey', fontsize=14)
 
     # rasterise the collected contours, clipped to the chart boundary
     for cx, cy, radius, color in contour:
@@ -533,6 +535,11 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
         ax.autoscale(True, 'x', True)
         ax.autoscale(True, 'y', False)
 
+        ylim = ax.get_ylim()
+        y_range = ylim[1] - ylim[0]
+        padding = y_range * 0.1
+        ax.set_ylim(ylim[0] - padding, ylim[1] + padding)
+
     if plt.isinteractive():
         plt.draw()
 
@@ -592,8 +599,7 @@ def plot_polar(theta: NumberLike, r: NumberLike,
             # So, passing a axe projection not polar is probably undesired
             warnings.warn(
                 f"Projection of the Axes passed as `ax` is not 'polar' but is {
-                    ax.name}." +
-                "See rsplotlib documentation to create a polar plot or call this function without the `ax` parameter.",
+                    ax.name}." + "See rsplotlib documentation to create a polar plot or call this function without the `ax` parameter.",
                 stacklevel=2)
 
     ax.plot(theta, r, *args, **kwargs)
@@ -1199,6 +1205,7 @@ def plot_s_smith(
         draw_labels=False,
         label_axes=False,
         draw_vswr=None,
+        draw_chart=True,
         *args,
         **kwargs):
     r"""
@@ -1270,8 +1277,10 @@ def plot_s_smith(
         generate_label = False
 
     # draw the chart once (rsplotlib has no drawn-patch introspection)
-    smith(ax=ax, smithR=r, chart_type=chart_type,
-          draw_labels=draw_labels, draw_vswr=draw_vswr)
+    # only draw the smith chart background if requested
+    if draw_chart:
+        smith(ax=ax, smithR=r, chart_type=chart_type,
+              draw_labels=draw_labels, draw_vswr=draw_vswr)
 
     for m in M:
         for n in N:
@@ -1287,7 +1296,7 @@ def plot_s_smith(
     # draw legend
     if show_legend:
         _legend(ax)
-    ax.axis(np.array([-1.1, 1.1, -1.1, 1.1])*r)
+    ax.axis(np.array([-1.25, 1.25, -1.25, 1.25])*r)
 
     if label_axes:
         ax.set_xlabel('Real')
@@ -1439,13 +1448,15 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     _STYLE_LEGEND_KW.clear()
     if ax_fc:
         _STYLE_LEGEND_KW['facecolor'] = ax_fc
-    legend_edge = _mplstyle_color(style.get('axes.edgecolor'))
+    legend_edge = _mplstyle_color(style.get('legend.edgecolor')) or _mplstyle_color(style.get('axes.edgecolor'))
     if legend_edge:
         _STYLE_LEGEND_KW['edgecolor'] = legend_edge
+    elif ax_fc and ax_fc in ('white', '#ffffff', '#fff', (1.0, 1.0, 1.0), '1', '1.0'):
+        _STYLE_LEGEND_KW['edgecolor'] = '#999999'
     framealpha = _num('legend.framealpha')
     _STYLE_LEGEND_KW['framealpha'] = 0.5 if framealpha is None else framealpha
     # shrink legend text 30% relative to rsplotlib's default 11pt base size
-    # (rsplotlib ignores legend.fontsize rcParams, so set it explicitly here).
+    # (rsplotlib ignores legend. rcParams, so set it explicitly here).
     _STYLE_LEGEND_KW['fontsize'] = 11.0 * 0.7
 
     tick_kw = {}
@@ -1463,8 +1474,7 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
 
     grid_val = style.get('axes.grid', False)
     grid_on = grid_val is True or (
-        isinstance(grid_val, str)
-        and grid_val.strip().lower() in ('true', '1', 'yes', 'on'))
+        isinstance(grid_val, str) and grid_val.strip().lower() in ('true', '1', 'yes', 'on'))
     if grid_on:
         grid_kw = {}
         grid_color = _mplstyle_color(style.get('grid.color'))
@@ -1686,10 +1696,8 @@ def plot_uncertainty_bounds_component(
             ntwk_std = self.__getattribute__('std_'+attribute)
             ntwk_std.s = n_deviations * ntwk_std.s
 
-            upper_bound = (ntwk_mean.s[:, m, n] +
-                           ntwk_std.s[:, m, n]).squeeze()
-            lower_bound = (ntwk_mean.s[:, m, n] -
-                           ntwk_std.s[:, m, n]).squeeze()
+            upper_bound = (ntwk_mean.s[:, m, n] + ntwk_std.s[:, m, n]).squeeze()
+            lower_bound = (ntwk_mean.s[:, m, n] - ntwk_std.s[:, m, n]).squeeze()
 
             if ppf is not None:
                 if type == 'bar':
@@ -1710,8 +1718,11 @@ def plot_uncertainty_bounds_component(
                 ntwk_mean.plot_s_re(ax=ax, m=m, n=n, **kwargs)
                 if color_error is None:
                     color_error = ax.get_lines()[-1].get_color()
+                # plot the mean via plot_s_re against frequency.f_scaled, so the
+                # fill band must share that same x scale (rsplotlib ignores the
+                # scale_frequency_ticks FuncFormatter, see Network.plot_attribute)
                 ax.fill_between(
-                    ntwk_mean.frequency.f,
+                    ntwk_mean.frequency.f_scaled,
                     lower_bound.real,
                     upper_bound.real,
                     alpha=alpha,
@@ -1723,7 +1734,7 @@ def plot_uncertainty_bounds_component(
                 ntwk_mean.plot_s_re(ax=ax, m=m, n=n, **kwargs)
                 if color_error is None:
                     color_error = ax.get_lines()[-1].get_color()
-                ax.errorbar(ntwk_mean.frequency.f[::markevery_error],
+                ax.errorbar(ntwk_mean.frequency.f_scaled[::markevery_error],
                             ntwk_mean.s_re[:, m, n].squeeze()[
                     ::markevery_error],
                     yerr=ntwk_std.s_mag[:, m, n].squeeze()[
