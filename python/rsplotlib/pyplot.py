@@ -18,6 +18,29 @@ def _get_rcparams():
     return mpl.rcParams
 
 
+# 模块级 rcParams，与 mpl.rcParams 为同一单例，供 plt.rcParams 使用
+rcParams = mpl.rcParams
+
+
+def rc(group, **kwargs):
+    """设置全局 rcParams（matplotlib.rc 兼容）。
+
+    - ``rc('lines', linewidth=2, color='r')`` 等价于设置
+      ``rcParams['lines.linewidth'] = 2`` 与 ``rcParams['lines.color'] = 'r'``。
+    - ``group`` 也可为分组名的列表/元组，如 ``('xtick', 'ytick')``。
+    - 传入 dict 时按 ``{完整键: 值}`` 直接更新 rcParams（空 dict 为空操作）。
+    """
+    if isinstance(group, dict):
+        for key, value in group.items():
+            rcParams[key] = value
+        return
+    if isinstance(group, str):
+        group = (group,)
+    for g in group:
+        for name, value in kwargs.items():
+            rcParams[f'{g}.{name}'] = value
+
+
 # ==================== 内部辅助函数 ====================
 
 def _to_list(obj):
@@ -1838,16 +1861,23 @@ def title(label, fontdict=None, loc=None, **kwargs):
         color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
 
     loc: 标题水平位置，可选 'left'、'center'、'right'，默认 'center'。
+    pad: 标题与数据区顶部的间距（points，默认 5.0）。
 
     用法:
         plt.title("标题")
         plt.title("标题", fontdict={"family": "Courier", "size": 18, "color": "red"})
         plt.title("标题", fontsize=18, color='b')
         plt.title("标题", loc="left")
+        plt.title("第一行\n第二行", pad=0.02)
     """
     family, size, color = _font_props(fontdict, kwargs)
-    # 字体族名的解析与注册由 Rust 层的 set_title 统一处理。
-    return _rsplotlib.title(_render_mathtext(label), color, size, family, loc)
+    fd = fontdict or {}
+    pad = kwargs.get('pad') or fd.get('pad')
+    try:
+        pad = None if pad is None else float(pad)
+    except (TypeError, ValueError):
+        pad = None
+    return _rsplotlib.title(_render_mathtext(label), color, size, family, loc, pad)
 
 
 def suptitle(t, **kwargs):
@@ -1886,8 +1916,37 @@ def legend(loc='best', **kwargs):
         loc: 图例位置 ('best', 'upper right', 'upper left', 'lower left',
               'lower right', 'upper center', 'lower center',
               'center left', 'center right', 'center')
+        facecolor: 图例框背景色 (颜色名或 '#RRGGBB')，默认沿用半透明白底
+        framealpha: 图例框背景不透明度 (0-1)，默认 0.85
+        edgecolor: 图例框边框色，默认浅灰
+        fontsize: 图例文字字号 (point)，默认 11.0
     """
-    return _rsplotlib.legend(loc)
+    facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
+    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize)
+
+
+def _legend_frame_kwargs(kwargs):
+    """从 kwargs 提取并规范化图例框样式 (facecolor, framealpha, edgecolor, fontsize)。
+
+    非字符串颜色一律忽略 (置 None)，交由后端使用默认值。
+    """
+    facecolor = kwargs.get('facecolor')
+    edgecolor = kwargs.get('edgecolor')
+    framealpha = kwargs.get('framealpha')
+    fontsize = kwargs.get('fontsize')
+    if not isinstance(facecolor, str):
+        facecolor = None
+    if not isinstance(edgecolor, str):
+        edgecolor = None
+    try:
+        framealpha = None if framealpha is None else float(framealpha)
+    except (TypeError, ValueError):
+        framealpha = None
+    try:
+        fontsize = None if fontsize is None else float(fontsize)
+    except (TypeError, ValueError):
+        fontsize = None
+    return facecolor, framealpha, edgecolor, fontsize
 
 
 def xlim(left=None, right=None, **kwargs):
@@ -2445,9 +2504,26 @@ def show(**kwargs):
     return _rsplotlib.show()
 
 
+def isinteractive():
+    """交互模式状态。rsplotlib 使用非交互 (Agg) 后端，恒为 False（与 matplotlib 非交互模式一致）。"""
+    return False
+
+
+def draw(*args, **kwargs):
+    """重绘当前 figure。非交互后端下为空操作（实际渲染在 savefig/show 时进行）。"""
+    return None
+
+
 def gca(**kwargs):
-    """获取当前 Axes。"""
-    return _rsplotlib.gca()
+    """获取当前 Axes；无当前 figure/axes 时自动新建（与 matplotlib 一致）。"""
+    try:
+        return _rsplotlib.gca()
+    except Exception:
+        pass
+    fig = _get_figure()
+    if fig is None:
+        fig = figure()
+    return fig.add_subplot()
 
 
 def gcf(**kwargs):
@@ -2952,6 +3028,7 @@ def _patch_axes():
         loc = kwargs.pop('loc', 'best')
         handles = kwargs.pop('handles', None)
         labels = kwargs.pop('labels', None)
+        facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
         if len(args) == 2:
             handles, labels = args[0], args[1]
         elif len(args) == 1:
@@ -2978,8 +3055,9 @@ def _patch_axes():
                 if not (isinstance(marker, str) and marker.strip() not in ('', 'none')):
                     marker = None
                 entries.append((_render_mathtext(str(lbl)), color, ls, marker, lw))
-            return self.set_legend_entries(entries, loc)
-        return _orig_legend(self, loc)
+            return self.set_legend_entries(
+                entries, loc, facecolor, framealpha, edgecolor, fontsize)
+        return _orig_legend(self, loc, facecolor, framealpha, edgecolor, fontsize)
 
     _rs.Axes.legend = _legend
 
@@ -3057,6 +3135,13 @@ def _patch_axes():
         return _orig_axis(self, None)
 
     _rs.Axes.axis = _axis
+
+    # autoscale(enable=True, axis='both', tight=None): rsplotlib 默认按数据自动计算
+    # 坐标范围，启用自动缩放即默认行为；关闭 (enable=False) 当前不支持冻结范围，按空操作处理。
+    def _autoscale(self, enable=True, axis='both', tight=None):
+        return None
+
+    _rs.Axes.autoscale = _autoscale
 
     # 文本类方法：把 matplotlib mathtext ($...$) 转成 Unicode 后再下沉到 Rust。
     # OO API (ax.set_xlabel / ax.text ...) 不经过模块级 plt.* 函数，需在此单独接入。

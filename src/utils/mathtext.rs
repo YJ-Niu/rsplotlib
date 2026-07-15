@@ -396,11 +396,11 @@ pub fn measure_plain(s: &str, family: Option<&str>, size: f64) -> (f64, f64) {
 
 // 布局常量（相对字号 em 的比例），按视觉效果调优。
 const SCRIPT_SCALE: f64 = 0.7; // 大型算符上/下极限（∑ ∏ 上下方）的缩放
-const SIDE_SCRIPT_SCALE: f64 = 0.49; // 右侧上/下标缩放（比极限再小 30%）
+const SIDE_SCRIPT_SCALE: f64 = 0.5; // 右侧上/下标缩放（比极限再小 30%），放大 20% 提升可读性
 const LEAF_UP: f64 = 0.42; // 叶子字形中心线以上视觉半高
 const LEAF_DOWN: f64 = 0.30; // 叶子字形中心线以下视觉半高
-const SUP_SHIFT: f64 = 0.44; // 上标中心相对基线中心上移
-const SUB_SHIFT: f64 = 0.34; // 下标中心相对基线中心下移
+const SUP_SHIFT: f64 = 0.4; // 上标中心相对基线中心上移
+const SUB_SHIFT: f64 = 0.26; // 下标中心相对基线中心下移，上移 10% 提升视觉平衡
 const SCRIPT_KERN: f64 = 0.04; // 基字符与上下标之间的水平间隙
 const FRAC_GAP: f64 = 0.12; // 分子/分母与分数线的间距
 const FRAC_PAD: f64 = 0.12; // 分式左右内边距
@@ -609,8 +609,17 @@ fn layout(node: &Node, size: f64, family: &str) -> Layout {
                 script_w = script_w.max(s.width);
             }
             if let Some(sub) = sub {
-                let s = layout(sub, side_size, family);
-                let cy = SUB_SHIFT * size;
+                let sub_size = if sup.is_none() {
+                    side_size * 1.5
+                } else {
+                    side_size
+                };
+                let s = layout(sub, sub_size, family);
+                let cy = if sup.is_none() {
+                    SUB_SHIFT * size * 0.55
+                } else {
+                    SUB_SHIFT * size
+                };
                 for r in s.runs {
                     runs.push(Run {
                         text: r.text,

@@ -155,7 +155,7 @@ pub fn ylabel(
 }
 
 #[pyfunction]
-#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+#[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None, pad=None))]
 pub fn title(
     py: Python,
     text: String,
@@ -163,10 +163,11 @@ pub fn title(
     fontsize: Option<f64>,
     family: Option<String>,
     loc: Option<String>,
+    pad: Option<f64>,
 ) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
-    Axes::set_title(&mut ax_ref, py, text, color, fontsize, family, loc);
+    Axes::set_title(&mut ax_ref, py, text, color, fontsize, family, loc, pad);
     Ok(())
 }
 
@@ -187,9 +188,18 @@ pub fn grid(
 }
 
 #[pyfunction]
-#[pyo3(signature = (loc="best"))]
-pub fn legend(py: Python, loc: &str) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).legend(loc);
+#[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]
+pub fn legend(
+    py: Python,
+    loc: &str,
+    facecolor: Option<String>,
+    framealpha: Option<f64>,
+    edgecolor: Option<String>,
+    fontsize: Option<f64>,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .legend(loc, facecolor, framealpha, edgecolor, fontsize);
     Ok(())
 }
 

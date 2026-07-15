@@ -20,12 +20,13 @@ use crate::utils::mathtext::{self, HAlign, VAlign};
 ///
 /// # 参数
 /// - `chart`: plotters 的 chart 上下文
-/// - `title`: 标题文本（为空时不渲染）
+/// - `title`: 标题文本（为空时不渲染，支持 `\n` 换行）
 /// - `title_fontsize`: 用户指定的字体大小（0 表示使用默认 12pt）
 /// - `font_scale`: 字体缩放系数
 /// - `title_color`: 标题颜色（默认黑色）
 /// - `title_family`: 用户显式指定的字体族名（None 时按文本自动选择字体栈）
 /// - `title_loc`: 标题水平位置（"left"/"center"/"right"，默认居中）
+/// - `title_pad`: 标题与数据区顶部的间距（数据范围比例，默认 0.01）
 /// - `x_min`, `x_max`: X 轴数据范围（用于计算标题水平位置）
 /// - `y_min`, `y_max`: Y 轴数据范围（用于计算标题垂直位置）
 #[allow(clippy::too_many_arguments)]
@@ -37,9 +38,10 @@ pub fn draw_title<DB: DrawingBackend>(
     title_color: RgbColor,
     title_family: Option<&str>,
     title_loc: &str,
+    title_pad: f64,
     x_min: f64,
     x_max: f64,
-    y_min: f64,
+    _y_min: f64,
     y_max: f64,
 ) -> PyResult<()>
 where
@@ -48,36 +50,37 @@ where
     if title.is_empty() {
         return Ok(());
     }
-    // 根据 loc 选择水平锚点与对齐方式：left→左端左对齐，right→右端右对齐，其余居中。
     let (title_x, h_align) = match title_loc {
         "left" => (x_min, HAlign::Left),
         "right" => (x_max, HAlign::Right),
         _ => ((x_min + x_max) / 2.0, HAlign::Center),
     };
-    // 标题位于数据范围上方的 margin_top 区域，使用数据坐标的微小偏移
-    let y_range = y_max - y_min;
-    // 标题锚点在数据区顶部，使用 VAlign::Bottom 让文字向上延伸
-    // 偏移量设为数据范围的极小比例，确保文字位于 margin_top 区域内
-    let title_y = y_max + y_range * 0.01;
-    // 使用用户指定的 fontsize；若未指定则取 matplotlib 默认 12pt
+    let title_y = y_max;
     let title_size = if title_fontsize > 0.0 {
         title_fontsize
     } else {
         9.6 * DEFAULT_FONT_SCALE
     };
+    let pixel_size = scale_font(title_size, font_scale);
+    let line_height = pixel_size * 1.2;
+    let pad_px = title_pad * font_scale;
     let rgb = RGBColor(title_color.0, title_color.1, title_color.2);
-    mathtext::draw_math_chart(
-        chart,
-        title_x,
-        title_y,
-        title,
-        scale_font(title_size, font_scale),
-        rgb,
-        title_family,
-        h_align,
-        VAlign::Bottom,
-        0.0,
-    )?;
+    let lines: Vec<&str> = title.split('\n').collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let dy_px = -(pad_px + (lines.len() - 1 - idx) as f64 * line_height);
+        mathtext::draw_math_chart(
+            chart,
+            title_x,
+            title_y,
+            line,
+            pixel_size,
+            rgb,
+            title_family,
+            h_align,
+            VAlign::Bottom,
+            dy_px,
+        )?;
+    }
     Ok(())
 }
 
