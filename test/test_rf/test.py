@@ -440,3 +440,25 @@ with plt.style.context('grayscale'):
 
     plt.savefig('./test/test_rf/test29.png')
     plt.clf()
+
+pprint(50, rf.io.read_all(rf.data.pwd, contains='ro'))
+
+ro_dict = rf.io.read_all(rf.data.pwd, contains='ro')
+ro_ns = NetworkSet(ro_dict, name='ro set')
+pprint(51, ro_ns)
+
+pprint(52, ro_ns[0])
+
+rf.stylely()
+ro_ns.plot_s_db()
+plt.savefig('./test/test_rf/test30.png')
+plt.clf()
+
+pprint(53, ro_ns.mean_s)
+ro_ns.mean_s.plot_s_db(label='ro')
+plt.savefig('./test/test_rf/test31.png')
+plt.clf()
+
+ro_ns.std_s.plot_s_re(y_label='Standard Deviations')
+plt.savefig('./test/test_rf/test32.png')
+plt.clf()

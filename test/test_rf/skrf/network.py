@@ -5951,7 +5951,7 @@ def parallelconnect(ntwks: Sequence[Network] | Network,
     np.einsum('kii->ki', s)[:] -= 1  # Sii
 
     # Get the index of internal port and external port from global matrix
-    in_ind = np.meshgrid(inter_indices, inter_indices, indexing='ij')
+    # in_ind = np.meshgrid(inter_indices, inter_indices, indexing='ij')
     out_ind = np.meshgrid(exter_indices, exter_indices, indexing='ij')
 
     # Update the concatenated intersection matrix

@@ -333,7 +333,7 @@ def read_all(dir: str | Path = '.', sort=True, contains=None, f_unit=None,
         for filename in glob.iglob(
                 os.path.join(
                     dir,
-                    '*.s*p'),
+                    f'{contains}*.s*p'),
                 recursive=recursive):
             filelist.append(filename)
     else:
@@ -343,8 +343,7 @@ def read_all(dir: str | Path = '.', sort=True, contains=None, f_unit=None,
         filelist.sort()
 
     for filename in filelist:
-        if contains is not None and contains not in filename:
-            continue
+
         fullname = filename
         keyname = os.path.splitext(filename.split(os.path.sep)[-1])[0]
         try:

@@ -1248,7 +1248,7 @@ def plot_s_smith(
  
     if ax is None:
         ax = plt.gca(1, 1, figsize=(8, 8))
-        plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+        # plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
     if m is None:
         M = range(netw.number_of_ports)
     else:
