@@ -5411,8 +5411,19 @@ class Network:
 
     def _fmt_trace_name(self, m: int, n: int) -> str:
         port_sep = "_" if self.nports > 9 else ""
-        subscript = f"{self.port_modes[m].lower()}{self.port_modes[n].lower()}"
-        # do not add subscript for single-ended to single-ended
+        
+        mode_m = self.port_modes[m]
+        mode_n = self.port_modes[n]
+        
+        if hasattr(mode_m, 'tolist'):
+            mode_m = mode_m.tolist()
+        if hasattr(mode_n, 'tolist'):
+            mode_n = mode_n.tolist()
+        
+        mode_m = str(mode_m)
+        mode_n = str(mode_n)
+        
+        subscript = f"{mode_m.lower()}{mode_n.lower()}"
         subscript = "" if subscript == "ss" else subscript
 
         return f"{subscript}{m + 1}{port_sep}{n + 1}"

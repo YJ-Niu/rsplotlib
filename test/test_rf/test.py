@@ -462,3 +462,15 @@ plt.clf()
 ro_ns.std_s.plot_s_re(y_label='Standard Deviations')
 plt.savefig('./test/test_rf/test32.png')
 plt.clf()
+
+ro_ns.mean_s_deg.plot_s_re()
+plt.savefig('./test/test_rf/test33.png')
+plt.clf()
+
+ro_ns.plot_uncertainty_bounds_s_db()
+plt.savefig('./test/test_rf/test34.png')
+plt.clf()
+
+ro_ns.plot_uncertainty_bounds_s_deg()
+plt.savefig('./test/test_rf/test35.png')
+plt.clf()
