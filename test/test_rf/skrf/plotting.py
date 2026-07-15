@@ -97,7 +97,7 @@ def _legend(target, *args, **kwargs):
     if 'edgecolor' not in kwargs:
         kwargs['edgecolor'] = '#999999'
     if 'facecolor' not in kwargs:
-        kwargs['facecolor'] = '#f5f5f5'
+        kwargs['facecolor'] = 'white'
     return target.legend(*args, **kwargs)
 
 

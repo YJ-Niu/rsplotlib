@@ -372,3 +372,19 @@ ring_slot.plot_s_db(m=0, n=0, label='Theory')
 ring_slot_meas.plot_s_db(m=0, n=0, label='Measurement')
 plt.savefig("./test/test_rf/test19.png")
 plt.clf()
+
+ring_slot.plot_s_deg()
+plt.savefig("./test/test_rf/test20.png")
+plt.clf()
+
+# ring_slot.plot_s_deg_unwrap()
+# plt.savefig("./test/test_rf/test21.png")
+# plt.clf()
+
+# gd = abs(ring_slot.s21.group_delay) * 1e9  # in ns
+
+# ring_slot.plot(gd)
+# plt.ylabel('Group Delay (ns)')
+# plt.title('Group Delay of Ring Slot S21')
+# plt.savefig("./test/test_rf/test22.png")
+# plt.clf()
