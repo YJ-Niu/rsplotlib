@@ -87,6 +87,14 @@ pub fn draw_marker<DB: DrawingBackend>(
             let pts = vec![(0, si), (-si, -si), (si, -si)];
             draw_polygon_marker(chart, x, y, &pts, fill, edge_style, need_edge)?;
         }
+        ">" => {
+            let pts = vec![(si, 0), (-si, -si), (-si, si)];
+            draw_polygon_marker(chart, x, y, &pts, fill, edge_style, need_edge)?;
+        }
+        "<" => {
+            let pts = vec![(-si, 0), (si, -si), (si, si)];
+            draw_polygon_marker(chart, x, y, &pts, fill, edge_style, need_edge)?;
+        }
         "D" => {
             // 菱形 = 边长为 markersize 的正方形旋转 45°，对角线半长 = s*√2
             let d = (s * std::f64::consts::SQRT_2).round() as i32;

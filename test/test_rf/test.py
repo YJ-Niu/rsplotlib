@@ -3,6 +3,7 @@ from skrf import Frequency, Network
 from skrf.data import ring_slot  # noqa: F811
 import rsnumpy as np
 import rsplotlib.pyplot as plt
+from rsplotlib import style
 from skrf.networkSet import NetworkSet
 from skrf.media import CPW, Coaxial
 from skrf.data import wr2p2_line1 as line1
@@ -377,14 +378,52 @@ ring_slot.plot_s_deg()
 plt.savefig("./test/test_rf/test20.png")
 plt.clf()
 
-# ring_slot.plot_s_deg_unwrap()
-# plt.savefig("./test/test_rf/test21.png")
-# plt.clf()
+ring_slot.plot_s_deg_unwrap()
+plt.savefig("./test/test_rf/test21.png")
+plt.clf()
 
-# gd = abs(ring_slot.s21.group_delay) * 1e9  # in ns
+gd = abs(ring_slot.s21.group_delay) * 1e9  # in ns
 
-# ring_slot.plot(gd)
-# plt.ylabel('Group Delay (ns)')
-# plt.title('Group Delay of Ring Slot S21')
-# plt.savefig("./test/test_rf/test22.png")
-# plt.clf()
+ring_slot.plot(gd)
+plt.ylabel('Group Delay (ns)')
+plt.title('Group Delay of Ring Slot S21')
+plt.savefig("./test/test_rf/test22.png")
+plt.clf()
+
+ring_slot.plot_z_im()
+plt.savefig('./test/test_rf/test23.png')
+plt.clf()
+
+ring_slot.plot_y_im()
+plt.savefig('./test/test_rf/test24.png')
+plt.clf()
+
+ring_slot.plot_s_db(m=0, n=0, label='Simulation')
+plt.savefig('./test/test_rf/test25.png')
+plt.clf()
+
+ring_slot.frequency.unit = 'mhz'
+ring_slot.plot_s_db(0, 0)
+plt.savefig('./test/test_rf/test26.png')
+plt.clf()
+
+ring_slot.frequency.unit = 'ghz'
+ring_slot.plot_s_db(m=0, n=0, linewidth=3, linestyle='--', label='Simulation')
+ring_slot_meas.plot_s_db(m=0, n=0, marker='<', markevery=10, label='Measured')
+plt.savefig('./test/test_rf/test27.png')
+plt.clf()
+
+mpl_style = "seaborn-ticks"
+try:
+    mpl_style = mpl_style if mpl_style in style.available else "seaborn-v0_8-ticks"
+except:
+    mpl_style = "seaborn-v0_8-ticks"
+with style.context(mpl_style):
+    ring_slot.plot_s_smith()
+    plt.xlabel('Real Part')
+    plt.ylabel('Imaginary Part')
+    plt.title('Smith Chart With Legend Room')
+    plt.axis([-1.1, 2.1, -1.1, 1.1])
+    plt.legend(loc=5)
+plt.savefig('./test/test_rf/test28.png')
+plt.clf()

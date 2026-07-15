@@ -2861,6 +2861,7 @@ def _patch_axes():
             kwargs['label'] = _render_mathtext(kwargs['label'])
         pairs, _ = _parse_plot_args(args, kwargs)
         lines = []
+        markevery = kwargs.get('markevery')
         for x, y, fmt in pairs:
             call_kwargs = dict(kwargs)
             if fmt:
@@ -2874,7 +2875,35 @@ def _patch_axes():
             # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
             x, x_tick_labels = _categorical(x)
             y, y_tick_labels = _categorical(y)
-            lines.append(_orig_plot(self, x, y, **call_kwargs))
+            # 过滤掉 Rust 层不支持的关键字参数
+            unsupported_args = {'markevery', 'alpha'}
+            call_kwargs = {k: v for k, v in call_kwargs.items() if k not in unsupported_args}
+            # 如果有 markevery，先去掉 marker 只画折线，然后用 scatter 单独绘制标记点
+            if markevery is not None and call_kwargs.get('marker'):
+                # 保存 marker 相关参数
+                marker = call_kwargs.pop('marker')
+                markersize = call_kwargs.pop('markersize', 6)
+                markerfacecolor = call_kwargs.pop('markerfacecolor', None)
+                markeredgecolor = call_kwargs.pop('markeredgecolor', None)
+                linecolor = call_kwargs.get('color', None)
+                # 画折线（不带 marker）
+                lines.append(_orig_plot(self, x, y, **call_kwargs))
+                # 用 scatter 绘制每隔 markevery 的标记点
+                import rsnumpy as np
+                x_arr = np.asarray(x)
+                y_arr = np.asarray(y)
+                indices = np.arange(0, len(x_arr), markevery)
+                scatter_kwargs = {'marker': marker, 's': markersize ** 2}
+                if markerfacecolor is not None:
+                    scatter_kwargs['c'] = markerfacecolor
+                elif linecolor is not None:
+                    scatter_kwargs['c'] = linecolor
+                if markeredgecolor is not None:
+                    scatter_kwargs['edgecolor'] = markeredgecolor
+                self.scatter(x_arr[indices], y_arr[indices], **scatter_kwargs)
+            else:
+                # 正常绘制（所有点都标记）
+                lines.append(_orig_plot(self, x, y, **call_kwargs))
             if x_tick_labels is not None:
                 self.set_xticks(list(range(len(x_tick_labels))), x_tick_labels)
             if y_tick_labels is not None:

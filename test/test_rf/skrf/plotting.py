@@ -524,12 +524,22 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
 
     if axis is not None:
         ax.autoscale(True, 'x', True)
-        ax.autoscale(True, 'y', False)
-
-        ylim = ax.get_ylim()
-        y_range = ylim[1] - ylim[0]
+        ax.autoscale(True, 'y', True)
+        
+        y_min_val = np.min(y)
+        y_max_val = np.max(y)
+        if hasattr(y_min_val, 'tolist'):
+            y_min_val = y_min_val.tolist()
+        if hasattr(y_max_val, 'tolist'):
+            y_max_val = y_max_val.tolist()
+        
+        current_ylim = ax.get_ylim()
+        new_ylim_min = min(current_ylim[0], y_min_val)
+        new_ylim_max = max(current_ylim[1], y_max_val)
+        
+        y_range = new_ylim_max - new_ylim_min
         padding = y_range * 0.1
-        ax.set_ylim(ylim[0] - padding, ylim[1] + padding)
+        ax.set_ylim(new_ylim_min - padding, new_ylim_max + padding)
 
     if plt.isinteractive():
         plt.draw()
