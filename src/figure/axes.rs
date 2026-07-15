@@ -760,6 +760,7 @@ pub struct Axes {
     pub title_color: RgbColor,
     pub title_family: Option<String>,
     pub title_loc: String,
+    pub title_pad: f64,
     pub xlim: Option<(f64, f64)>,
     pub ylim: Option<(f64, f64)>,
     pub grid_visible: bool,
@@ -860,6 +861,7 @@ impl Clone for Axes {
             title_color: self.title_color,
             title_family: self.title_family.clone(),
             title_loc: self.title_loc.clone(),
+            title_pad: self.title_pad,
             xlim: self.xlim,
             ylim: self.ylim,
             grid_visible: self.grid_visible,
@@ -1031,6 +1033,7 @@ impl Axes {
             title_color: RgbColor(0, 0, 0),
             title_family: None,
             title_loc: "center".to_string(),
+            title_pad: 5.0,
             xlim: None,
             ylim: None,
             grid_visible: false,
@@ -1512,21 +1515,41 @@ impl Axes {
             if is_step {
                 if histtype_val == "stepfilled" {
                     for i in 0..effective_bins {
+                        if (top_arr[i] - base_arr[i]).abs() < 1e-12 {
+                            continue;
+                        }
                         bars[di].push((bin_edges[i], bin_edges[i + 1], base_arr[i], top_arr[i]));
                     }
                 }
-                // 轮廓折线(阶梯)
                 let mut pts: Vec<(f64, f64)> = Vec::with_capacity(effective_bins * 2 + 2);
-                pts.push((bin_edges[0], base_arr[0]));
+                let mut started = false;
                 for i in 0..effective_bins {
+                    let height = top_arr[i] - base_arr[i];
+                    if height.abs() < 1e-12 {
+                        if started {
+                            pts.push((bin_edges[i], base_arr[i]));
+                            started = false;
+                        }
+                        continue;
+                    }
+                    if !started {
+                        pts.push((bin_edges[i], base_arr[i]));
+                        started = true;
+                    }
                     pts.push((bin_edges[i], top_arr[i]));
                     pts.push((bin_edges[i + 1], top_arr[i]));
                 }
-                pts.push((bin_edges[effective_bins], base_arr[effective_bins - 1]));
+                if started {
+                    pts.push((bin_edges[effective_bins], base_arr[effective_bins - 1]));
+                }
                 outlines[di] = pts;
             } else {
                 // bar / barstacked
                 for i in 0..effective_bins {
+                    let height = top_arr[i] - base_arr[i];
+                    if height.abs() < 1e-12 {
+                        continue;
+                    }
                     let l = bin_edges[i];
                     let r = bin_edges[i + 1];
                     let binw = r - l;
@@ -1869,7 +1892,7 @@ impl Axes {
         }
     }
 
-    #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None))]
+    #[pyo3(signature = (text, color=None, fontsize=None, family=None, loc=None, pad=None))]
     pub fn set_title(
         &mut self,
         py: Python<'_>,
@@ -1878,6 +1901,7 @@ impl Axes {
         fontsize: Option<f64>,
         family: Option<String>,
         loc: Option<String>,
+        pad: Option<f64>,
     ) {
         self.title = text;
         if let Some(fs) = fontsize {
@@ -1886,11 +1910,12 @@ impl Axes {
         if let Some(c) = color {
             self.title_color = parse_color(&c, 0).unwrap_or(RgbColor(0, 0, 0));
         }
-        // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到
-        // plotters，使用实际字体家族名称，确保标题以该字体渲染（与 text() 一致）。
         self.title_family = resolve_and_register_family(py, family);
         if let Some(l) = loc {
             self.title_loc = l;
+        }
+        if let Some(p) = pad {
+            self.title_pad = p;
         }
     }
 
@@ -3639,6 +3664,7 @@ impl Axes {
             self.title_color,
             self.title_family.as_deref(),
             &self.title_loc,
+            self.title_pad,
             x_min,
             x_max,
             y_min,

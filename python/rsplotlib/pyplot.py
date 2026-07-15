@@ -1861,16 +1861,23 @@ def title(label, fontdict=None, loc=None, **kwargs):
         color: 文本颜色 (如 'r'、'#ff0000'、'SeaGreen')
 
     loc: 标题水平位置，可选 'left'、'center'、'right'，默认 'center'。
+    pad: 标题与数据区顶部的间距（points，默认 5.0）。
 
     用法:
         plt.title("标题")
         plt.title("标题", fontdict={"family": "Courier", "size": 18, "color": "red"})
         plt.title("标题", fontsize=18, color='b')
         plt.title("标题", loc="left")
+        plt.title("第一行\n第二行", pad=0.02)
     """
     family, size, color = _font_props(fontdict, kwargs)
-    # 字体族名的解析与注册由 Rust 层的 set_title 统一处理。
-    return _rsplotlib.title(_render_mathtext(label), color, size, family, loc)
+    fd = fontdict or {}
+    pad = kwargs.get('pad') or fd.get('pad')
+    try:
+        pad = None if pad is None else float(pad)
+    except (TypeError, ValueError):
+        pad = None
+    return _rsplotlib.title(_render_mathtext(label), color, size, family, loc, pad)
 
 
 def suptitle(t, **kwargs):
