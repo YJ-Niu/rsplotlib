@@ -27,17 +27,16 @@ uv.lock
 Thumbs.db
 
 # Data / plots
-testing/
-test_plot/
-test*.py
 *.png
-main*.py
 .trae/
 debug.md
 out/
+test_plot/
+test_rf_1/
+
 wheelhouse/
 N237S NB.csv
-plots*.py
+plots.py
 # Environment
 .venv
 .env
