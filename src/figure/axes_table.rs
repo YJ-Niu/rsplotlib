@@ -32,7 +32,7 @@ where
     };
 
     let font_size = table.fontsize * font_scale;
-    let line_height = font_size * 1.5;
+    let line_height = font_size;
 
     let row_label_width = if !table.row_labels.is_empty() {
         font_size * 3.0
@@ -47,7 +47,7 @@ where
     let total_table_height = total_rows as f64 * line_height;
     let col_area_width = subplot_w - row_label_width;
 
-    let table_x = subplot_x;
+    let table_x = subplot_x + row_label_width * 0.5;
     let table_y = match table.loc.as_str() {
         "top" => subplot_y + 5.0 * font_scale,
         "center" => subplot_y + subplot_h / 2.0 - total_table_height / 2.0,
@@ -79,7 +79,7 @@ where
                 let style = FontDesc::from(("sans-serif", font_size))
                     .color(&BLACK)
                     .pos(Pos::new(HPos::Center, VPos::Center));
-                let text_x = (x_pos + col_width / 2.0).round() as i32;
+                let text_x = (x_pos + col_width * 0.5).round() as i32;
                 let text_y = (y_pos + line_height / 2.0).round() as i32;
                 root.draw_text(label, &style, (text_x, text_y))
                     .map_err(|e| PyRuntimeError::new_err(format!("Table col label text: {}", e)))?;
@@ -118,8 +118,8 @@ where
             let style = FontDesc::from(("sans-serif", font_size))
                 .color(&BLACK)
                 .pos(Pos::new(HPos::Center, VPos::Center));
-            let text_x = (x_pos + row_label_width / 2.0).round() as i32;
-            let text_y = (y_pos + line_height / 2.0).round() as i32;
+            let text_x = (x_pos + row_label_width * 0.5).round() as i32;
+            let text_y = (y_pos + line_height * 5.0 / 8.0).round() as i32;
             root.draw_text(label, &style, (text_x, text_y))
                 .map_err(|e| PyRuntimeError::new_err(format!("Table row label text: {}", e)))?;
         }
@@ -153,8 +153,8 @@ where
             let style = FontDesc::from(("sans-serif", font_size))
                 .color(&BLACK)
                 .pos(Pos::new(HPos::Center, VPos::Center));
-            let text_x = (col_x + col_width / 2.0).round() as i32;
-            let text_y = (y_pos + line_height / 2.0).round() as i32;
+            let text_x = (col_x + col_width * 0.5).round() as i32;
+            let text_y = (y_pos + line_height * 5.0 / 8.0).round() as i32;
             root.draw_text(text, &style, (text_x, text_y))
                 .map_err(|e| PyRuntimeError::new_err(format!("Table cell text: {}", e)))?;
             col_x += col_width;

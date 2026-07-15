@@ -295,7 +295,7 @@ where
         // 横向布局（像素）：左内边距 | 线条/marker 样本 | 间隙 | 文字 | 右内边距。
         // 宽度按最宽标签自适应，避免长文字溢出图例框。
         let pad_h_px = 8.0 * font_scale;
-        let handle_px = font_scale * 10.0;
+        let handle_px = label_fs * 1.2;
         let gap_px = 7.0 * font_scale;
         let max_text_px = legend_labels
             .iter()

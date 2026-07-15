@@ -3,7 +3,7 @@ use plotters::style::ShapeStyle;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct RgbColor(pub u8, pub u8, pub u8);
 
 /// 预计算的 10 种默认颜色

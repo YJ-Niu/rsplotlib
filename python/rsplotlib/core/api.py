@@ -505,17 +505,22 @@ def yticks(ticks=None, labels=None):
 
 # ==================== 子图与布局 ====================
 
-def subplots(nrows=1, ncols=1):
-    """创建子图网格
+def subplots(nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None, layout=None):
+    """创建子图网格（兼容 Matplotlib 风格参数）
 
     Args:
         nrows: 行数 (默认: 1)
         ncols: 列数 (默认: 1)
+        figsize: (width, height) 元组，单位为英寸
+        dpi: 分辨率
+        width_ratios: 列宽度比例
+        height_ratios: 行高度比例
+        layout: 布局模式，支持 'constrained'、'tight' 或 None
 
     Returns:
         tuple: (Figure, axes_list)
     """
-    return _rsplotlib.subplots(nrows, ncols)
+    return _rsplotlib.subplots(nrows, ncols, figsize=figsize, dpi=dpi, width_ratios=width_ratios, height_ratios=height_ratios, layout=layout)
 
 
 def subplot(nrows, ncols, index):
@@ -567,32 +572,19 @@ def twiny():
 
 # ==================== 图形控制 ====================
 
-def figure(num=None, figsize=None, dpi=None):
-    """创建新图形（兼容 Matplotlib 风格的 `figsize` 和 `dpi` 参数）
+def figure(num=None, figsize=None, dpi=None, layout=None):
+    """创建新图形（兼容 Matplotlib 风格的 `figsize`、`dpi` 和 `layout` 参数）
 
     Args:
         num: 图形编号（兼容，未使用）
         figsize: (width, height) 元组，单位为英寸
         dpi: 分辨率
+        layout: 布局模式，支持 'constrained'、'tight' 或 None
 
     Returns:
         Figure: 创建的图形对象
     """
-    fig = _rsplotlib.figure()
-    # 默认 dpi 保持与 pyplot 一致的 100
-    d = dpi if dpi is not None else 100
-    # 调用底层设置方法（Rust 侧实现）
-    try:
-        fig.set_dpi(d)
-    except Exception:
-        pass
-    if figsize is not None:
-        try:
-            w_inch, h_inch = figsize
-            fig.set_size(round(w_inch * d), round(h_inch * d))
-        except Exception:
-            pass
-    return fig
+    return _rsplotlib.figure(figsize=figsize, dpi=dpi, layout=layout)
 
 
 def savefig(filename):

@@ -95,11 +95,17 @@ pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
 }
 
 fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
+    let fig_py = match get_current_figure(py) {
+        Ok(fig) => fig.into(),
+        Err(_) => {
+            let mut fig = Figure::new();
+            fig.axes_list.clear();
+            fig.axes_positions.clear();
+            let fig_py = Py::new(py, fig)?;
+            set_current_figure(fig_py.clone_ref(py));
+            fig_py
+        }
+    };
     let ax_py = Py::new(py, ax)?;
     init_axes_self_py(&ax_py, py);
     fig_py.borrow_mut(py).axes_list.push(ax_py.clone_ref(py));
@@ -1087,16 +1093,17 @@ pub fn subplot<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None))]
-pub fn subplots(
-    py: Python<'_>,
+#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None, layout=None))]
+pub fn subplots<'a>(
+    py: Python<'a>,
     nrows: usize,
     ncols: usize,
     figsize: Option<(f64, f64)>,
     dpi: Option<f64>,
     width_ratios: Option<Vec<f64>>,
     height_ratios: Option<Vec<f64>>,
-) -> PyResult<Bound<'_, PyTuple>> {
+    layout: Option<&'a str>,
+) -> PyResult<Bound<'a, PyTuple>> {
     let total = nrows * ncols;
     let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
     let (width, height) = if let Some((w, h)) = figsize {
@@ -1113,6 +1120,7 @@ pub fn subplots(
     fig.width = width.max(100);
     fig.height = height.max(100);
     fig.dpi = dpi_val;
+    fig.constrained_layout = layout.is_some_and(|l| l == "constrained" || l == "tight");
     // 仅在长度与网格轨道数一致时采纳比例，否则回退等分（渲染阶段据此按比例分配行/列）。
     let width_ratios = width_ratios.filter(|r| r.len() == ncols);
     let height_ratios = height_ratios.filter(|r| r.len() == nrows);
@@ -1225,8 +1233,26 @@ pub fn show(py: Python) -> PyResult<()> {
 }
 
 #[pyfunction]
-pub fn figure(py: Python) -> PyResult<Py<Figure>> {
-    let fig = Figure::new();
+#[pyo3(signature = (figsize=None, dpi=None, layout=None))]
+pub fn figure(
+    py: Python,
+    figsize: Option<(f64, f64)>,
+    dpi: Option<f64>,
+    layout: Option<&str>,
+) -> PyResult<Py<Figure>> {
+    let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
+    let (width, height) = if let Some((w, h)) = figsize {
+        ((w * dpi_val).round() as u32, (h * dpi_val).round() as u32)
+    } else {
+        let w = (DEFAULT_FIGSIZE.0 * dpi_val).round() as u32;
+        let h = (DEFAULT_FIGSIZE.1 * dpi_val).round() as u32;
+        (w, h)
+    };
+    let mut fig = Figure::new();
+    fig.width = width.max(100);
+    fig.height = height.max(100);
+    fig.dpi = dpi_val;
+    fig.constrained_layout = layout.is_some_and(|l| l == "constrained" || l == "tight");
     let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
     Ok(fig_py)

@@ -5,7 +5,7 @@
 """
 
 from . import rsplotlib as _rsplotlib
-from .figure._defaults import DEFAULT_DPI, DEFAULT_FIGSIZE
+from .figure._defaults import DEFAULT_FIGSIZE
 # ============ 样式接口 ============
 from .utils import style as _style_module
 from .pylab import mpl
@@ -2152,7 +2152,8 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     width_ratios = _to_list(width_ratios) if width_ratios is not None else None
     height_ratios = _to_list(height_ratios) if height_ratios is not None else None
 
-    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi, width_ratios, height_ratios)
+    layout = kwargs.get('layout')
+    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi, width_ratios, height_ratios, layout)
     fig = result[0]
 
     # gridspec_kw={'wspace':.., 'hspace':..} 与 matplotlib 一致地控制子图间距，
@@ -2162,9 +2163,6 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
         hs = gridspec_kw.get('hspace')
         if ws is not None or hs is not None:
             fig.subplots_adjust(wspace=ws, hspace=hs)
-
-    # layout='constrained'/'tight' 开启智能均匀边距（保持 figsize 不变）。
-    _apply_layout(fig, kwargs)
 
     if nrows == 1 and ncols == 1:
         single = result[1]
@@ -2441,18 +2439,10 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
     Returns:
         Figure 对象
     """
-    fig = _rsplotlib.figure()
-    d = dpi if dpi is not None else DEFAULT_DPI
-    fig.set_dpi(d)
-    if figsize is not None:
-        w_inch, h_inch = figsize
-        fig.set_size(round(w_inch * d), round(h_inch * d))
-    else:
-        w, h = _get_rcparams().get('figure.figsize', list(DEFAULT_FIGSIZE))
-        fig.set_size(round(w * d), round(h * d))
-    # layout='constrained'/'tight' 开启智能均匀边距（保持 figsize 不变）。
-    _apply_layout(fig, kwargs)
-    return fig
+    if figsize is None:
+        figsize = tuple(_get_rcparams().get('figure.figsize', DEFAULT_FIGSIZE))
+    layout = kwargs.get('layout')
+    return _rsplotlib.figure(figsize=figsize, dpi=dpi, layout=layout)
 
 
 def axes(arg=None, **kwargs):
@@ -2522,7 +2512,7 @@ def draw(*args, **kwargs):
     return None
 
 
-def gca(**kwargs):
+def gca(*args, **kwargs):
     """获取当前 Axes；无当前 figure/axes 时自动新建（与 matplotlib 一致）。"""
     try:
         return _rsplotlib.gca()
@@ -2530,7 +2520,7 @@ def gca(**kwargs):
         pass
     fig = _get_figure()
     if fig is None:
-        fig = figure()
+        fig = figure(args)
     return fig.add_subplot()
 
 

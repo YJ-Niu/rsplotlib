@@ -2999,6 +2999,22 @@ impl Axes {
         sd.parent = self.self_py.as_ref().map(|p| p.clone_ref(py));
         Py::new(py, sd)
     }
+
+    fn subplots_adjust(
+        &self,
+        py: Python<'_>,
+        left: Option<f64>,
+        right: Option<f64>,
+        bottom: Option<f64>,
+        top: Option<f64>,
+        wspace: Option<f64>,
+        hspace: Option<f64>,
+    ) {
+        if let Ok(fig) = crate::figure::figure::get_current_figure(py) {
+            fig.borrow_mut()
+                .subplots_adjust(left, right, bottom, top, wspace, hspace);
+        }
+    }
 }
 
 impl Axes {

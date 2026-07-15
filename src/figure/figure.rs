@@ -129,7 +129,7 @@ impl Figure {
     }
 
     #[pyo3(signature = (left=None, right=None, bottom=None, top=None, wspace=None, hspace=None))]
-    fn subplots_adjust(
+    pub fn subplots_adjust(
         &mut self,
         left: Option<f64>,
         right: Option<f64>,
