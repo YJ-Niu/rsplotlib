@@ -328,5 +328,16 @@ for l_ in lines:
         cell_text.append([f'{f:.3f} {f_unit}', z])
 
 leg1 = ax.legend(fontsize=6)
+
+# plot the table
+the_table = ax.table(cellText=cell_text,
+                     colWidths=[0.4] * 2,
+                     rowLabels=row_labels,
+                     colLabels=col_labels,
+                     rowColours=row_colors,
+                     loc='bottom')
+the_table.auto_set_font_size(False)
+the_table.set_fontsize(6)
+# the_table.scale(1.5, 1.5)
 plt.savefig("./test/test_rf/test15.png")
 plt.clf()
