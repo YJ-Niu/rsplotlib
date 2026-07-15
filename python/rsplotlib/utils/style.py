@@ -47,6 +47,15 @@ class Style:
     def current(self):
         return self._impl.current
 
+    def context(self, style_name):
+        """返回一个上下文管理器，用于临时应用样式
+
+        Example:
+            with style.context('seaborn-v0_8'):
+                plt.plot(x, y)
+        """
+        return _StyleContext(style_name)
+
 
 # 全局样式实例
 style = Style()
@@ -65,3 +74,30 @@ def available():
 def current():
     """返回当前样式名称"""
     return style.current
+
+
+class _StyleContext:
+    """样式上下文管理器"""
+
+    def __init__(self, style_name):
+        self._style_name = style_name
+        self._old_style = None
+
+    def __enter__(self):
+        self._old_style = style.current
+        style.use(self._style_name)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._old_style is not None:
+            style.use(self._old_style)
+
+
+def context(style_name):
+    """返回一个上下文管理器，用于临时应用样式
+
+    Example:
+        with style.context('seaborn-v0_8'):
+            plt.plot(x, y)
+    """
+    return _StyleContext(style_name)

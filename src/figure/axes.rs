@@ -605,6 +605,22 @@ impl Line2D {
         });
     }
 
+    fn set_marker(&self, py: Python<'_>, marker: &str) {
+        self.with_line(py, |elem| {
+            if let PlotElement::Line { marker: m, .. } = elem {
+                *m = Some(marker.to_string());
+            }
+        });
+    }
+
+    fn set_markevery(&self, py: Python<'_>, markevery: &Bound<'_, PyAny>) {
+        self.with_line(py, |elem| {
+            if let PlotElement::Line { markevery: m, .. } = elem {
+                *m = Some(markevery.to_string());
+            }
+        });
+    }
+
     fn set_label(&self, py: Python<'_>, label: &str) {
         self.with_line(py, |elem| {
             if let PlotElement::Line { label: l, .. } = elem {
@@ -1213,6 +1229,7 @@ impl Axes {
             markersize,
             markerfacecolor,
             markeredgecolor,
+            markevery: None,
         });
         if let Some(lbl) = actual_label {
             let c =
@@ -1931,6 +1948,11 @@ impl Axes {
         if let Some(p) = pad {
             self.title_pad = p;
         }
+    }
+
+    #[doc = "返回坐标轴标题"]
+    fn get_title(&self) -> &str {
+        &self.title
     }
 
     #[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]

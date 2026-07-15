@@ -264,6 +264,14 @@ impl Figure {
         Ok(ax_py)
     }
 
+    #[doc = "返回所有坐标轴对象列表"]
+    fn get_axes<'a>(&self, py: Python<'a>) -> Vec<Bound<'a, Axes>> {
+        self.axes_list
+            .iter()
+            .map(|ax| ax.bind(py).clone())
+            .collect()
+    }
+
     #[doc = "保存图形到文件\n\n参数:\n    filename: 文件名, 支持 .png/.jpg/.svg\n    dpi: 可选分辨率, 默认与创建时一致"]
     #[pyo3(signature = (filename, dpi=None))]
     fn savefig(&self, py: Python, filename: &str, dpi: Option<f64>) -> PyResult<()> {

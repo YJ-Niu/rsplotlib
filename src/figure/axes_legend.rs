@@ -295,8 +295,8 @@ where
         // 横向布局（像素）：左内边距 | 线条/marker 样本 | 间隙 | 文字 | 右内边距。
         // 宽度按最宽标签自适应，避免长文字溢出图例框。
         let pad_h_px = 8.0 * font_scale;
-        let handle_px = label_fs * 1.2;
-        let gap_px = 7.0 * font_scale;
+        let handle_px = label_fs * 1.6;
+        let gap_px = 3.5 * font_scale;
         let max_text_px = legend_labels
             .iter()
             .map(|(label, ..)| mathtext::measure_plain(label.as_str(), None, label_fs).0)
@@ -313,7 +313,7 @@ where
         // 内边距：取数据范围的 2%，避免图例紧贴坐标轴边界
         let px = x_range * 0.02;
         let py = y_range * 0.02;
-        let (box_x1, box_y1, box_x2, box_y2) = match loc.as_str() {
+        let (box_x1, mut box_y1, box_x2, mut box_y2) = match loc.as_str() {
             "upper right" => box_from_anchor(
                 HPos::Right,
                 VPos::Top,
@@ -395,7 +395,7 @@ where
                 if xlog || ylog {
                     for p in pts.iter_mut() {
                         if xlog {
-                            p.0 = if p.0 > 0.0 {
+                            p.0 = if p.1 > 0.0 {
                                 p.0.log10()
                             } else {
                                 x_min.min(x_max)
@@ -421,6 +421,12 @@ where
                 )
             }
         };
+
+        let max_legend_height = y_max - y_min - 2.0 * py;
+        if box_y2 - box_y1 > max_legend_height {
+            box_y1 = y_min + py;
+            box_y2 = y_max - py;
+        }
 
         // 图例框背景/边框样式：默认沿用半透明白底 + 浅灰边框；
         // 调用方（如 stylely 捕获的样式）可覆盖为任意颜色与不透明度。
@@ -473,8 +479,12 @@ where
         // 否则固定的数据单位间隔在不同数据范围下会失效（例如整段被一个"虚线"填满而显示为实线）。
         let dash_unit = font_scale * x_per_px;
 
+        let max_entries =
+            ((box_y2 - box_y1 - 2.0 * pad_v_px * y_per_px) / entry_height).floor() as usize;
         for (i, (label, color, ls, marker_opt, lw)) in legend_labels.iter().enumerate() {
-            // 从顶部向下排列，使条目按插入顺序从上到下显示。行内垂直居中于其行高。
+            if i >= max_entries {
+                break;
+            }
             let y_pos = box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - i as f64 * entry_height;
             let x_line_start = box_x1 + pad_h_px * x_per_px;
             let x_line_end = x_line_start + handle_px * x_per_px;

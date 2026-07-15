@@ -1468,7 +1468,8 @@ where
                 markersize,
                 markerfacecolor,
                 markeredgecolor,
-                ..
+                markevery,
+                label: _,
             } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
@@ -1666,7 +1667,14 @@ where
                         let diameter_px = ms * marker_scale;
                         diameter_px / 2.0
                     };
-                    for (xv, yv) in x.iter().zip(y.iter()) {
+                    let step = markevery
+                        .as_deref()
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(1);
+                    for (i, (xv, yv)) in x.iter().zip(y.iter()).enumerate() {
+                        if i % step != 0 {
+                            continue;
+                        }
                         let txv = tx(*xv);
                         let tyv = ty(*yv) - y_half_px;
                         if txv.is_finite() && tyv.is_finite() {

@@ -10,6 +10,8 @@ from skrf.data import wr2p2_line1 as line1
 from skrf.data import wr1p5_line, wr2p2_line
 import os
 from skrf.data import ring_slot_meas
+from skrf.plotting import save_all_figs
+from skrf import plotting
 
 def pprint(n, ss):
     print(f"Network {n}")
@@ -427,3 +429,14 @@ with style.context(mpl_style):
     plt.legend(loc=5)
 plt.savefig('./test/test_rf/test28.png')
 plt.clf()
+
+save_all_figs('./test/test_rf', format=['png'])
+
+
+with plt.style.context('grayscale'):
+    ring_slot.plot_s_deg()
+    plotting.add_markers_to_lines()
+    plt.legend()  # have to re-generate legend
+
+    plt.savefig('./test/test_rf/test29.png')
+    plt.clf()

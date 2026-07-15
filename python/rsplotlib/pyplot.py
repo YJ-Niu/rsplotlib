@@ -1917,18 +1917,35 @@ def grid(visible=True, **kwargs):
     return _rsplotlib.grid(visible, c, ls, lw, axis)
 
 
+_LOC_MAP = {
+    0: 'best',
+    1: 'upper right',
+    2: 'upper left',
+    3: 'lower left',
+    4: 'lower right',
+    5: 'right',
+    6: 'center left',
+    7: 'center right',
+    8: 'lower center',
+    9: 'upper center',
+    10: 'center',
+}
+
+
 def legend(loc='best', **kwargs):
     """显示图例 (需要 plot 时设置 label 参数)。
 
     Args:
         loc: 图例位置 ('best', 'upper right', 'upper left', 'lower left',
               'lower right', 'upper center', 'lower center',
-              'center left', 'center right', 'center')
+              'center left', 'center right', 'center')，也支持整数 0-10
         facecolor: 图例框背景色 (颜色名或 '#RRGGBB')，默认沿用半透明白底
         framealpha: 图例框背景不透明度 (0-1)，默认 0.85
         edgecolor: 图例框边框色，默认浅灰
         fontsize: 图例文字字号 (point)，默认 11.0
     """
+    if isinstance(loc, int):
+        loc = _LOC_MAP.get(loc, 'best')
     facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
     return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize)
 
@@ -2427,11 +2444,20 @@ def twiny():
 
 # ==================== 图形控制 ====================
 
+_FIGURES = {}
+_FIGURE_COUNTER = 1
+
+
+def get_fignums():
+    """返回当前所有图形的编号列表。"""
+    return [num for num, fig in _FIGURES.items() if len(fig.get_axes()) > 0]
+
+
 def figure(num=None, figsize=None, dpi=None, **kwargs):
     """创建新的 Figure 对象。
 
     Args:
-        num: 图形编号 (兼容 matplotlib, 未实际使用)
+        num: 图形编号，如果已存在则返回该图形
         figsize: (width, height) 英寸数
         dpi: 分辨率
         **kwargs: 其他关键字参数
@@ -2439,10 +2465,22 @@ def figure(num=None, figsize=None, dpi=None, **kwargs):
     Returns:
         Figure 对象
     """
+    global _FIGURE_COUNTER
+
+    if num is not None and num in _FIGURES:
+        return _FIGURES[num]
+
     if figsize is None:
         figsize = tuple(_get_rcparams().get('figure.figsize', DEFAULT_FIGSIZE))
     layout = kwargs.get('layout')
-    return _rsplotlib.figure(figsize=figsize, dpi=dpi, layout=layout)
+    fig = _rsplotlib.figure(figsize=figsize, dpi=dpi, layout=layout)
+
+    if num is None:
+        num = _FIGURE_COUNTER
+        _FIGURE_COUNTER += 1
+    _FIGURES[num] = fig
+
+    return fig
 
 
 def axes(arg=None, **kwargs):

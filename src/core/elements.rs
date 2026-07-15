@@ -54,6 +54,7 @@ pub enum PlotElement {
         markersize: Option<f64>,
         markerfacecolor: Option<String>,
         markeredgecolor: Option<String>,
+        markevery: Option<String>,
     },
     Scatter {
         x: Vec<f64>,
