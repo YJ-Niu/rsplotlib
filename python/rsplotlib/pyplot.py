@@ -3216,6 +3216,45 @@ def _patch_axes():
 
     _rs.Axes.annotate = _annotate
 
+    class _Table:
+        def __init__(self, ax, cell_text, col_widths, row_labels, col_labels, row_colors, loc):
+            self.ax = ax
+            self._cell_text = cell_text
+            self._col_widths = col_widths
+            self._row_labels = row_labels
+            self._col_labels = col_labels
+            self._row_colors = row_colors
+            self._loc = loc
+            self._fontsize = 10.0
+
+        def auto_set_font_size(self, auto):
+            pass
+
+        def set_fontsize(self, size):
+            self._fontsize = size
+
+        def scale(self, xscale, yscale):
+            pass
+
+    def _table(self, cellText=None, colWidths=None, rowLabels=None, colLabels=None,
+               rowColours=None, loc='bottom', **kwargs):
+        cell_text = cellText or []
+        col_widths = colWidths or []
+        row_labels = rowLabels or []
+        col_labels = colLabels or []
+        row_colors = rowColours or []
+
+        table_obj = _Table(self, cell_text, col_widths, row_labels, col_labels, row_colors, loc)
+        fontsize = kwargs.get('fontsize', 10.0)
+        table_obj.set_fontsize(fontsize)
+
+        _orig_table(self, cell_text, col_widths, row_labels, col_labels, row_colors, loc)
+
+        return table_obj
+
+    _orig_table = _rs.Axes.table
+    _rs.Axes.table = _table
+
     # set(**kwargs): matplotlib 语义, 每个 key 映射到 set_<key>(value)
     def _ax_set(self, **kwargs):
         for key, value in kwargs.items():

@@ -709,6 +709,17 @@ pub struct ColorbarSpec {
     pub norm: String,
 }
 
+#[derive(Clone)]
+pub struct TableSpec {
+    pub cell_text: Vec<Vec<String>>,
+    pub col_widths: Vec<f64>,
+    pub row_labels: Vec<String>,
+    pub col_labels: Vec<String>,
+    pub row_colors: Vec<String>,
+    pub loc: String,
+    pub fontsize: f64,
+}
+
 impl ColorbarSpec {
     /// 由 (cmap, vmin, vmax, norm) 构造默认竖直右置颜色条（其余参数取 matplotlib 缺省）。
     pub fn from_mappable(cmap: String, vmin: f64, vmax: f64, norm: String) -> Self {
@@ -840,6 +851,7 @@ pub struct Axes {
     pub secondary_x: Option<SecondaryAxisSpec>,
     /// 二级 y 轴（secondary_yaxis）。
     pub secondary_y: Option<SecondaryAxisSpec>,
+    pub table: Option<TableSpec>,
 }
 
 impl Clone for Axes {
@@ -926,6 +938,7 @@ impl Clone for Axes {
             aspect: self.aspect,
             secondary_x: None,
             secondary_y: None,
+            table: self.table.clone(),
         }
     }
 }
@@ -1098,6 +1111,7 @@ impl Axes {
             aspect: None,
             secondary_x: None,
             secondary_y: None,
+            table: None,
         }
     }
 
@@ -1941,6 +1955,28 @@ impl Axes {
         if fontsize.is_some() {
             self.legend_fontsize = fontsize;
         }
+    }
+
+    #[pyo3(signature = (cell_text=None, col_widths=None, row_labels=None, col_labels=None, row_colors=None, loc="bottom"))]
+    pub fn table(
+        &mut self,
+        cell_text: Option<Vec<Vec<String>>>,
+        col_widths: Option<Vec<f64>>,
+        row_labels: Option<Vec<String>>,
+        col_labels: Option<Vec<String>>,
+        row_colors: Option<Vec<String>>,
+        loc: &str,
+    ) -> PyResult<()> {
+        self.table = Some(TableSpec {
+            cell_text: cell_text.unwrap_or_default(),
+            col_widths: col_widths.unwrap_or_default(),
+            row_labels: row_labels.unwrap_or_default(),
+            col_labels: col_labels.unwrap_or_default(),
+            row_colors: row_colors.unwrap_or_default(),
+            loc: loc.to_string(),
+            fontsize: 10.0,
+        });
+        Ok(())
     }
 
     /// 用显式的 (label, color, linestyle, marker, linewidth) 条目替换图例内容并显示。

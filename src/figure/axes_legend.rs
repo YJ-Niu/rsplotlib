@@ -295,7 +295,7 @@ where
         // 横向布局（像素）：左内边距 | 线条/marker 样本 | 间隙 | 文字 | 右内边距。
         // 宽度按最宽标签自适应，避免长文字溢出图例框。
         let pad_h_px = 8.0 * font_scale;
-        let handle_px = 34.0 * font_scale;
+        let handle_px = font_scale * 10.0;
         let gap_px = 7.0 * font_scale;
         let max_text_px = legend_labels
             .iter()
@@ -310,36 +310,39 @@ where
         let legend_height = entry_height * entry_count as f64 + 2.0 * pad_v_px * y_per_px;
 
         // 已知固定位置直接定位；其余（含 "best" 与未识别值）自动避让数据。
+        // 内边距：取数据范围的 2%，避免图例紧贴坐标轴边界
+        let px = x_range * 0.02;
+        let py = y_range * 0.02;
         let (box_x1, box_y1, box_x2, box_y2) = match loc.as_str() {
             "upper right" => box_from_anchor(
                 HPos::Right,
                 VPos::Top,
-                x_max,
-                y_max,
+                x_max - px,
+                y_max - py,
                 legend_width,
                 legend_height,
             ),
             "upper left" => box_from_anchor(
                 HPos::Left,
                 VPos::Top,
-                x_min,
-                y_max,
+                x_min + px,
+                y_max - py,
                 legend_width,
                 legend_height,
             ),
             "lower right" => box_from_anchor(
                 HPos::Right,
                 VPos::Bottom,
-                x_max,
-                y_min,
+                x_max - px,
+                y_min + py,
                 legend_width,
                 legend_height,
             ),
             "lower left" => box_from_anchor(
                 HPos::Left,
                 VPos::Bottom,
-                x_min,
-                y_min,
+                x_min + px,
+                y_min + py,
                 legend_width,
                 legend_height,
             ),
@@ -354,7 +357,7 @@ where
             "right" | "center right" => box_from_anchor(
                 HPos::Right,
                 VPos::Center,
-                x_max,
+                x_max - px,
                 (y_min + y_max) / 2.0,
                 legend_width,
                 legend_height,
@@ -362,7 +365,7 @@ where
             "center left" => box_from_anchor(
                 HPos::Left,
                 VPos::Center,
-                x_min,
+                x_min + px,
                 (y_min + y_max) / 2.0,
                 legend_width,
                 legend_height,
@@ -371,7 +374,7 @@ where
                 HPos::Center,
                 VPos::Bottom,
                 (x_min + x_max) / 2.0,
-                y_min,
+                y_min + py,
                 legend_width,
                 legend_height,
             ),
@@ -379,7 +382,7 @@ where
                 HPos::Center,
                 VPos::Top,
                 (x_min + x_max) / 2.0,
-                y_max,
+                y_max - py,
                 legend_width,
                 legend_height,
             ),

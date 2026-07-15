@@ -1237,6 +1237,14 @@ impl Figure {
             let data_right = chart_x0 + chart_w;
             let data_top = chart_y0 + margin_top as f64;
             let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
+
+            // 表格：在画布坐标系中绘制，位于子图区域下方
+            if let Some(table) = &ax.table {
+                crate::figure::axes_table::draw_table(
+                    &root, table, font_scale, x0, y0, sub_w, sub_h,
+                )?;
+            }
+
             drop(ax);
             for twin_py in &twin_axes {
                 // 先禁用 twin 自身的框线与内置刻度，使其 render 只绘制数据（折线/图例）；

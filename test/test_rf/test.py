@@ -8,6 +8,7 @@ from skrf.media import CPW, Coaxial
 from skrf.data import wr2p2_line1 as line1
 from skrf.data import wr1p5_line, wr2p2_line
 import os
+from skrf.data import ring_slot_meas
 
 def pprint(n, ss):
     print(f"Network {n}")
@@ -327,7 +328,7 @@ for l_ in lines:
         ax.annotate(row_labels[-1], (x, y), xytext=(-7, 7), textcoords='offset points', color=l_['color'])
         cell_text.append([f'{f:.3f} {f_unit}', z])
 
-leg1 = ax.legend(fontsize=6)
+ax.legend(fontsize=6, loc='upper right')
 
 # plot the table
 the_table = ax.table(cellText=cell_text,
@@ -340,4 +341,34 @@ the_table.auto_set_font_size(False)
 the_table.set_fontsize(6)
 # the_table.scale(1.5, 1.5)
 plt.savefig("./test/test_rf/test15.png")
+plt.clf()
+
+# prepare figure
+fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+# background = plt.imread('figures/smithchart.png')
+
+# tweak background position
+# ax.imshow(background, extent=[-1.185, 1.14, -1.13, 1.155])
+rf.plotting.smith(ax=ax, draw_labels=True, ref_imm=1.0, chart_type='z')
+
+ring_slot.plot_s_smith(ax=ax, draw_chart=False)
+plt.savefig("./test/test_rf/test16.png")
+plt.clf()
+
+ring_slot.plot_s_complex()
+
+rf.stylely()
+plt.axis('equal')  # otherwise circles won't be circles
+plt.savefig("./test/test_rf/test17.png")
+plt.clf()
+
+rf.stylely()
+ring_slot.plot_s_db()
+plt.savefig("./test/test_rf/test18.png")
+plt.clf()
+
+rf.stylely()
+ring_slot.plot_s_db(m=0, n=0, label='Theory')
+ring_slot_meas.plot_s_db(m=0, n=0, label='Measurement')
+plt.savefig("./test/test_rf/test19.png")
 plt.clf()
