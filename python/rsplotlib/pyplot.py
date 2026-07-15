@@ -281,6 +281,14 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, k
     """
     x = _to_seq(x)
     y = _to_seq(y)
+    if hasattr(x, 'ndim') and x.ndim == 0:
+        x = [float(x.item()) if hasattr(x, 'item') else float(x)]
+    elif not hasattr(x, '__len__'):
+        x = [x]
+    if hasattr(y, 'ndim') and y.ndim == 0:
+        y = [float(y.item()) if hasattr(y, 'item') else float(y)]
+    elif not hasattr(y, '__len__'):
+        y = [y]
     n = len(x) if hasattr(x, '__len__') else 0
     marker = marker or 'o'
     if c is None:
@@ -3196,6 +3204,13 @@ def _patch_axes():
             xycoords = 'data'
         if textcoords is not None and not isinstance(textcoords, str):
             textcoords = None
+        # 处理 xy 中的 0-d rsnumpy 数组
+        if isinstance(xy, (list, tuple)) and len(xy) >= 2:
+            def _to_float(v):
+                if hasattr(v, 'ndim') and v.ndim == 0:
+                    return float(v.item()) if hasattr(v, 'item') else float(v)
+                return float(v)
+            xy = (_to_float(xy[0]), _to_float(xy[1]))
         return _orig_annotate(self, text, xy, xytext, fontsize, color,
                               arrowprops, xycoords, textcoords, ha, family)
 
