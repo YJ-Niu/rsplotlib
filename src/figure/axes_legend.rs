@@ -90,6 +90,22 @@ fn collect_data_points(elements: &[PlotElement]) -> Vec<(f64, f64)> {
                     }
                 }
             }
+            PlotElement::Violin {
+                positions,
+                widths,
+                vert,
+                ..
+            } => {
+                let is_vertical = *vert;
+                for (di, &pos) in positions.iter().enumerate() {
+                    let width = *widths.get(di).unwrap_or(&0.5);
+                    if is_vertical {
+                        push_rect(&mut pts, pos - width, pos + width, 0.0, 1.0);
+                    } else {
+                        push_rect(&mut pts, 0.0, 1.0, pos - width, pos + width);
+                    }
+                }
+            }
             PlotElement::FillBetween { x, y1, y2, .. } => {
                 for (i, &xi) in x.iter().enumerate() {
                     let yl = *y1.get(i).unwrap_or(&0.0);

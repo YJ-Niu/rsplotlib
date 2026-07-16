@@ -661,7 +661,7 @@ def network_2_spreadsheet(
     Write a Network object to a spreadsheet, for your boss.
 
     Write the s-parameters  of a network to a spreadsheet, in a variety
-    of forms. This functions makes use of the pandas module, which in
+    of forms. This functions makes use of the rspandas module, which in
     turn makes use of the xlrd module. These are imported during this
     function call. For more details about the file-writing functions
     see the `pandas.DataFrom.to_???` functions.
@@ -693,7 +693,7 @@ def network_2_spreadsheet(
     --------
     networkset_2_spreadsheet : writes a spreadsheet for many networks
     """
-    from pandas import DataFrame, Series
+    from rspandas import DataFrame, Series
 
     file_extns = {'csv': 'csv', 'excel': 'xls', 'html': 'html'}
 
@@ -747,7 +747,7 @@ def network_2_dataframe(ntwk: Network,
                                           int]] = None,
                         port_sep: str | None = None):
     """
-    Convert one or more attributes of a network to a pandas DataFrame.
+    Convert one or more attributes of a network to a rspandas DataFrame.
 
     Parameters
     ----------
@@ -766,9 +766,9 @@ def network_2_dataframe(ntwk: Network,
 
     Returns
     -------
-    df : pandas DataFrame Object
+    df : rspandas DataFrame Object
     """
-    from pandas import DataFrame
+    from rspandas import DataFrame
 
     if attrs is None:
         attrs = ["s_db"]
@@ -799,7 +799,7 @@ def networkset_2_spreadsheet(
     spreadsheet. If the `excel` file_type is used, then each network,
     is written to its own sheet, with the sheetname taken from the
     network `name` attribute.
-    This functions makes use of the pandas module, which in turn makes
+    This functions makes use of the rspandas module, which in turn makes
     use of the xlrd module. These are imported during this function.
 
 
@@ -829,7 +829,7 @@ def networkset_2_spreadsheet(
     --------
     networkset_2_spreadsheet : writes a spreadsheet for many networks
     """
-    from pandas import ExcelWriter
+    from rspandas import ExcelWriter
 
     if ntwkset.name is None and file_name is None:
         raise (ValueError('Either ntwkset must have name or give a file_name'))

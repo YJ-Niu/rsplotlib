@@ -16,23 +16,29 @@ use crate::utils::font_stack;
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<f64>
 fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
-    // 快路径：一维 numpy 风格数组直接读原始缓冲区，避免 .tolist() 生成
-    // 数百万 Python 浮点对象的开销。仅限一维；多维交由后续路径按各自语义处理。
-    if let Some((shape, flat)) = array_interface_flat(obj)
-        && shape.len() == 1
-    {
-        return Ok(flat);
+    if let Ok(f) = obj.extract::<f64>() {
+        return Ok(vec![f]);
     }
-    // 先尝试直接 extract（Python list）
+    if let Some((shape, flat)) = array_interface_flat(obj) {
+        if shape.is_empty() {
+            return Ok(flat);
+        }
+        if shape.len() == 1 {
+            return Ok(flat);
+        }
+    }
     if let Ok(v) = obj.extract::<Vec<f64>>() {
         return Ok(v);
     }
-    // 尝试调用 .tolist()（numpy 数组）
     if obj.hasattr("tolist")? {
         let list = obj.call_method0("tolist")?;
-        return list.extract::<Vec<f64>>();
+        if let Ok(f) = list.extract::<f64>() {
+            return Ok(vec![f]);
+        }
+        if let Ok(v) = list.extract::<Vec<f64>>() {
+            return Ok(v);
+        }
     }
-    // 尝试转换为 list
     let items: Vec<Bound<'_, PyAny>> = obj.try_iter()?.collect::<PyResult<Vec<_>>>()?;
     let list = PyList::new(obj.py(), items)?;
     list.extract::<Vec<f64>>()
@@ -1658,6 +1664,83 @@ impl Axes {
             PyList::new(py, lists.as_slice())?.into_any().unbind()
         };
         Ok((n_obj, bin_edges, None))
+    }
+
+    #[pyo3(signature = (dataset, positions=None, widths=None, showmeans=false, showmedians=true, showextrema=true, vert=true, quantiles=None, points=100, bw_method=None))]
+    pub fn violinplot(
+        &mut self,
+        dataset: &Bound<'_, PyAny>,
+        positions: Option<&Bound<'_, PyAny>>,
+        widths: Option<&Bound<'_, PyAny>>,
+        showmeans: bool,
+        showmedians: bool,
+        showextrema: bool,
+        vert: bool,
+        quantiles: Option<&Bound<'_, PyAny>>,
+        points: usize,
+        bw_method: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        let _ = (quantiles, bw_method);
+        let data: Vec<Vec<f64>> = py_to_vec_vec_f64(dataset)?;
+
+        let n_networks = data.len();
+        if n_networks == 0 {
+            return Ok(());
+        }
+
+        let n_freq = data[0].len();
+
+        let mut transposed_data: Vec<Vec<f64>> = Vec::with_capacity(n_freq);
+        for fi in 0..n_freq {
+            let mut freq_data = Vec::with_capacity(n_networks);
+            for network in &data {
+                freq_data.push(network[fi]);
+            }
+            transposed_data.push(freq_data);
+        }
+
+        let positions_vec: Vec<f64> = match positions {
+            Some(p) => py_to_vec_f64(p)?,
+            None => (0..n_freq).map(|i| i as f64).collect(),
+        };
+
+        let widths_vec: Vec<f64> = match widths {
+            Some(w) => {
+                let w_vec = py_to_vec_f64(w)?;
+                if w_vec.len() == 1 {
+                    vec![w_vec[0]; n_freq]
+                } else if w_vec.len() == n_freq {
+                    w_vec
+                } else if !w_vec.is_empty() {
+                    vec![w_vec[0]; n_freq]
+                } else {
+                    vec![0.5; n_freq]
+                }
+            }
+            None => vec![0.5; n_freq],
+        };
+
+        let idx = self.element_count;
+        self.element_count += 1;
+
+        let colors: Vec<String> = (0..n_freq).map(|di| default_color_str(idx + di)).collect();
+
+        self.elements.push(PlotElement::Violin {
+            data: transposed_data,
+            positions: positions_vec,
+            widths: widths_vec,
+            showmeans,
+            showmedians,
+            showextrema,
+            vert,
+            colors,
+            label: None,
+            color_idx: idx,
+            alpha: 0.3,
+            points,
+        });
+
+        Ok(())
     }
 
     #[pyo3(signature = (x, cmap="viridis", aspect="equal", vmin=None, vmax=None, alpha=None, origin=None, interpolation=None, norm=None))]

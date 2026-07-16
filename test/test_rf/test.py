@@ -466,6 +466,7 @@ plt.clf()
 ro_ns.mean_s_deg.plot_s_re()
 plt.savefig('./test/test_rf/test33.png')
 plt.clf()
+plt.close()
 
 ro_ns.plot_uncertainty_bounds_s_db()
 plt.savefig('./test/test_rf/test34.png')
@@ -474,3 +475,23 @@ plt.clf()
 ro_ns.plot_uncertainty_bounds_s_deg()
 plt.savefig('./test/test_rf/test35.png')
 plt.clf()
+
+rf.stylely()
+ro_ns_interp = ro_ns.interpolate_frequency(rf.Frequency(500, 600, 15, "GHz"))
+ro_ns_interp.plot_violin("s_db")
+plt.savefig('./test/test_rf/test36.png')
+plt.clf()
+
+rf.stylely()
+ro_ns_interp.plot_violin("s_deg")
+plt.savefig('./test/test_rf/test37.png')
+plt.clf()
+
+pprint(58, ro_ns.write_touchstone(dir='/Users/user/Desktop/rust_project/rsplotlib/test/test_rf/data'))
+
+rf.io.write('./test/test_rf/data/ro set.ns', ro_ns)
+
+ro_ns = rf.io.read('./test/test_rf/data/ro set.ns')
+pprint(59, ro_ns)
+
+ro_ns.write_spreadsheet('./test/test_rf/data/ro_spreadsheet.xls', form='db')

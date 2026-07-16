@@ -2240,7 +2240,7 @@ class Network:
         )
         ntwk.frequency._f = self.frequency._f.copy()
         ntwk.frequency.unit = self.frequency.unit
-        ntwk.port_modes = self.port_modes.copy()
+        ntwk.port_modes = np.array(self.port_modes)
 
         if self.params is not None:
             ntwk.params = self.params.copy()
@@ -2762,7 +2762,13 @@ class Network:
         # creating a new array with shape (nfreqs, nports, nports*2)
         if form == "ri":
             formatDic = {"labelA": "Re", "labelB": "Im", "param": parameter}
-            data = np.ascontiguousarray(pdata).view(float)
+            data = np.empty(
+                (pdata.shape[0],
+                 pdata.shape[1],
+                 pdata.shape[2] * 2),
+                dtype='float64')
+            data[:, :, 0::2] = np.real(pdata)
+            data[:, :, 1::2] = np.imag(pdata)
         elif form == "db":
             formatDic = {"labelA": "dB", "labelB": "ang", "param": parameter}
             data = np.empty(
@@ -5276,10 +5282,10 @@ class Network:
         else:
             N = [n]
 
-        if 'label' not in kwargs.keys():
-            gen_label = True
-        else:
-            gen_label = False
+        # if 'label' not in kwargs.keys():
+        #     gen_label = True
+        # else:
+        #     gen_label = False
 
         if conversion in ["time_impulse", "time_step"]:
             xlabel = "Time (ns)"
@@ -5303,16 +5309,18 @@ class Network:
                 # set the legend label for this trace to the networks
                 # name if it exists, and they didn't pass a name key in
                 # the kwargs
-                if gen_label:
-                    kwargs['label'] = rfplt._get_label_str(
-                        self, attribute[0].upper(), m, n)
-
+                # if gen_label:
+                #     kwargs['label'] = kwargs['label']
+                if 'label' in kwargs.keys():
+                    label_ = kwargs['label']
+                else:
+                    label_ = ""
                 if conversion in ["time_impulse", "time_step"]:
                     rfplt.plot_rectangular(x=x * 1e9,
                                            y=y[:, m, n],
                                            x_label=xlabel,
                                            y_label=y_label,
-                                           show_legend=show_legend, ax=ax,
+                                           show_legend=show_legend, ax=ax, label=label_,
                                            **kwargs)
 
                 else:
@@ -5410,7 +5418,7 @@ class Network:
         return rfplt.plot_prop_polar(self, *args, **kwargs)
 
     def _fmt_trace_name(self, m: int, n: int) -> str:
-        port_sep = "_" if self.nports > 9 else ""
+        # port_sep = "_" if self.nports > 9 else ""
         
         mode_m = self.port_modes[m]
         mode_n = self.port_modes[n]
@@ -5423,10 +5431,15 @@ class Network:
         mode_m = str(mode_m)
         mode_n = str(mode_n)
         
+        if mode_m == 'None' or mode_m == '0.0':
+            mode_m = 'S'
+        if mode_n == 'None' or mode_n == '0.0':
+            mode_n = 'S'
+        
         subscript = f"{mode_m.lower()}{mode_n.lower()}"
         subscript = "" if subscript == "ss" else subscript
 
-        return f"{subscript}{m + 1}{port_sep}{n + 1}"
+        return f"{subscript}{m + 1}{n + 1}"
 
 
 for func_name, (_func, prop_name,

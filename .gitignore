@@ -33,6 +33,7 @@ debug.md
 out/
 test_plot/
 test_rf_1/
+test_data/
 
 wheelhouse/
 N237S NB.csv
