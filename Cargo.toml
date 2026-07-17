@@ -20,10 +20,10 @@ ab_glyph = "0.2.32"
 plotters-backend = "0.3.7"
 
 [profile.release]
-lto = "fat"
-codegen-units = 1
-opt-level = 3
-strip = "symbols"
+opt-level = 2          # 通常 opt-level=2 已经足够，3 可能带来边际收益而时间翻倍
+lto = "thin"           # 用 ThinLTO 代替 fat LTO，编译速度和内存占用大幅改善，性能损失极小
+codegen-units = 16     # ThinLTO 允许并行，设置合理数量（如 CPU 核心数）
+strip = true           # 或 "symbols"，效果相同
 
 [profile.dev]
 opt-level = 0
