@@ -3,7 +3,7 @@
 Matplotlib
 **********
 
-Draw networks with rsplotlib.
+Draw networks with matplotlib.
 
 Examples
 --------
@@ -12,9 +12,9 @@ Examples
 
 See Also
 --------
- - :doc:`rstplotlib <rstplotlib:index>`
- - :func:`rstplotlib.pyplot.scatter`
- - :obj:`rstplotlib.patches.FancyArrowPatch`
+ - :doc:`matplotlib <matplotlib:index>`
+ - :func:`matplotlib.pyplot.scatter`
+ - :obj:`matplotlib.patches.FancyArrowPatch`
 """
 
 import collections
@@ -22,11 +22,12 @@ import itertools
 import math
 from numbers import Number
 
+import matplotlib.pyplot as plt
 import networkx as nx
 
 __all__ = [
     "display",
-    "apply_rstplotlib_colors",
+    "apply_matplotlib_colors",
     "draw",
     "draw_networkx",
     "draw_networkx_nodes",
@@ -45,13 +46,13 @@ __all__ = [
 ]
 
 
-def apply_rstplotlib_colors(
+def apply_matplotlib_colors(
     G, src_attr, dest_attr, map, vmin=None, vmax=None, nodes=True
 ):
     """
-    Apply colors from a rsplotlib colormap to a graph.
+    Apply colors from a matplotlib colormap to a graph.
 
-    Reads values from the `src_attr` and use a rsplotlib colormap
+    Reads values from the `src_attr` and use a matplotlib colormap
     to produce a color. Write the color to `dest_attr`.
 
     Parameters
@@ -65,8 +66,8 @@ def apply_rstplotlib_colors(
     dest_attr : str or other attribute name
         The name of the attribute to write to on the graph.
 
-    map : rsplotlib.colormap
-        The rsplotlib colormap to use.
+    map : matplotlib.colormap
+        The matplotlib colormap to use.
 
     vmin : float, default None
         The minimum value for scaling the colormap. If `None`, find the
@@ -79,7 +80,7 @@ def apply_rstplotlib_colors(
     nodes : bool, default True
         Whether the attribute names are edge attributes or node attributes.
     """
-    import rsplotlib as mpl
+    import matplotlib as mpl
 
     if nodes:
         type_iter = G.nodes()
@@ -171,7 +172,7 @@ class CurvedArrowTextBase:
         # Fractional label position
         # Text position at a proportion t along the line in display coords
         # default is 0.5 so text appears at the halfway point
-        import rsplotlib as mpl
+        import matplotlib as mpl
         import rsnumpy as np
 
         t = self.label_pos
@@ -191,16 +192,14 @@ class CurvedArrowTextBase:
         else:
             if not isinstance(
                 conn,
-                mpl.patches.ConnectionStyle.Angle
-                | mpl.patches.ConnectionStyle.Arc
-                | mpl.patches.ConnectionStyle.Bar,
+                mpl.patches.ConnectionStyle.Angle | mpl.patches.ConnectionStyle.Arc | mpl.patches.ConnectionStyle.Bar,
             ):
                 msg = f"invalid connection style: {type(conn)}"
                 raise TypeError(msg)
             # A. Collect lines
             codes = path_disp.codes
             lines = [
-                points[i - 1 : i + 1]
+                points[i - 1:i + 1]
                 for i in range(1, len(points))
                 if codes[i] == mpl.path.Path.LINETO
             ]
@@ -236,7 +235,11 @@ class CurvedArrowTextBase:
             else:
                 change_x = (cx2 - cx1) / 2
                 change_y = (cy2 - cy1) / 2
-            angle = np.arctan2(change_y, change_x) / (2 * np.pi) * 360
+            angle_val = np.arctan2(change_y, change_x) / (2 * np.pi) * 360
+            if hasattr(angle_val, 'tolist'):
+                angle = float(angle_val.tolist())
+            else:
+                angle = float(angle_val)
             # Text is "right way up"
             if angle > 90:
                 angle -= 180
@@ -299,7 +302,7 @@ def display(
             * alpha : 1.0
             * h_align : center
             * v_align : center
-            * bbox : Dict describing a `rstplotlib.patches.FancyBboxPatch`.
+            * bbox : Dict describing a `matplotlib.patches.FancyBboxPatch`.
               Default is None.
 
         * - node_shape
@@ -333,7 +336,7 @@ def display(
             * family : sans serif
             * weight : normal
             * alpha : 1.0
-            * bbox : Dict describing a `rstplotlib.patches.FancyBboxPatch`.
+            * bbox : Dict describing a `matplotlib.patches.FancyBboxPatch`.
               Default {"boxstyle": "round", "ec": (1.0, 1.0, 1.0), "fc": (1.0, 1.0, 1.0)}
             * h_align : "center"
             * v_align : "center"
@@ -367,8 +370,8 @@ def display(
     G : graph
         A networkx graph
 
-    canvas : rsplotlib Axes object, optional
-        Draw the graph in specified rsplotlib axes
+    canvas : matplotlib Axes object, optional
+        Draw the graph in specified matplotlib axes
 
     node_pos : string or function, default "pos"
         A string naming the node attribute storing the position of nodes as a tuple.
@@ -406,13 +409,13 @@ def display(
             one of "left", "center", "right"; default: "center"
         * v_align : The vertical alignment of the label.
             one of "top", "center", "bottom"; default: "center"
-        * bbox : A dict of parameters for `rstplotlib.patches.FancyBboxPatch`.
+        * bbox : A dict of parameters for `matplotlib.patches.FancyBboxPatch`.
 
         Visible nodes without this attribute will be treated as if the value was True.
 
     node_shape : string, default "shape"
         A string naming the node attribute which stores the label of each node.
-        The values of this attribute are expected to be one of the rsplotlib shapes,
+        The values of this attribute are expected to be one of the matplotlib shapes,
         one of 'so^>v<dph8'. Visible nodes without this attribute will use 'o'.
 
     node_alpha : string, default "alpha"
@@ -461,7 +464,7 @@ def display(
             one of "left", "center", "right"; default: "center"
         * v_align : The vertical alignment of the label.
             one of "top", "center", "bottom"; default: "center"
-        * bbox : A dict of parameters for `rstplotlib.patches.FancyBboxPatch`.
+        * bbox : A dict of parameters for `matplotlib.patches.FancyBboxPatch`.
         * rotate : Whether to rotate labels to lie parallel to the edge, default: True.
         * pos : A float showing how far along the edge to put the label; default: 0.5.
 
@@ -481,7 +484,7 @@ def display(
         each edge. Visible edges without this attribute use ``"-"`` for undirected graphs
         and ``"-|>"`` for directed graphs.
 
-        See `rstplotlib.patches.ArrowStyle` for more options
+        See `matplotlib.patches.ArrowStyle` for more options
 
     edge_arrowsize : string or int, default "arrowsize"
         A string naming the edge attribute which stores the size of the arrowhead for each
@@ -493,8 +496,8 @@ def display(
        value, resulting an a straight line between the two nodes. Curvature can be given
        as 'arc3,rad=0.2' to specify both the style and radius of curvature.
 
-       Please see `rstplotlib.patches.ConnectionStyle` and
-       `rstplotlib.patches.FancyArrowPatch` for more information.
+       Please see `matplotlib.patches.ConnectionStyle` and
+       `matplotlib.patches.FancyArrowPatch` for more information.
 
     edge_source_margin : string or int, default "source_margin"
         A string naming the edge attribute which stores the minimum margin (gap) between
@@ -507,7 +510,7 @@ def display(
         will use a default value of 0.
 
     hide_ticks : bool, default True
-        Weather to remove the ticks from the axes of the rsplotlib object.
+        Weather to remove the ticks from the axes of the matplotlib object.
 
     Raises
     ------
@@ -526,8 +529,8 @@ def display(
     """
     from collections import Counter
 
-    import rsplotlib as mpl
-    import rsplotlib.pyplot as plt
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
     import rsnumpy as np
 
     defaults = {
@@ -594,7 +597,7 @@ def display(
             labelleft=False,
         )
 
-    ### Helper methods and classes
+    # Helper methods and classes
 
     def node_property_sequence(seq, attr):
         """Return a list of attribute values for `seq`, using a default if needed"""
@@ -614,9 +617,9 @@ def display(
         # it must be a user-default value. Allow attr=None to tell draw to skip
         # attributes which are on the graph
         if (
-            attr is not None
-            and nx.get_node_attributes(node_subgraph, attr) == {}
-            and any(attr == v for k, v in kwargs.items() if "node" in k)
+            attr is not None and nx.get_node_attributes(
+                node_subgraph, attr) == {} and any(
+                    attr == v for k, v in kwargs.items() if "node" in k)
         ):
             return [attr for _ in seq]
 
@@ -649,12 +652,8 @@ def display(
 
     def collection_compatible(e):
         return (
-            get_edge_attr(e, "arrowstyle") == "-"
-            and get_edge_attr(e, "curvature") == "arc3"
-            and get_edge_attr(e, "source_margin") == 0
-            and get_edge_attr(e, "target_margin") == 0
-            # Self-loops will use fancy arrow patches
-            and e[0] != e[1]
+            get_edge_attr(e, "arrowstyle") == "-" and get_edge_attr(e, "curvature") == "arc3" and get_edge_attr(
+                e, "source_margin") == 0 and get_edge_attr(e, "target_margin") == 0 and e[0] != e[1]
         )
 
     def edge_property_sequence(seq, attr):
@@ -671,9 +670,8 @@ def display(
                     raise nx.NetworkXError(f"Attribute '{attr}' missing for edge {e}")
 
         if (
-            attr is not None
-            and nx.get_edge_attributes(edge_subgraph, attr) == {}
-            and any(attr == v for k, v in kwargs.items() if "edge" in k)
+            attr is not None and nx.get_edge_attributes(edge_subgraph, attr) == {} and any(
+                attr == v for k, v in kwargs.items() if "edge" in k)
         ):
             return [attr for _ in seq]
 
@@ -690,9 +688,7 @@ def display(
             raise nx.NetworkXError(f"Attribute '{attr}' missing from edge {e}")
 
         if (
-            attr is not None
-            and nx.get_edge_attributes(edge_subgraph, attr) == {}
-            and attr in kwargs.values()
+            attr is not None and nx.get_edge_attributes(edge_subgraph, attr) == {} and attr in kwargs.values()
         ):
             return attr
 
@@ -710,9 +706,7 @@ def display(
             raise nx.NetworkXError(f"Attribute '{attr}' missing from node {n}")
 
         if (
-            attr is not None
-            and nx.get_node_attributes(subgraph, attr) == {}
-            and attr in kwargs.values()
+            attr is not None and nx.get_node_attributes(subgraph, attr) == {} and attr in kwargs.values()
         ):
             return attr
 
@@ -809,7 +803,7 @@ def display(
     class CurvedArrowText(CurvedArrowTextBase, mpl.text.Text):
         pass
 
-    ### Draw the nodes first
+    # Draw the nodes first
     node_visible = kwargs.get("node_visible", "visible")
     if isinstance(node_visible, bool):
         if node_visible:
@@ -880,8 +874,7 @@ def display(
                                 "border_color",
                                 False,
                             )
-                        )
-                        != "face"
+                        ) != "face"
                         else color[i]
                     )
                     for i, n in enumerate(nodes_with_shape)
@@ -898,7 +891,7 @@ def display(
                 zorder=2,
             )
 
-    ### Draw node labels
+    # Draw node labels
     node_label = kwargs.get("node_label", "label")
     # Plot labels if node_label is not None and not False
     if node_label is not None and node_label is not False:
@@ -937,7 +930,7 @@ def display(
                 bbox=lbl.get("bbox", defaults["node_label"]["bbox"]),
             )
 
-    ### Draw edges
+    # Draw edges
 
     edge_visible = kwargs.get("edge_visible", "visible")
     if isinstance(edge_visible, bool):
@@ -995,7 +988,7 @@ def display(
             fancy_arrows[e] = build_fancy_arrow(e)
             canvas.add_patch(fancy_arrows[e])
 
-    ### Draw edge labels
+    # Draw edge labels
     edge_label = kwargs.get("edge_label", "label")
     default_dict = {}
     if isinstance(edge_label, dict):
@@ -1089,10 +1082,10 @@ def display(
 
 
 def draw(G, pos=None, ax=None, **kwds):
-    """Draw the graph G with rsplotlib.
+    """Draw the graph G with matplotlib.
 
     Draw the graph as a simple representation with no node
-    labels or edge labels and using the full rsplotlib figure area
+    labels or edge labels and using the full matplotlib figure area
     and no axis labels by default.  See draw_networkx() for more
     full-featured drawing that allows title, axis labels etc.
 
@@ -1107,8 +1100,8 @@ def draw(G, pos=None, ax=None, **kwds):
         See :py:mod:`networkx.drawing.layout` for functions that
         compute node positions.
 
-    ax : rsplotlib Axes object, optional
-        Draw the graph in specified rsplotlib axes.
+    ax : matplotlib Axes object, optional
+        Draw the graph in specified matplotlib axes.
 
     kwds : optional keywords
         See networkx.draw_networkx() for a description of optional keywords.
@@ -1136,7 +1129,7 @@ def draw(G, pos=None, ax=None, **kwds):
 
     With pyplot use
 
-    >>> import rsplotlib.pyplot as plt
+    >>> import matplotlib.pyplot as plt
     >>> G = nx.dodecahedral_graph()
     >>> nx.draw(G)  # networkx draw()
     >>> plt.draw()  # pyplot draw()
@@ -1145,7 +1138,7 @@ def draw(G, pos=None, ax=None, **kwds):
     https://networkx.org/documentation/latest/auto_examples/index.html
     """
 
-    import rsplotlib.pyplot as plt
+    import matplotlib.pyplot as plt
 
     if ax is None:
         cf = plt.gcf()
@@ -1168,9 +1161,9 @@ def draw(G, pos=None, ax=None, **kwds):
 
 
 def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
-    r"""Draw the graph G using rsplotlib.
+    r"""Draw the graph G using matplotlib.
 
-    Draw the graph with rsplotlib with options for node positions,
+    Draw the graph with matplotlib with options for node positions,
     labeling, titles, and many other drawing features.
     See draw() for simple drawing without labels or axes.
 
@@ -1187,8 +1180,8 @@ def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
 
     arrows : bool or None, optional (default=None)
         If `None`, directed graphs draw arrowheads with
-        `~rstplotlib.patches.FancyArrowPatch`, while undirected graphs draw edges
-        via `~rstplotlib.collections.LineCollection` for speed.
+        `~matplotlib.patches.FancyArrowPatch`, while undirected graphs draw edges
+        via `~matplotlib.collections.LineCollection` for speed.
         If `True`, draw arrowheads with FancyArrowPatches (bendable and stylish).
         If `False`, draw edges using LineCollection (linear and fast).
         For directed graphs, if True draw arrowheads.
@@ -1198,19 +1191,19 @@ def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
         For directed graphs, choose the style of the arrowsheads.
         For undirected graphs default to '-'
 
-        See `rstplotlib.patches.ArrowStyle` for more options.
+        See `matplotlib.patches.ArrowStyle` for more options.
 
     arrowsize : int or list (default=10)
         For directed graphs, choose the size of the arrow head's length and
         width. A list of values can be passed in to assign a different size for arrow head's length and width.
-        See `rstplotlib.patches.FancyArrowPatch` for attribute `mutation_scale`
+        See `matplotlib.patches.FancyArrowPatch` for attribute `mutation_scale`
         for more info.
 
     with_labels :  bool (default=True)
         Set to True to draw labels on the nodes.
 
-    ax : rsplotlib Axes object, optional
-        Draw the graph in the specified rsplotlib axes.
+    ax : matplotlib Axes object, optional
+        Draw the graph in the specified matplotlib axes.
 
     nodelist : list (default=list(G))
         Draw only specified nodes
@@ -1227,16 +1220,16 @@ def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
         length as nodelist. Color can be string or rgb (or rgba) tuple of
         floats from 0-1. If numeric values are specified they will be
         mapped to colors using the cmap and vmin,vmax parameters. See
-        rsplotlib.scatter for more details.
+        matplotlib.scatter for more details.
 
     node_shape :  string (default='o')
-        The shape of the node.  Specification is as rsplotlib.scatter
+        The shape of the node.  Specification is as matplotlib.scatter
         marker, one of 'so^>v<dph8'.
 
     alpha : float or None (default=None)
         The node and edge transparency
 
-    cmap : rsplotlib colormap, optional
+    cmap : matplotlib colormap, optional
         Colormap for mapping intensities of nodes
 
     vmin,vmax : float, optional
@@ -1254,7 +1247,7 @@ def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
         floats from 0-1. If numeric values are specified they will be
         mapped to colors using the edge_cmap and edge_vmin,edge_vmax parameters.
 
-    edge_cmap : rsplotlib colormap, optional
+    edge_cmap : matplotlib colormap, optional
         Colormap for mapping intensities of edges
 
     edge_vmin,edge_vmax : floats, optional
@@ -1263,7 +1256,7 @@ def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
     style : string (default=solid line)
         Edge line style e.g.: '-', '--', '-.', ':'
         or words like 'solid' or 'dashed'.
-        (See `rstplotlib.patches.FancyArrowPatch`: `linestyle`)
+        (See `matplotlib.patches.FancyArrowPatch`: `linestyle`)
 
     labels : dictionary (default=None)
         Node labels in a dictionary of text labels keyed by node
@@ -1304,7 +1297,7 @@ def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
     >>> nx.draw(G)
     >>> nx.draw(G, pos=nx.spring_layout(G))  # use spring layout
 
-    >>> import rsplotlib.pyplot as plt
+    >>> import matplotlib.pyplot as plt
     >>> limits = plt.axis("off")  # turn off axis
 
     Also see the NetworkX drawing examples at
@@ -1320,7 +1313,7 @@ def draw_networkx(G, pos=None, arrows=None, with_labels=True, **kwds):
     """
     from inspect import signature
 
-    import rsplotlib.pyplot as plt
+    import matplotlib.pyplot as plt
 
     # Get all valid keywords by inspecting the signatures of draw_networkx_nodes,
     # draw_networkx_edges, draw_networkx_labels
@@ -1387,8 +1380,8 @@ def draw_networkx_nodes(
         A dictionary with nodes as keys and positions as values.
         Positions should be sequences of length 2.
 
-    ax : rsplotlib Axes object, optional
-        Draw the graph in the specified rsplotlib axes.
+    ax : matplotlib Axes object, optional
+        Draw the graph in the specified matplotlib axes.
 
     nodelist : list (default list(G))
         Draw only specified nodes
@@ -1401,10 +1394,10 @@ def draw_networkx_nodes(
         length as nodelist. Color can be string or rgb (or rgba) tuple of
         floats from 0-1. If numeric values are specified they will be
         mapped to colors using the cmap and vmin,vmax parameters. See
-        rsplotlib.scatter for more details.
+        matplotlib.scatter for more details.
 
     node_shape :  string (default='o')
-        The shape of the node.  Specification is as rsplotlib.scatter
+        The shape of the node.  Specification is as matplotlib.scatter
         marker, one of 'so^>v<dph8'.
 
     alpha : float or array of floats (default=None)
@@ -1413,7 +1406,7 @@ def draw_networkx_nodes(
         if it is an array, the elements of alpha will be applied to the colors
         in order (cycling through alpha multiple times if necessary).
 
-    cmap : rsplotlib colormap (default=None)
+    cmap : matplotlib colormap (default=None)
         Colormap for mapping intensities of nodes
 
     vmin,vmax : floats or None (default=None)
@@ -1426,7 +1419,7 @@ def draw_networkx_nodes(
         Colors of node borders. Can be a single color or a sequence of colors with the
         same length as nodelist. Color can be string or rgb (or rgba) tuple of floats
         from 0-1. If numeric values are specified they will be mapped to colors
-        using the cmap and vmin,vmax parameters. See `~rstplotlib.pyplot.scatter` for more details.
+        using the cmap and vmin,vmax parameters. See `~matplotlib.pyplot.scatter` for more details.
 
     label : [None | string]
         Label for legend
@@ -1434,8 +1427,8 @@ def draw_networkx_nodes(
     margins : float or 2-tuple, optional
         Sets the padding for axis autoscaling. Increase margin to prevent
         clipping for nodes that are near the edges of an image. Values should
-        be in the range ``[0, 1]``. See :meth:`rstplotlib.axes.Axes.margins`
-        for details. The default is `None`, which uses the rsplotlib default.
+        be in the range ``[0, 1]``. See :meth:`matplotlib.axes.Axes.margins`
+        for details. The default is `None`, which uses the matplotlib default.
 
     hide_ticks : bool, optional
         Hide ticks of axes. When `True` (the default), ticks and ticklabels
@@ -1444,7 +1437,7 @@ def draw_networkx_nodes(
 
     Returns
     -------
-    rsplotlib.collections.PathCollection
+    matplotlib.collections.PathCollection
         `PathCollection` of the nodes.
 
     Examples
@@ -1465,9 +1458,9 @@ def draw_networkx_nodes(
     """
     from collections.abc import Iterable
 
-    import rsplotlib as mpl
-    import rsplotlib.collections  # call as mpl.collections
-    import rsplotlib.pyplot as plt
+    import matplotlib as mpl
+    import matplotlib.collections  # call as mpl.collections
+    import matplotlib.pyplot as plt
     import rsnumpy as np
     if ax is None:
         ax = plt.gca()
@@ -1528,12 +1521,12 @@ def draw_networkx_nodes(
 
 
 class FancyArrowFactory:
-    """Draw arrows with `rstplotlib.patches.FancyarrowPatch`"""
+    """Draw arrows with `matplotlib.patches.FancyarrowPatch`"""
 
     class ConnectionStyleFactory:
         def __init__(self, connectionstyles, selfloop_height, ax=None):
-            import rsplotlib as mpl
-            import rsplotlib.path  # call as mpl.path
+            import matplotlib as mpl
+            import matplotlib.path  # call as mpl.path
             import rsnumpy as np
 
             self.ax = ax
@@ -1608,9 +1601,8 @@ class FancyArrowFactory:
         min_target_margin=0,
         ax=None,
     ):
-        import rsplotlib as mpl
-        import rsplotlib.patches  # call as mpl.patches
-        import rsplotlib.pyplot as plt
+        import matplotlib as mpl
+        import matplotlib.patches  # call as mpl.patches
         import rsnumpy as np
 
         if isinstance(connectionstyle, str):
@@ -1647,18 +1639,14 @@ class FancyArrowFactory:
         shrink_source = 0  # space from source to tail
         shrink_target = 0  # space from  head to target
         if (
-            self.np.iterable(self.min_source_margin)
-            and not isinstance(self.min_source_margin, str)
-            and not isinstance(self.min_source_margin, tuple)
+            self.np.iterable(self.min_source_margin) and not isinstance(self.min_source_margin, str) and not isinstance(self.min_source_margin, tuple)
         ):
             min_source_margin = self.min_source_margin[i]
         else:
             min_source_margin = self.min_source_margin
 
         if (
-            self.np.iterable(self.min_target_margin)
-            and not isinstance(self.min_target_margin, str)
-            and not isinstance(self.min_target_margin, tuple)
+            self.np.iterable(self.min_target_margin) and not isinstance(self.min_target_margin, str) and not isinstance(self.min_target_margin, tuple)
         ):
             min_target_margin = self.min_target_margin[i]
         else:
@@ -1698,9 +1686,7 @@ class FancyArrowFactory:
             linewidth = self.linewidth
 
         if (
-            self.np.iterable(self.style)
-            and not isinstance(self.style, str)
-            and not isinstance(self.style, tuple)
+            self.np.iterable(self.style) and not isinstance(self.style, str) and not isinstance(self.style, tuple)
         ):
             if len(self.style) > i:
                 linestyle = self.style[i]
@@ -1717,9 +1703,7 @@ class FancyArrowFactory:
             connectionstyle = self.connectionstyle_factory.curved(self.edge_indices[i])
 
         if (
-            self.np.iterable(self.arrowstyle)
-            and not isinstance(self.arrowstyle, str)
-            and not isinstance(self.arrowstyle, tuple)
+            self.np.iterable(self.arrowstyle) and not isinstance(self.arrowstyle, str) and not isinstance(self.arrowstyle, tuple)
         ):
             arrowstyle = self.arrowstyle[i]
         else:
@@ -1804,7 +1788,7 @@ def draw_networkx_edges(
         If more styles than edges are given the styles will be used sequentially
         and not be exhausted.
         Also, `(offset, onoffseq)` tuples can be used as style instead of a strings.
-        (See `rstplotlib.patches.FancyArrowPatch`: `linestyle`)
+        (See `matplotlib.patches.FancyArrowPatch`: `linestyle`)
 
     alpha : float or array of floats (default=None)
         The edge transparency.  This can be a single alpha value,
@@ -1812,19 +1796,19 @@ def draw_networkx_edges(
         if it is an array, the elements of alpha will be applied to the colors
         in order (cycling through alpha multiple times if necessary).
 
-    edge_cmap : rsplotlib colormap, optional
+    edge_cmap : matplotlib colormap, optional
         Colormap for mapping intensities of edges
 
     edge_vmin,edge_vmax : floats, optional
         Minimum and maximum for edge colormap scaling
 
-    ax : rsplotlib Axes object, optional
-        Draw the graph in the specified rsplotlib axes.
+    ax : matplotlib Axes object, optional
+        Draw the graph in the specified matplotlib axes.
 
     arrows : bool or None, optional (default=None)
         If `None`, directed graphs draw arrowheads with
-        `~rstplotlib.patches.FancyArrowPatch`, while undirected graphs draw edges
-        via `~rstplotlib.collections.LineCollection` for speed.
+        `~matplotlib.patches.FancyArrowPatch`, while undirected graphs draw edges
+        via `~matplotlib.collections.LineCollection` for speed.
         If `True`, draw arrowheads with FancyArrowPatches (bendable and stylish).
         If `False`, draw edges using LineCollection (linear and fast).
 
@@ -1834,18 +1818,18 @@ def draw_networkx_edges(
         For directed graphs and `arrows==True` defaults to '-\|>',
         For undirected graphs default to '-'.
 
-        See `rstplotlib.patches.ArrowStyle` for more options.
+        See `matplotlib.patches.ArrowStyle` for more options.
 
     arrowsize : int or list of ints(default=10)
         For directed graphs, choose the size of the arrow head's length and
-        width. See `rstplotlib.patches.FancyArrowPatch` for attribute
+        width. See `matplotlib.patches.FancyArrowPatch` for attribute
         `mutation_scale` for more info.
 
     connectionstyle : string or iterable of strings (default="arc3")
         Pass the connectionstyle parameter to create curved arc of rounding
         radius rad. For example, connectionstyle='arc3,rad=0.2'.
-        See `rstplotlib.patches.ConnectionStyle` and
-        `rstplotlib.patches.FancyArrowPatch` for more info.
+        See `matplotlib.patches.ConnectionStyle` and
+        `matplotlib.patches.FancyArrowPatch` for more info.
         If Iterable, index indicates i'th edge key of MultiGraph
 
     node_size : scalar or array (default=300)
@@ -1857,7 +1841,7 @@ def draw_networkx_edges(
 
     node_shape :  string (default='o')
         The marker used for nodes, used in determining edge positioning.
-        Specification is as a `rstplotlib.markers` marker, e.g. one of 'so^>v<dph8'.
+        Specification is as a `matplotlib.markers` marker, e.g. one of 'so^>v<dph8'.
 
     label : None or string
         Label for legend
@@ -1875,7 +1859,7 @@ def draw_networkx_edges(
 
     Returns
     -------
-     rsplotlib.collections.LineCollection or a list of rsplotlib.patches.FancyArrowPatch
+     matplotlib.collections.LineCollection or a list of matplotlib.patches.FancyArrowPatch
         If ``arrows=True``, a list of FancyArrowPatches is returned.
         If ``arrows=False``, a LineCollection is returned.
         If ``arrows=None`` (the default), then a LineCollection is returned if
@@ -1890,7 +1874,7 @@ def draw_networkx_edges(
     Be sure to include `node_size` as a keyword argument; arrows are
     drawn considering the size of nodes.
 
-    Self-loops are always drawn with `~rstplotlib.patches.FancyArrowPatch`
+    Self-loops are always drawn with `~matplotlib.patches.FancyArrowPatch`
     regardless of the value of `arrows` or whether `G` is directed.
     When ``arrows=False`` or ``arrows=None`` and `G` is undirected, the
     FancyArrowPatches corresponding to the self-loops are not explicitly
@@ -1911,9 +1895,9 @@ def draw_networkx_edges(
 
     The FancyArrowPatches corresponding to self-loops are not always
     returned, but can always be accessed via the ``patches`` attribute of the
-    `rstplotlib.Axes` object.
+    `matplotlib.Axes` object.
 
-    >>> import rsplotlib.pyplot as plt
+    >>> import matplotlib.pyplot as plt
     >>> fig, ax = plt.subplots()
     >>> G = nx.Graph([(0, 1), (0, 0)])  # Self-loop at node 0
     >>> edge_collection = nx.draw_networkx_edges(G, pos=nx.circular_layout(G), ax=ax)
@@ -1933,10 +1917,10 @@ def draw_networkx_edges(
     """
     import warnings
 
-    import rsplotlib as mpl
-    import rsplotlib.collections  # call as mpl.collections
-    import rsplotlib.colors  # call as mpl.colors
-    import rsplotlib.pyplot as plt
+    import matplotlib as mpl
+    import matplotlib.collections  # call as mpl.collections
+    import matplotlib.colors  # call as mpl.colors
+    import matplotlib.pyplot as plt
     import rsnumpy as np
 
     # The default behavior is to use LineCollection to draw edges for
@@ -2016,11 +2000,9 @@ def draw_networkx_edges(
     edge_pos = np.asarray([(pos[e[0]], pos[e[1]]) for e in edgelist])
 
     # Check if edge_color is an array of floats and map to edge_cmap.
-    # This is the only case handled differently from rsplotlib
+    # This is the only case handled differently from matplotlib
     if (
-        np.iterable(edge_color)
-        and (len(edge_color) == len(edge_pos))
-        and np.all([isinstance(c, Number) for c in edge_color])
+        np.iterable(edge_color) and (len(edge_color) == len(edge_pos)) and np.all([isinstance(c, Number) for c in edge_color])
     ):
         if edge_cmap is not None:
             assert isinstance(edge_cmap, mpl.colors.Colormap)
@@ -2167,7 +2149,7 @@ def draw_networkx_labels(
     alpha : float or None or dictionary of nodes to floats (default=None)
         The text transparency.
 
-    bbox : rsplotlib bbox, (default is rsplotlib's ax.text default)
+    bbox : matplotlib bbox, (default is matplotlib's ax.text default)
         Specify text box properties (e.g. shape, color etc.) for node labels.
 
     horizontalalignment : string or array of strings (default='center')
@@ -2178,8 +2160,8 @@ def draw_networkx_labels(
         Vertical alignment {'center', 'top', 'bottom', 'baseline', 'center_baseline'}.
         If an array is specified it must be the same length as `nodelist`.
 
-    ax : rsplotlib Axes object, optional
-        Draw the graph in the specified rsplotlib axes.
+    ax : matplotlib Axes object, optional
+        Draw the graph in the specified matplotlib axes.
 
     clip_on : bool (default=True)
         Turn on clipping of node labels at axis boundaries
@@ -2210,7 +2192,7 @@ def draw_networkx_labels(
     draw_networkx_edges
     draw_networkx_edge_labels
     """
-    import rsplotlib.pyplot as plt
+    import matplotlib.pyplot as plt
 
     if ax is None:
         ax = plt.gca()
@@ -2327,7 +2309,7 @@ def draw_networkx_edge_labels(
     alpha : float or None (default=None)
         The text transparency
 
-    bbox : rsplotlib bbox, optional
+    bbox : matplotlib bbox, optional
         Specify text box properties (e.g. shape, color etc.) for edge labels.
         Default is {boxstyle='round', ec=(1.0, 1.0, 1.0), fc=(1.0, 1.0, 1.0)}.
 
@@ -2337,8 +2319,8 @@ def draw_networkx_edge_labels(
     verticalalignment : string (default='center')
         Vertical alignment {'center', 'top', 'bottom', 'baseline', 'center_baseline'}
 
-    ax : rsplotlib Axes object, optional
-        Draw the graph in the specified rsplotlib axes.
+    ax : matplotlib Axes object, optional
+        Draw the graph in the specified matplotlib axes.
 
     rotate : bool (default=True)
         Rotate edge labels to lie parallel to edges
@@ -2355,8 +2337,8 @@ def draw_networkx_edge_labels(
     connectionstyle : string or iterable of strings (default="arc3")
         Pass the connectionstyle parameter to create curved arc of rounding
         radius rad. For example, connectionstyle='arc3,rad=0.2'.
-        See `rstplotlib.patches.ConnectionStyle` and
-        `rstplotlib.patches.FancyArrowPatch` for more info.
+        See `matplotlib.patches.ConnectionStyle` and
+        `matplotlib.patches.FancyArrowPatch` for more info.
         If Iterable, index indicates i'th edge key of MultiGraph
 
     hide_ticks : bool, optional
@@ -2385,8 +2367,8 @@ def draw_networkx_edge_labels(
     draw_networkx_edges
     draw_networkx_labels
     """
-    import rsplotlib as mpl
-    import rsplotlib.pyplot as plt
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
     import rsnumpy as np
 
     class CurvedArrowText(CurvedArrowTextBase, mpl.text.Text):
@@ -2911,7 +2893,7 @@ def apply_alpha(colors, alpha, elem_list, cmap=None, vmin=None, vmax=None):
         or a sequence of colors with the same length as nodelist.
         If numeric values are specified they will be mapped to
         colors using the cmap and vmin,vmax parameters.  See
-        rsplotlib.scatter for more details.
+        matplotlib.scatter for more details.
 
     alpha : float or array of floats
         Alpha values for elements. This can be a single alpha value, in
@@ -2923,7 +2905,7 @@ def apply_alpha(colors, alpha, elem_list, cmap=None, vmin=None, vmax=None):
         The list of elements which are being colored. These could be nodes,
         edges or labels.
 
-    cmap : rsplotlib colormap
+    cmap : matplotlib colormap
         Color map for use if colors is a list of floats corresponding to points
         on a color mapping.
 
@@ -2939,9 +2921,9 @@ def apply_alpha(colors, alpha, elem_list, cmap=None, vmin=None, vmax=None):
     """
     from itertools import cycle, islice
 
-    import rsplotlib as mpl
-    import rsplotlib.cm  # call as mpl.cm
-    import rsplotlib.colors  # call as mpl.colors
+    import matplotlib as mpl
+    import matplotlib.cm  # call as mpl.cm
+    import matplotlib.colors  # call as mpl.colors
     import rsnumpy as np
 
     # If we have been provided with a list of numbers as long as elem_list,
@@ -2950,7 +2932,7 @@ def apply_alpha(colors, alpha, elem_list, cmap=None, vmin=None, vmax=None):
         mapper = mpl.cm.ScalarMappable(cmap=cmap)
         mapper.set_clim(vmin, vmax)
         rgba_colors = mapper.to_rgba(colors)
-    # Otherwise, convert colors to rsplotlib's RGB using the colorConverter
+    # Otherwise, convert colors to matplotlib's RGB using the colorConverter
     # object.  These are converted to rsnumpy ndarrays to be consistent with the
     # to_rgba method of ScalarMappable.
     else:

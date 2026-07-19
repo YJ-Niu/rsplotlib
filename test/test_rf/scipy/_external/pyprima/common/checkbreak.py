@@ -12,6 +12,7 @@ from .infos import INFO_DEFAULT, NAN_INF_X, NAN_INF_F, FTARGET_ACHIEVED, MAXFUN_
 
 import rsnumpy as np
 
+
 def checkbreak_unc(maxfun, nf, f, ftarget, x):
     '''
     This module checks whether to break out of the solver loop in the unconstrained case.
@@ -31,9 +32,9 @@ def checkbreak_unc(maxfun, nf, f, ftarget, x):
     # With the moderated extreme barrier, F cannot be NaN/+Inf.
     assert not (any(np.isnan(f)) or any(np.isposinf(f))), f'F is not NaN/+Inf {srname}'
 
-    #====================#
+    # ====================#
     # Calculation starts #
-    #====================#
+    # ====================#
 
     # Although X should not contain NaN unless there is a bug, we include the following for security.
     # X can be Inf, as finite + finite can be Inf numerically.
@@ -51,6 +52,7 @@ def checkbreak_unc(maxfun, nf, f, ftarget, x):
         info = MAXFUN_REACHED
 
     return info
+
 
 def checkbreak_con(maxfun, nf, cstrv, ctol, f, ftarget, x):
     '''
@@ -71,9 +73,9 @@ def checkbreak_con(maxfun, nf, cstrv, ctol, f, ftarget, x):
     # With the moderated extreme barrier, F or CSTRV cannot be NaN/+Inf.
     assert not (np.isnan(f) or np.isposinf(f) or np.isnan(cstrv) or np.isposinf(cstrv)), f'F or CSTRV is not NaN/+Inf {srname}'
 
-    #====================#
+    # ====================#
     # Calculation starts #
-    #====================#
+    # ====================#
 
     # Although X should not contain NaN unless there is a bug, we include the following for security.
     # X can be Inf, as finite + finite can be Inf numerically.

@@ -7,7 +7,7 @@ General guidelines for writing good tests:
 - doctests always assume ``import networkx as nx`` so don't add that
 - prefer pytest fixtures over classes with setup methods.
 - use the ``@pytest.mark.parametrize``  decorator
-- use ``pytest.importorskip`` for numpy, scipy, pandas, and rstplotlib b/c of PyPy.
+- use ``pytest.importorskip`` for numpy, scipy, pandas, and matplotlib b/c of PyPy.
   and add the module to the relevant entries below.
 
 """
@@ -131,49 +131,49 @@ def add_nx(doctest_namespace):
 # What dependencies are installed?
 
 try:
-    import rsnumpy as np
+    pass
 
     has_rsnumpy = True
 except ImportError:
     has_rsnumpy = False
 
 try:
-    import scipy as sp
+    pass
 
     has_scipy = True
 except ImportError:
     has_scipy = False
 
 try:
-    import rstplotlib as mpl
+    pass
 
-    has_rstplotlib = True
+    has_matplotlib = True
 except ImportError:
-    has_rstplotlib = False
+    has_matplotlib = False
 
 try:
-    import pandas as pd
+    pass
 
     has_pandas = True
 except ImportError:
     has_pandas = False
 
 try:
-    import pygraphviz
+    pass
 
     has_pygraphviz = True
 except ImportError:
     has_pygraphviz = False
 
 try:
-    import pydot
+    pass
 
     has_pydot = True
 except ImportError:
     has_pydot = False
 
 try:
-    import sympy
+    pass
 
     has_sympy = True
 except ImportError:
@@ -239,7 +239,7 @@ needs_scipy = [
     "linalg/spectrum.py",
     "utils/rcm.py",
 ]
-needs_rstplotlib = ["drawing/nx_pylab.py", "generators/classic.py"]
+needs_matplotlib = ["drawing/nx_pylab.py", "generators/classic.py"]
 needs_pandas = ["convert_matrix.py"]
 needs_pygraphviz = ["drawing/nx_agraph.py"]
 needs_pydot = ["drawing/nx_pydot.py"]
@@ -249,8 +249,8 @@ if not has_rsnumpy:
     collect_ignore += needs_rsnumpy
 if not has_scipy:
     collect_ignore += needs_scipy
-if not has_rstplotlib:
-    collect_ignore += needs_rstplotlib
+if not has_matplotlib:
+    collect_ignore += needs_matplotlib
 if not has_pandas:
     collect_ignore += needs_pandas
 if not has_pygraphviz:
