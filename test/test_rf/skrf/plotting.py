@@ -53,7 +53,7 @@ Convenience plotting functions
 
 """
 from __future__ import annotations
-import matplotlib.pyplot as plt
+import rsplotlib.pyplot as plt
 
 import os
 from collections.abc import Callable
@@ -64,8 +64,8 @@ from numbers import Number
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from matplotlib.axes import Axes
-    from matplotlib.figure import Figure
+    from rsplotlib.axes import Axes
+    from rsplotlib.figure import Figure
 
     from .constants import NumberLike, PrimaryPropertiesT
     from .frequency import Frequency
@@ -85,7 +85,7 @@ SI_PREFIXES_ASCII = 'yzafpnum kMGTPEZY'
 SI_CONVERSION = {key: 10**((8-i)*3) for i, key in enumerate(SI_PREFIXES_ASCII)}
 
 # legend frame style captured by stylely() and injected into legend calls;
-# matplotlib ignores legend.* rcParams and returns no legend handle to restyle
+# rsplotlib ignores legend.* rcParams and returns no legend handle to restyle
 _STYLE_LEGEND_KW: dict = {}
 
 
@@ -108,20 +108,20 @@ def _legend(target, *args, **kwargs):
 def plotting_available() -> bool:
     result = False
     with suppress(ImportError):
-        import matplotlib  # noqa: F401
+        import rsplotlib  # noqa: F401
         result = True
     return result
 
 
 def axes_kwarg(func):
     """
-    This decorator checks if a :class:`matplotlib.axes.Axes` object is passed,
+    This decorator checks if a :class:`rsplotlib.axes.Axes` object is passed,
     if not the current axis will be gathered through :func:`plt.gca`.
 
     Raises
     ------
     RuntimeError
-        When trying to run the decorated function without matplotlib
+        When trying to run the decorated function without rsplotlib
     """
 
     @wraps(func)
@@ -139,12 +139,12 @@ def axes_kwarg(func):
 
 def figure(*args, **kwargs) -> Figure:
     """
-    Wraps the matplotlib figure call and raises if not available.
+    Wraps the rsplotlib figure call and raises if not available.
 
     Raises
     ------
     RuntimeError
-        When trying to get subplots without matplotlib installed.
+        When trying to get subplots without rsplotlib installed.
     """
 
     try:
@@ -155,12 +155,12 @@ def figure(*args, **kwargs) -> Figure:
 
 def subplots(*args, **kwargs) -> tuple[Figure, np.ndarray]:
     """
-    Wraps the matplotlib subplots call and raises if not available.
+    Wraps the rsplotlib subplots call and raises if not available.
 
     Raises
     ------
     RuntimeError
-        When trying to get subplots without matplotlib installed.
+        When trying to get subplots without rsplotlib installed.
     """
 
     try:
@@ -189,7 +189,7 @@ def scale_frequency_ticks(ax: Axes, funit: str):
     Parameters
     ----------
     ax : plt.Axes
-        matplotlib figure axe
+        rsplotlib figure axe
     funit : str
         frequency unit string as in :data:`~skrf.frequency.Frequency.unit`
 
@@ -198,7 +198,7 @@ def scale_frequency_ticks(ax: Axes, funit: str):
     ValueError
         if invalid unit is passed
     """
-    from matplotlib import ticker
+    from rsplotlib import ticker
 
     if funit.lower() == "hz":
         prefix = " "
@@ -215,7 +215,7 @@ def scale_frequency_ticks(ax: Axes, funit: str):
 def _clip_circle_to_disk(cx, cy, radius, disk_r, n=361):
     """Return polyline segments of a circle clipped to a centered disk.
 
-    matplotlib exposes no patch or clip-path API, so Smith-chart circles are
+    rsplotlib exposes no patch or clip-path API, so Smith-chart circles are
     rasterised as polylines and clipped to the chart boundary by hand.
     """
     import math
@@ -285,7 +285,7 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
         draw a rectangular border with axis ticks, around the perimeter
         of the figure. Not used if draw_labels = True.
         Default is False.
-    ax : :class:`matplotlib.pyplot.Axes` or None, optional
+    ax : :class:`rsplotlib.pyplot.Axes` or None, optional
         existing axes to draw smith chart on.
         Default is None (creates a new figure)
     ref_imm : number, optional
@@ -302,7 +302,7 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
 
     """
     # contour holds circles as (center_x, center_y, radius, color) tuples that
-    # are rasterised with ax.plot (matplotlib has no patch support)
+    # are rasterised with ax.plot (rsplotlib has no patch support)
     contour = []
 
     # these are hard-coded on purpose,as they should always be present
@@ -502,7 +502,7 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
         controls the drawing of the legend. Default is True.
     axis : str, optional
         whether or not to autoscale the axis. Default is 'tight'
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None, optional.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None, optional.
         axes to draw on. Default is None (creates a new figure)
     \*args, \*\*kwargs : passed to pylab.plot
 
@@ -573,7 +573,7 @@ def plot_polar(theta: NumberLike, r: NumberLike,
         plot title. Default is None.
     show_legend : Boolean, optional.
         controls the drawing of the legend. Default is True.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure).
     \*args, \*\*kwargs : passed to pylab.plot
 
@@ -603,7 +603,7 @@ def plot_polar(theta: NumberLike, r: NumberLike,
             # So, passing a axe projection not polar is probably undesired
             warnings.warn(
                 f"Projection of the Axes passed as `ax` is not 'polar' but is {
-                    ax.name}." + "See matplotlib documentation to create a polar plot or call this function without the `ax` parameter.",
+                    ax.name}." + "See rsplotlib documentation to create a polar plot or call this function without the `ax` parameter.",
                 stacklevel=2)
 
     ax.plot(theta, r, *args, **kwargs)
@@ -653,7 +653,7 @@ def plot_complex_rectangular(
         plot title. Default is 'Complex Plane'
     show_legend : Boolean, optional.
         controls the drawing of the legend. Default is True.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure)
     \*\*kwargs : passed to pylab.plot
 
@@ -693,7 +693,7 @@ def plot_complex_polar(z: NumberLike,
         plot title. Default is None.
     show_legend : Boolean, optional.
         controls the drawing of the legend. Default is True.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure).
     \*\*kwargs : passed to pylab.plot
 
@@ -749,7 +749,7 @@ def plot_smith(
         controls the drawing of the legend. Default is True.
     axis_equal: Boolean, optional.
         sets axis to be equal increments. Default is 'equal'.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure).
     force_chart : Boolean, optional.
         forces the re-drawing of smith chart. Default is False.
@@ -772,7 +772,7 @@ def plot_smith(
     if ax is None:
         ax = plt.gca()
 
-    # matplotlib exposes no drawn-patch introspection, so (re)draw the chart
+    # rsplotlib exposes no drawn-patch introspection, so (re)draw the chart
     # unless the caller suppresses it via force_chart
     if not force_chart:
         smith(ax=ax, smithR=smith_r, chart_type=chart_type,
@@ -816,10 +816,10 @@ def subplot_params(ntwk: Network, param: str = 's', proj: str = 'db',
 
     Returns
     -------
-    f : :class:`matplotlib.pyplot.Figure`
-        matplotlib Figure
-    ax : :class:`matplotlib.pyplot.Axes`
-        matplotlib Axes
+    f : :class:`rsplotlib.pyplot.Figure`
+        rsplotlib Figure
+    ax : :class:`rsplotlib.pyplot.Axes`
+        rsplotlib Axes
 
     """
  
@@ -860,10 +860,10 @@ def shade_bands(edges: NumberLike, y_range: tuple | None = None,
     y_range : tuple or None, optional.
         y-values to shade in. Default is None.
     cmap : str, optional.
-        see matplotlib.cm  or matplotlib.colormaps for acceptable values.
+        see rsplotlib.cm  or rsplotlib.colormaps for acceptable values.
         Default is 'prism'.
     \*\*kwargs : key word arguments
-        passed to `matplotlib.fill_between`
+        passed to `rsplotlib.fill_between`
 
     Examples
     --------
@@ -894,7 +894,7 @@ def save_all_figs(dir: str = './', format: None | list[str] = None,
         path to save figures into. Default is './'
     format : None or list of strings, optional.
         the types of formats to save figures as. The elements of this
-        list are passed to :func:`matplotlib.pyplot.savefig`. This is a list so that
+        list are passed to :func:`rsplotlib.pyplot.savefig`. This is a list so that
         you can save each figure in multiple formats. Default is None.
     replace_spaces : bool, optional
         default is True.
@@ -942,12 +942,12 @@ def add_markers_to_lines(ax: Axes = None,
 
     Parameters
     ----------
-    ax : matplotlib.Axes or None, optional
+    ax : rsplotlib.Axes or None, optional
         axis which to add markers to.
         Default is current axe gca()
     marker_list : list of string, optional
         list of marker characters. Default is ['o', 'D', 's', '+', 'x'].
-        see matplotlib.plot help for possible marker characters
+        see rsplotlib.plot help for possible marker characters
     markevery : int, optional.
         markevery number of points with a marker.
         Default is 10.
@@ -971,7 +971,7 @@ def legend_off(ax: Axes = None):
 
     Parameters
     ----------
-    ax : matplotlib.Axes or None, optional
+    ax : rsplotlib.Axes or None, optional
         axis to operate on.
         Default is None for current axe gca()
     """
@@ -993,7 +993,7 @@ def scrape_legend(n: int | None = None,
     ----------
     n : int or None, optional.
         Default is None.
-    ax : matplotlib.Axes or None, optional
+    ax : rsplotlib.Axes or None, optional
         axis to operate on.
         Default is None for current axe gca()
     """
@@ -1053,7 +1053,7 @@ def plot_vector(a: complex, off: complex = 0+0j, **kwargs):
 
     Returns
     -------
-    quiver : matplotlib.pyplot.quiver
+    quiver : rsplotlib.pyplot.quiver
     """
  
     return plt.quiver(off.real, off.imag, a.real, a.imag, scale_units='xy',
@@ -1215,7 +1215,7 @@ def plot_s_smith(
             first index
     n : int, optional
             second index
-    ax : matplotlib.Axes object, optional
+    ax : rsplotlib.Axes object, optional
             axes to plot on. in case you want to update an existing
             plot.
     show_legend : boolean, optional
@@ -1232,9 +1232,9 @@ def plot_s_smith(
         draw VSWR circles. If True, default values are used.
 
     \*args : arguments, optional
-            passed to the matplotlib.plot command
+            passed to the rsplotlib.plot command
     \*\*kwargs : keyword arguments, optional
-            passed to the matplotlib.plot command
+            passed to the rsplotlib.plot command
 
 
     See Also
@@ -1267,7 +1267,7 @@ def plot_s_smith(
     else:
         generate_label = False
 
-    # draw the chart once (matplotlib has no drawn-patch introspection)
+    # draw the chart once (rsplotlib has no drawn-patch introspection)
     # only draw the smith chart background if requested
     if draw_chart:
         smith(ax=ax, smithR=r, chart_type=chart_type,
@@ -1305,9 +1305,9 @@ def plot_it_all(netw: Network, *args, **kwargs):
     Parameters
     ----------
     \*args : arguments, optional
-            passed to the matplotlib.plot command
+            passed to the rsplotlib.plot command
     \*\*kwargs : keyword arguments, optional
-            passed to the matplotlib.plot command
+            passed to the rsplotlib.plot command
 
     See Also
     --------
@@ -1334,9 +1334,9 @@ def plot_it_all(netw: Network, *args, **kwargs):
 
 
 def _mplstyle_color(value):
-    """Normalize an mplstyle color token to a form matplotlib accepts.
+    """Normalize an mplstyle color token to a form rsplotlib accepts.
 
-    mplstyle writes bare 6-digit hex (``E5E5E5``); matplotlib wants ``#E5E5E5``.
+    mplstyle writes bare 6-digit hex (``E5E5E5``); rsplotlib wants ``#E5E5E5``.
     Named colors (``white``) and grayscale floats (``0.50``) pass through.
     """
     if not value:
@@ -1350,7 +1350,7 @@ def _mplstyle_color(value):
 
 
 def _read_mplstyle(path: str) -> dict:
-    """Parse a matplotlib style file into a ``{key: raw_value}`` dict.
+    """Parse a rsplotlib style file into a ``{key: raw_value}`` dict.
 
     Comments and blank lines are skipped and inline ``#`` comments stripped.
     Values stay as raw strings for the caller to convert.
@@ -1374,9 +1374,9 @@ def _read_mplstyle(path: str) -> dict:
 
 def _apply_style(plt, style: dict, font_scale: float = 1.0,
                  figsize_override=None, dpi_override=None):
-    """Apply the subset of an mplstyle that the matplotlib backend can honor.
+    """Apply the subset of an mplstyle that the rsplotlib backend can honor.
 
-    matplotlib does not read ``axes.facecolor`` / ``axes.grid`` / tick colors
+    rsplotlib does not read ``axes.facecolor`` / ``axes.grid`` / tick colors
     from rcParams, so those are applied programmatically to the current figure
     and axes. Unsupported keys (e.g. ``axes.prop_cycle`` line colors) are ignored.
     Font sizes (``font.size`` and tick label size) are multiplied by ``font_scale``.
@@ -1417,12 +1417,16 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     if font_size:
         plt.rcParams['font.size'] = font_size
 
-    fig = plt.gcf()
+    try:
+        fig = plt.gcf()
+    except RuntimeError:
+        plt.figure()
+        fig = plt.gcf()
     ax = plt.gca()
 
     if dpi:
         fig.set_dpi(dpi)
-    if figsize and len(figsize) == 2:
+    if figsize and len(figsize) == 2 and hasattr(fig, 'set_size_inches'):
         fig.set_size_inches(figsize)
 
     fig_fc = _mplstyle_color(style.get('figure.facecolor'))
@@ -1433,7 +1437,7 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
         ax.set_facecolor(ax_fc)
 
     # capture legend frame style so _legend() can match the axes background
-    # (matplotlib ignores legend.* rcParams). Default to a semi-transparent frame.
+    # (rsplotlib ignores legend.* rcParams). Default to a semi-transparent frame.
     _STYLE_LEGEND_KW.clear()
     if ax_fc:
         _STYLE_LEGEND_KW['facecolor'] = ax_fc
@@ -1444,8 +1448,8 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
         _STYLE_LEGEND_KW['edgecolor'] = '#999999'
     framealpha = _num('legend.framealpha')
     _STYLE_LEGEND_KW['framealpha'] = 0.5 if framealpha is None else framealpha
-    # shrink legend text 30% relative to matplotlib's default 11pt base size
-    # (matplotlib ignores legend. rcParams, so set it explicitly here).
+    # shrink legend text 30% relative to rsplotlib's default 11pt base size
+    # (rsplotlib ignores legend. rcParams, so set it explicitly here).
     _STYLE_LEGEND_KW['fontsize'] = 11.0 * 0.7
 
     tick_kw = {}
@@ -1489,7 +1493,7 @@ def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',
         style file, by default 'skrf.mplstyle'
     font_scale : float, optional
         multiplier applied to the style's font and tick-label sizes, by default
-        3.0. The style file's base sizes render small at the matplotlib backend's
+        3.0. The style file's base sizes render small at the rsplotlib backend's
         resolution, so they are enlarged for readability.
     figsize : tuple of (width, height) in inches, optional
         overrides the style file's ``figure.figsize``. Use this instead of a
@@ -1500,8 +1504,8 @@ def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',
 
     Notes
     -----
-    The matplotlib backend does not load matplotlib style files nor honor every
-    rcParam the way matplotlib does. This applies the supported subset (figure
+    The rsplotlib backend does not load rsplotlib style files nor honor every
+    rcParam the way rsplotlib does. This applies the supported subset (figure
     size/dpi, font size, figure/axes background, grid, and tick colors) directly
     to the current figure and axes, so it must be called just before plotting.
     Because it styles the *current* figure, do not create a new figure with
@@ -1513,7 +1517,7 @@ def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',
         from .data import pwd  # delayed to solve circular import
     except ImportError as e:
         warnings.warn(
-            f"Could not import matplotlib: {e}", ImportWarning, stacklevel=2)
+            f"Could not import rsplotlib: {e}", ImportWarning, stacklevel=2)
         return
 
     style = _read_mplstyle(os.path.join(pwd, style_file))
@@ -1638,14 +1642,14 @@ def plot_uncertainty_bounds_component(
     n_deviations : int
         number of std deviations to plot as bounds
     alpha : float
-        passed to matplotlib.fill_between() command. [number, 0-1]
+        passed to rsplotlib.fill_between() command. [number, 0-1]
     color_error : str
         color of the +- std dev fill shading. Default is None.
     markevery_error : float
         tbd
     type : str
         if type=='bar', this controls frequency of error bars
-    ax : matplotlib axes object
+    ax : rsplotlib axes object
         Axes to plot on. Default is None.
     ppf : function
         post processing function. a function applied to the
@@ -1797,14 +1801,14 @@ def plot_minmax_bounds_component(
     type : str
         ['shade' | 'bar'], type of plot to draw
     alpha : float
-        passed to matplotlib.fill_between() command. [number, 0-1]
+        passed to rsplotlib.fill_between() command. [number, 0-1]
     color_error : str
         color of the min/max fill shading. Default is None.
     markevery_error : float
         tbd
     type : str
         if type=='bar', this controls frequency of error bars
-    ax : matplotlib axes object
+    ax : rsplotlib axes object
         Axes to plot on. Default is None.
     ppf : function
         post processing function. a function applied to the
@@ -1924,10 +1928,10 @@ def plot_violin(
         The number of points to evaluate each of the gaussian kernel density estimations at.
     bw_method : {'scott', 'silverman'} or float or callable, default: 'scott'
         _description_. Defaults to None.
-    ax : matplotlib axes object
+    ax : rsplotlib axes object
         Axes to plot on. Default is None.
     \*\*kwargs :
-        passed to :meth:`matplotlib.pyplot.violinplot`
+        passed to :meth:`rsplotlib.pyplot.violinplot`
 
     Note
     ----
@@ -2095,7 +2099,7 @@ def signature(
     \*args,\*\*kw : arguments, keyword arguments
         passed to :func:`~pylab.imshow`
     """
-    from matplotlib.dates import date2num
+    from rsplotlib.dates import date2num
     mat = np.array([self[k].__getattribute__(component)[:, m, n]
                     for k in range(len(self))])
 
@@ -2171,7 +2175,7 @@ def plot_contour(freq: Frequency,
     title : str, optional
         Figure title. The default is ''.
     \*\*kwargs : dict
-        Other parameters passed to `matplotlib.plot()`.
+        Other parameters passed to `rsplotlib.plot()`.
 
     Returns
     -------
@@ -2181,7 +2185,7 @@ def plot_contour(freq: Frequency,
         min or max.
 
     """
-    from matplotlib import tri
+    from rsplotlib import tri
     from . import Network
 
     ri = np.linspace(0, 1, 50)
@@ -2233,7 +2237,7 @@ def plot_prop_complex(netw: Network, prop_name: str,
         first index of s-parameter matrix, if None will use all
     n : int, optional
         second index of the s-parameter matrix, if None will use all
-    ax : :class:`matplotlib.Axes` object, optional
+    ax : :class:`rsplotlib.Axes` object, optional
         An existing Axes object to plot on
     show_legend : Boolean
         draw legend or not
@@ -2241,7 +2245,7 @@ def plot_prop_complex(netw: Network, prop_name: str,
         the y-axis label
 
     \*args,\**kwargs : arguments, keyword arguments
-        passed to :func:`matplotlib.plot`
+        passed to :func:`rsplotlib.plot`
 
     Note
     ----
@@ -2299,7 +2303,7 @@ def plot_prop_polar(netw: Network, prop_name: str,
         first index of s-parameter matrix, if None will use all
     n : int, optional
         second index of the s-parameter matrix, if None will use all
-    ax : :class:`matplotlib.Axes` object, optional
+    ax : :class:`rsplotlib.Axes` object, optional
         An existing Axes object to plot on
     show_legend : Boolean
         draw legend or not
@@ -2307,7 +2311,7 @@ def plot_prop_polar(netw: Network, prop_name: str,
         the y-axis label
 
     \*args,\**kwargs : arguments, keyword arguments
-        passed to :func:`matplotlib.plot`
+        passed to :func:`rsplotlib.plot`
 
     Note
     ----
