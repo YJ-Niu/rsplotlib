@@ -30,6 +30,7 @@ Thumbs.db
 *.png
 .trae/
 debug.md
+debug_*.py
 out/
 test_plot/
 test_rf_1/

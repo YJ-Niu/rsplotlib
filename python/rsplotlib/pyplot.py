@@ -4,6 +4,7 @@
 使用方法: import rsplotlib.pyplot as plt
 """
 
+import math
 from . import rsplotlib as _rsplotlib
 from .figure._defaults import DEFAULT_FIGSIZE
 # ============ 样式接口 ============
@@ -279,6 +280,7 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, k
     - mappable: None 或 (cmap名, vmin, vmax)，当 c 为数值数组经 colormap 映射时给出，
       供随后的 plt.colorbar() 绘制颜色条。
     """
+    alpha = alpha if alpha is not None else 1.0
     x = _to_seq(x)
     y = _to_seq(y)
     if hasattr(x, 'ndim') and x.ndim == 0:
@@ -1620,12 +1622,19 @@ def text(x, y, s, fontdict=None, **kwargs):
         x, y: 文本位置 (数据坐标)
         s: 文本内容
         fontdict: 字体属性字典 (可选)
-        **kwargs: 支持 fontsize, color/c, family 等参数
+        **kwargs: 支持 fontsize, color/c, family, ha, va, rotation, dx, dy 等参数
     """
+    import sys
     fontsize = kwargs.get('fontsize', fontdict.get('fontsize', 12) if fontdict else 12)
     color = kwargs.get('color', fontdict.get('color', 'black') if fontdict else 'black')
     c = kwargs.get('c', None)
     family = kwargs.get('family', None)
+    ha = kwargs.get('ha', kwargs.get('horizontalalignment', None))
+    va = kwargs.get('va', kwargs.get('verticalalignment', None))
+    rotation = kwargs.get('rotation', None)
+    dx = kwargs.get('dx', None)
+    dy = kwargs.get('dy', None)
+    bbox = kwargs.get('bbox', None)
     if not isinstance(s, str):
         s = str(s)
     s = _render_mathtext(s)
@@ -1645,7 +1654,7 @@ def text(x, y, s, fontdict=None, **kwargs):
             # 字体注册失败不影响绘制（会回退到默认 sans-serif）
             pass
 
-    return _rsplotlib.text(x, y, s, fontsize, color, c, family)
+    return _rsplotlib.text(x, y, s, fontsize, color, c, family, ha, va, rotation, dx, dy, bbox)
 
 
 def axhline(y=0, **kwargs):
@@ -2998,8 +3007,11 @@ def _patch_axes():
         if mappable is not None:
             self.set_mappable(*mappable)
         if use_multi:
-            return self.scatter_multi(*args)
-        return _orig_scatter(self, *args)
+            self.scatter_multi(*args)
+        else:
+            _orig_scatter(self, *args)
+        from .collections import PathCollection
+        return PathCollection(None)
 
     _rs.Axes.scatter = _scatter
 
@@ -3018,6 +3030,13 @@ def _patch_axes():
         return _ScalarMappable(self)
 
     _rs.Axes.imshow = _imshow
+
+    _orig_tick_params = _rs.Axes.tick_params
+
+    def _tick_params(self, **kwargs):
+        kwargs.pop('which', None)
+        return _orig_tick_params(self, **kwargs)
+    _rs.Axes.tick_params = _tick_params
 
     # pcolormesh / contourf: 后端未原生支持，近似为 imshow 上色
     # (origin='lower', aspect='auto' 使色块填满子图框)。返回可映射句柄供 colorbar 使用。
@@ -3229,12 +3248,24 @@ def _patch_axes():
 
     _orig_text = _rs.Axes.text
 
-    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, **kwargs):
-        # va/ha/rotation 等后端未支持的对齐参数被 **kwargs 吸收后丢弃。
+    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, rotation=None, horizontalalignment='center', verticalalignment='center', transform=None, bbox=None, clip_on=None, alpha=None, weight=None, dx=None, dy=None, **kwargs):
+        import rsnumpy as np
         if not isinstance(s, str):
             s = str(s)
-        return _orig_text(self, x, y, _render_mathtext(s),
-                          fontsize=fontsize, color=color, c=c, family=family)
+        if fontsize is None:
+            fontsize = kwargs.get('size', None)
+        if hasattr(x, 'item'):
+            x = x.item()
+        elif isinstance(x, np.ndarray):
+            x = float(x)
+        if hasattr(y, 'item'):
+            y = y.item()
+        elif isinstance(y, np.ndarray):
+            y = float(y)
+        if rotation is None:
+            rotation = 0.0
+        s_rendered = _render_mathtext(s)
+        return _orig_text(self, x, y, s_rendered, fontsize, color, c, family, horizontalalignment, verticalalignment, rotation, dx, dy, bbox)
 
     _rs.Axes.text = _text
 
@@ -3325,6 +3356,215 @@ def _patch_axes():
         return None
 
     _rs.Axes.set = _ax_set
+
+    class _Transform:
+        def transform(self, coords):
+            return coords
+
+        def inverted(self):
+            return self
+
+    _rs.Axes.transData = _Transform()
+
+    def _to_color_string(color):
+        """Convert a color value (string, list, tuple) to a CSS color string."""
+        if isinstance(color, str):
+            return color
+        if isinstance(color, (list, tuple)):
+            n = len(color)
+            if n == 3:
+                r = int(max(0, min(1, color[0])) * 255)
+                g = int(max(0, min(1, color[1])) * 255)
+                b = int(max(0, min(1, color[2])) * 255)
+                return f'rgb({r},{g},{b})'
+            if n == 4:
+                r = int(max(0, min(1, color[0])) * 255)
+                g = int(max(0, min(1, color[1])) * 255)
+                b = int(max(0, min(1, color[2])) * 255)
+                a = float(color[3])
+                return f'rgba({r},{g},{b},{a})'
+        return 'black'
+
+    def _add_collection(self, collection, autolim=True):
+        from rsplotlib.collections import LineCollection
+        if isinstance(collection, LineCollection):
+            segments = collection.segments
+            if segments is None:
+                return
+            color = _to_color_string(collection.colors) if collection.colors else 'black'
+            linewidth = collection.linewidths if collection.linewidths else 1.0
+            linestyle = collection.linestyle if collection.linestyle else '-'
+            alpha = collection.alpha if collection.alpha else None
+            
+            try:
+                import rsnumpy as np
+                if isinstance(segments, np.ndarray):
+                    segments = segments.tolist()
+            except ImportError:
+                pass
+            
+            for i, seg in enumerate(segments):
+                if len(seg) >= 2:
+                    x = [float(p[0]) for p in seg]
+                    y = [float(p[1]) for p in seg]
+                    try:
+                        self.plot(x, y, color=color, linewidth=linewidth, linestyle=linestyle, alpha=alpha)
+                    except Exception:
+                        pass
+
+    _rs.Axes.add_collection = _add_collection
+
+    def _update_datalim(self, xydata, update_datalim=True):
+        pass
+
+    _rs.Axes.update_datalim = _update_datalim
+
+    def _autoscale_view(self, tight=None, scalex=True, scaley=True):
+        pass
+    _rs.Axes.autoscale_view = _autoscale_view
+
+    def _add_artist(self, artist):
+        # Edge label text rendering from CurvedArrowTextBase
+        is_edge_label = hasattr(artist, '_update_text_pos_angle') and hasattr(artist, 'arrow')
+        if is_edge_label:
+            text_str = artist.text if hasattr(artist, 'text') else ''
+            family = getattr(artist, 'family', None)
+            fontsize = artist.fontsize
+            color = artist.color
+            ha = artist.horizontalalignment
+            va = artist.verticalalignment
+            x, y = artist.x, artist.y
+
+            lines = text_str.split('\n')
+            if len(lines) <= 1:
+                self.text(x, y, text_str, fontsize=fontsize, color=color, rotation=0,
+                          family=family, horizontalalignment=ha, verticalalignment=va,
+                          bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=1.0))
+                return
+
+            # 多行文本：全部水平显示（rotation=0），上下排列
+            # 编号在上，阻抗在下
+            line_height = fontsize * 0.002
+            
+            n = len(lines)
+            
+            # 绘制文字（使用 bbox 参数添加白色背景）
+            for i, line in enumerate(lines):
+                # idx 越小的行越靠上（y_offset为正 = 向上偏移，因为数据坐标y越大越靠上）
+                y_offset = - (i - (n - 1) / 2.0) * line_height
+                self.text(x, y + y_offset, line, fontsize=fontsize, color=color, rotation=0,
+                          family=family, horizontalalignment='center', verticalalignment='center',
+                          bbox=dict(facecolor='white', edgecolor='none', pad=0.5, alpha=1.0))
+    _rs.Axes.add_artist = _add_artist
+
+    def _add_patch(self, patch):
+        from rsplotlib.patches import FancyArrowPatch, _Path
+        if isinstance(patch, FancyArrowPatch):
+            posA = patch.posA
+            posB = patch.posB
+            color = _to_color_string(patch.color) if patch.color else 'black'
+            linewidth = patch.linewidth if patch.linewidth else 1.0
+            
+            # Apply shrinkA/shrinkB to adjust endpoints
+            shrinkA = patch.shrinkA if patch.shrinkA else 0.0
+            shrinkB = patch.shrinkB if patch.shrinkB else 0.0
+            
+            x1, y1 = posA
+            x2, y2 = posB
+            
+            # Calculate direction vector
+            dx = x2 - x1
+            dy = y2 - y1
+            length = math.sqrt(dx*dx + dy*dy)
+            
+            # 标记是否需要在标签位置断开线
+            need_break = False
+            break_x1, break_y1 = x1, y1
+            break_x2, break_y2 = x2, y2
+            
+            if length > 0:
+                # Apply shrink
+                if shrinkA > 0 or shrinkB > 0:
+                    ux, uy = dx / length, dy / length
+                    x1 += ux * shrinkA
+                    y1 += uy * shrinkA
+                    x2 -= ux * shrinkB
+                    y2 -= uy * shrinkB
+                
+                # 如果边有标签，在标签位置断开线
+                # 标签位于边的中间位置，留出约 15% 的边长度作为标签区域
+                if hasattr(patch, 'arrow') or hasattr(patch, '_update_text_pos_angle'):
+                    need_break = True
+                    label_region = length * 0.15
+                    ux, uy = dx / length, dy / length
+                    # 第一段终点 = 起点 + (总长度 - 标签区域) / 2
+                    break_x1 = x1 + ux * (length - label_region) / 2
+                    break_y1 = y1 + uy * (length - label_region) / 2
+                    # 第二段起点 = 终点 - (总长度 - 标签区域) / 2
+                    break_x2 = x2 - ux * (length - label_region) / 2
+                    break_y2 = y2 - uy * (length - label_region) / 2
+            
+            # Use connectionstyle to get the curve path
+            conn = patch.get_connectionstyle()
+            if conn is not None:
+                path = conn((x1, y1), (x2, y2))
+                if isinstance(path, _Path) and len(path.vertices) >= 3:
+                    if need_break:
+                        # 断开绘制：第一段从起点到标签区域起点
+                        path1 = conn((x1, y1), (break_x1, break_y1))
+                        if isinstance(path1, _Path) and len(path1.vertices) >= 3:
+                            vertices = path1.vertices
+                            xs, ys = [], []
+                            for i in range(21):
+                                t = i / 20
+                                tt = 1 - t
+                                px = tt*tt * vertices[0][0] + 2*tt*t * vertices[1][0] + t*t * vertices[2][0]
+                                py = tt*tt * vertices[0][1] + 2*tt*t * vertices[1][1] + t*t * vertices[2][1]
+                                xs.append(px)
+                                ys.append(py)
+                            self.plot(xs, ys, color=color, linewidth=linewidth)
+                        else:
+                            self.plot([x1, break_x1], [y1, break_y1], color=color, linewidth=linewidth)
+                        # 第二段从标签区域终点到终点
+                        path2 = conn((break_x2, break_y2), (x2, y2))
+                        if isinstance(path2, _Path) and len(path2.vertices) >= 3:
+                            vertices = path2.vertices
+                            xs, ys = [], []
+                            for i in range(21):
+                                t = i / 20
+                                tt = 1 - t
+                                px = tt*tt * vertices[0][0] + 2*tt*t * vertices[1][0] + t*t * vertices[2][0]
+                                py = tt*tt * vertices[0][1] + 2*tt*t * vertices[1][1] + t*t * vertices[2][1]
+                                xs.append(px)
+                                ys.append(py)
+                            self.plot(xs, ys, color=color, linewidth=linewidth)
+                        else:
+                            self.plot([break_x2, x2], [break_y2, y2], color=color, linewidth=linewidth)
+                    else:
+                        vertices = path.vertices
+                        xs, ys = [], []
+                        for i in range(21):
+                            t = i / 20
+                            tt = 1 - t
+                            px = tt*tt * vertices[0][0] + 2*tt*t * vertices[1][0] + t*t * vertices[2][0]
+                            py = tt*tt * vertices[0][1] + 2*tt*t * vertices[1][1] + t*t * vertices[2][1]
+                            xs.append(px)
+                            ys.append(py)
+                        self.plot(xs, ys, color=color, linewidth=linewidth)
+                else:
+                    if need_break:
+                        self.plot([x1, break_x1], [y1, break_y1], color=color, linewidth=linewidth)
+                        self.plot([break_x2, x2], [break_y2, y2], color=color, linewidth=linewidth)
+                    else:
+                        self.plot([x1, x2], [y1, y2], color=color, linewidth=linewidth)
+            else:
+                self.plot([x1, x2], [y1, y2], color=color, linewidth=linewidth)
+            
+            arrowstyle = patch.arrowstyle
+            if arrowstyle and arrowstyle != '-':
+                self.annotate('', xy=(x2, y2), xytext=(x1, y1), arrowprops=dict(color=color, arrowstyle=arrowstyle, linewidth=linewidth))
+
+    _rs.Axes.add_patch = _add_patch
 
 
 _patch_figure_add_subplot()

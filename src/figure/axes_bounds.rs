@@ -619,12 +619,12 @@ pub fn compute_bounds(
     }
 
     if x_min == f64::INFINITY {
-        x_min = 0.0;
-        x_max = 1.0;
+        x_min = -2.0;
+        x_max = 2.0;
     }
     if y_min == f64::INFINITY {
-        y_min = 0.0;
-        y_max = 1.0;
+        y_min = -2.0;
+        y_max = 2.0;
     }
 
     let x_range = x_max - x_min;

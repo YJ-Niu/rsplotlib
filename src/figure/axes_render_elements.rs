@@ -1448,6 +1448,9 @@ where
     };
 
     for el in elements {
+        if matches!(el, PlotElement::Text { .. }) {
+            continue;
+        }
         // matplotlib 默认 axisbelow='line'：按元素归属的网格分层跳过不属于本趟的元素。
         // Hist 例外——柱在网格下、step 轮廓在网格上，其分支内部各自按 layer 判断。
         if !matches!(el, PlotElement::Hist { .. })
@@ -2146,35 +2149,6 @@ where
                         y_max,
                     )?;
                 }
-            }
-            PlotElement::Text {
-                x,
-                y,
-                text,
-                fontsize,
-                color,
-                font_family,
-            } => {
-                let txv = tx(*x);
-                let tyv = ty(*y);
-                if !txv.is_finite() || !tyv.is_finite() {
-                    continue;
-                }
-                let fs = scale_font(*fontsize, font_scale);
-                // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
-                // 与 axhline/axvline 在同一坐标时的视觉位置一致。
-                mathtext::draw_math_chart(
-                    chart,
-                    txv,
-                    tyv,
-                    text,
-                    fs,
-                    to_plotters_color(*color),
-                    font_family.as_deref(),
-                    HAlign::Left,
-                    VAlign::Center,
-                    0.0,
-                )?;
             }
             PlotElement::HLine {
                 y,
@@ -2945,6 +2919,80 @@ where
                     halign,
                     VAlign::Center,
                     0.0,
+                    0.0,
+                    0.0,
+                    None,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
+                )?;
+            }
+            PlotElement::Text { .. } => {}
+        }
+    }
+
+    if layer == GridLayer::AboveGrid {
+        for el in elements {
+            if !matches!(el, PlotElement::Text { .. }) {
+                continue;
+            }
+            if let PlotElement::Text {
+                x,
+                y,
+                text,
+                fontsize,
+                color,
+                font_family,
+                ha,
+                va,
+                rotation,
+                dx,
+                dy,
+                bbox,
+            } = el
+            {
+                let txv = tx(*x);
+                let tyv = ty(*y);
+                if !txv.is_finite() || !tyv.is_finite() {
+                    continue;
+                }
+                let fs = scale_font(*fontsize, font_scale);
+                let h_align = match ha.as_str() {
+                    "left" => HAlign::Left,
+                    "right" => HAlign::Right,
+                    _ => HAlign::Center,
+                };
+                let v_align = match va.as_str() {
+                    "top" => VAlign::Top,
+                    "bottom" => VAlign::Bottom,
+                    _ => VAlign::Center,
+                };
+
+                let bbox_tuple = bbox.as_ref().map(|b| {
+                    let fc = b.face_color.as_deref().unwrap_or("");
+                    let ec = b.edge_color.as_deref().unwrap_or("");
+                    (fc, ec, b.pad, b.alpha)
+                });
+
+                mathtext::draw_math_chart(
+                    chart,
+                    txv,
+                    tyv,
+                    text,
+                    fs,
+                    to_plotters_color(*color),
+                    font_family.as_deref(),
+                    h_align,
+                    v_align,
+                    *rotation,
+                    *dx,
+                    *dy,
+                    bbox_tuple,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
                 )?;
             }
         }

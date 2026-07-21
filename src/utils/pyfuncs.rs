@@ -774,7 +774,7 @@ pub fn boxplot<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None))]
+#[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None, ha=None, va=None, rotation=None, dx=None, dy=None, bbox=None))]
 pub fn text(
     py: Python,
     x: f64,
@@ -784,10 +784,32 @@ pub fn text(
     color: Option<String>,
     c: Option<String>,
     family: Option<String>,
+    ha: Option<String>,
+    va: Option<String>,
+    rotation: Option<f64>,
+    dx: Option<f64>,
+    dy: Option<f64>,
+    bbox: Option<Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
-    Axes::text(&mut ax_ref, py, x, y, text, fontsize, color, c, family);
+    Axes::text(
+        &mut ax_ref,
+        py,
+        x,
+        y,
+        text,
+        fontsize,
+        color,
+        c,
+        family,
+        ha,
+        va,
+        rotation,
+        dx,
+        dy,
+        bbox,
+    );
     Ok(())
 }
 

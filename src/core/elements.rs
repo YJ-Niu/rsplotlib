@@ -36,6 +36,14 @@ pub struct ArrowSpec {
 }
 
 #[derive(Clone)]
+pub struct BBox {
+    pub face_color: Option<String>,
+    pub edge_color: Option<String>,
+    pub pad: f64,
+    pub alpha: f64,
+}
+
+#[derive(Clone)]
 pub enum PlotElement {
     Line {
         /// X 坐标，行主序。缺失值（Python 的 None/空串）与非法值统一以 `NaN`
@@ -133,6 +141,12 @@ pub enum PlotElement {
         fontsize: f64,
         color: RgbColor,
         font_family: Option<String>,
+        ha: String,
+        va: String,
+        rotation: f64,
+        dx: f64,
+        dy: f64,
+        bbox: Option<BBox>,
     },
     HLine {
         y: f64,

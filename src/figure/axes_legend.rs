@@ -411,7 +411,7 @@ where
                 if xlog || ylog {
                     for p in pts.iter_mut() {
                         if xlog {
-                            p.0 = if p.1 > 0.0 {
+                            p.0 = if p.0 > 0.0 {
                                 p.0.log10()
                             } else {
                                 x_min.min(x_max)
@@ -627,7 +627,14 @@ where
                 None,
                 HAlign::Left,
                 VAlign::Top,
+                0.0,
+                0.0,
                 text_nudge,
+                None,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
             )?;
         }
     }

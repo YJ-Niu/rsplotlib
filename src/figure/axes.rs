@@ -2227,7 +2227,8 @@ impl Axes {
         let _ = (emit, auto);
     }
 
-    #[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None))]
+    #[doc = "在指定位置绘制文本\n\n参数:\n    x: x 坐标\n    y: y 坐标\n    text: 文本内容\n    fontsize: 字体大小 (可选)\n    color/c: 颜色 (可选)\n    family: 字体族 (可选)\n    ha: 水平对齐方式 (可选)\n    va: 垂直对齐方式 (可选)\n    rotation: 旋转角度 (可选)\n    dx: 水平像素偏移 (可选)\n    dy: 垂直像素偏移 (可选)\n    bbox: 文本背景框参数 (可选)"]
+    #[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None, ha=None, va=None, rotation=None, dx=None, dy=None, bbox=None))]
     pub fn text(
         &mut self,
         py: Python<'_>,
@@ -2238,6 +2239,12 @@ impl Axes {
         color: Option<String>,
         c: Option<String>,
         family: Option<String>,
+        ha: Option<String>,
+        va: Option<String>,
+        rotation: Option<f64>,
+        dx: Option<f64>,
+        dy: Option<f64>,
+        bbox: Option<Bound<'_, PyAny>>,
     ) {
         let color = c.or(color);
         let text_str: String = text
@@ -2245,8 +2252,62 @@ impl Axes {
             .unwrap_or_else(|_| text.str().map(|s| s.to_string()).unwrap_or_default());
         let col = parse_color(&color.unwrap_or_else(|| "black".to_string()), 0)
             .unwrap_or(RgbColor(0, 0, 0));
-        // 当 family 参数传入时，通过 Python 的 _font_resolver 解析字体路径并注册到 plotters，
-        // 使用实际字体家族名称（而非 "sans-serif"），确保只影响指定文字。
+
+        let bbox_val = bbox.map(|bbox_obj| {
+            let face_color = bbox_obj
+                .call_method1("get", ("facecolor",))
+                .ok()
+                .and_then(|fc| {
+                    if fc.is_none() {
+                        None
+                    } else {
+                        fc.extract::<String>().ok()
+                    }
+                });
+
+            let edge_color = bbox_obj
+                .call_method1("get", ("edgecolor",))
+                .ok()
+                .and_then(|ec| {
+                    if ec.is_none() {
+                        None
+                    } else {
+                        ec.extract::<String>().ok()
+                    }
+                });
+
+            let pad = bbox_obj
+                .call_method1("get", ("pad",))
+                .ok()
+                .and_then(|p| {
+                    if p.is_none() {
+                        None
+                    } else {
+                        p.extract::<f64>().ok()
+                    }
+                })
+                .unwrap_or(0.0);
+
+            let alpha = bbox_obj
+                .call_method1("get", ("alpha",))
+                .ok()
+                .and_then(|a| {
+                    if a.is_none() {
+                        None
+                    } else {
+                        a.extract::<f64>().ok()
+                    }
+                })
+                .unwrap_or(1.0);
+
+            crate::core::elements::BBox {
+                face_color,
+                edge_color,
+                pad,
+                alpha,
+            }
+        });
+
         let font_family = family.and_then(|family_name| {
             if let Ok(resolver_mod) = py.import("rsplotlib.utils._font_resolver")
                 && let Ok(path_obj) =
@@ -2272,6 +2333,12 @@ impl Axes {
             fontsize: fontsize.unwrap_or(12.0),
             color: col,
             font_family,
+            ha: ha.unwrap_or_else(|| "center".to_string()),
+            va: va.unwrap_or_else(|| "center".to_string()),
+            rotation: rotation.unwrap_or(0.0),
+            dx: dx.unwrap_or(0.0),
+            dy: dy.unwrap_or(0.0),
+            bbox: bbox_val,
         });
     }
 
