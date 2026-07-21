@@ -1562,7 +1562,7 @@ where
                             } else {
                                 let p = match linestyle.as_str() {
                                     // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
-                                    "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
+                                    "--" => Some(vec![(3.7 * ds, true), (3.2 * ds, false)]),
                                     // dotted (lines.dotted_pattern): 点 1, 隙 1.65
                                     ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
                                     // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6

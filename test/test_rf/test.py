@@ -13,6 +13,7 @@ from skrf.data import ring_slot_meas
 from skrf.plotting import save_all_figs
 from skrf import plotting
 from skrf.circuit import Circuit
+from skrf.calibration.deembedding import OpenShort
 
 
 def pprint(n, ss):
@@ -580,6 +581,8 @@ cir = Circuit(cnx)
 # the result if the same :
 pprint(70, cir.network.s[0])
 
+fig.clear()
+fig = plt.figure(figsize=(10, 6))
 freq = rf.Frequency(start=0.1, stop=10, unit='GHz', npoints=1001)
 tl_media = rf.media.DefinedGammaZ0(freq, z0=50, gamma=1j*freq.w/rf.constants.c)
 C1 = tl_media.capacitor(3.222e-12, name='C1')
@@ -658,17 +661,18 @@ ax2.set_ylabel("Q-factor")
 ax2.set_xlabel("Freq. (GHz)")
 fig.tight_layout()
 ssaver('./test/test_rf/test42.png')
+fig.clear()
 
-# # load in 2-ports short/open dummy networks
-# open_nw = rf.data.open_2p
-# short_nw = rf.data.short_2p
-# from skrf.calibration.deembedding import OpenShort
+fig = plt.figure(figsize=(10, 10))
+# load in 2-ports short/open dummy networks
+open_nw = rf.data.open_2p
+short_nw = rf.data.short_2p
 
-# dm = OpenShort(dummy_open=open_nw, dummy_short=short_nw, name='tutorial')
+dm = OpenShort(dummy_open=open_nw, dummy_short=short_nw, name='tutorial')
 
-# actual_ind = dm.deembed(raw_ind)
-# actual_ind.plot_s_smith()
-# ssaver('./test/test_rf/test43.png')
+actual_ind = dm.deembed(raw_ind)
+actual_ind.plot_s_smith()
+ssaver('./test/test_rf/test43.png')
 
 rf.stylely()
 C = 1e-6  # F
@@ -685,3 +689,71 @@ resonator = media.line(d=random_d, unit='rad') ** media.shunt_inductor(L) ** med
 
 resonator.plot_s_db()
 ssaver('./test/test_rf/test44.png')
+
+Lactual_nH = 1e9 * np.imag(1/actual_ind.y[:, 0, 0])/2/np.pi/actual_ind.f
+
+fig, ax1 = plt.subplots(1, 1)
+ax1.plot(actual_ind.f*1e-9, Lactual_nH)
+ax1.grid()
+ax1.set_ylim(0.95, 1.1)
+ax1.set_ylabel("Inductance (nH)")
+ax1.set_xlabel("Freq. (GHz)")
+fig.tight_layout()
+ssaver('./test/test_rf/test45.png')
+
+C = 1e-6  # F
+L = 1e-9  # H
+R = 30  # Ohm
+Z0 = 50  # Ohm
+
+freq = rf.Frequency(5, 5.2, npoints=501, unit='MHz')
+media = rf.media.DefinedGammaZ0(frequency=freq, z0=Z0)  # ideal line (no loss)
+rng = np.random.default_rng()
+random_d = rng.uniform(-np.pi, np.pi)  # a random length for the sake of the example
+
+resonator = media.line(d=random_d, unit='rad') ** media.shunt_inductor(L) ** media.shunt_capacitor(C) ** media.shunt(media.resistor(R)**media.short()) ** media.open()
+
+resonator.plot_s_db()
+ssaver('./test/test_rf/test46.png')
+
+def f_res_RLC(L, C):
+    return 1/(2*np.pi*np.sqrt(L*C))
+
+def Q_RLC(R, L, C):
+    return R * C / np.sqrt(L*C)
+
+
+pprint(71, f'Theoretical Resonant Frequency: {f_res_RLC(L, C)/1e6} MHz')
+pprint(72, f'Theoretical Loaded Q: Q_L = {Q_RLC((R*Z0)/(R+Z0), L, C)}')  # Req = R//Z0
+pprint(73, f'Theoretical Unloaded Q: Q_0 = {Q_RLC(R, L, C)}')
+
+Q = rf.qfactor.Qfactor(resonator, res_type='reflection')
+
+res = Q.fit()
+pprint(74, f'Fitted Resonant Frequency: f_L = {Q.f_L/1e6} MHz')
+pprint(75, f'Fitted Loaded Q-factor: Q_L = {Q.Q_L}')
+
+pprint(76, Q)
+
+Q0 = Q.Q_unloaded(res)
+pprint(77, f'Fitted Unloaded Q-factor: Q_0 = {Q0}')
+
+Q0 = Q.Q_unloaded()  # will use the latest optimized results performed with .fit()
+pprint(78, f'Fitted Unloaded Q-factor: Q_0 = {Q0}')
+pprint(79, f'Relative Error on Q_0: {(Q_RLC(R, L, C) - Q0)/Q_RLC(R, L, C)}')
+
+new_freq = rf.Frequency(5, 5.2, npoints=5001, unit='MHz')
+fitted_network = Q.fitted_network(res, frequency=new_freq)
+resonator.plot_s_mag(label='Parallel RLC ', lw=2)
+fitted_network.plot_s_mag(label='Fitted Model', lw=2, ls='--')
+ssaver('./test/test_rf/test47.png')
+
+diam, S_V, S_T = Q.Q_circle()
+fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+resonator.plot_s_polar(ax=ax, label="RLC Resonator", ls='', marker='x', ms=5)
+fitted_network.plot_s_polar(ax=ax, label="Fitted Model", lw=2)
+ax.plot(np.angle(S_V), np.abs(S_V), 'ko')
+ax.plot(np.angle(S_T), np.abs(S_T), 'ko')
+ax.text(np.angle(S_T), 0.8*np.abs(S_T), '$S_T$')
+ax.text(np.angle(S_V), 1.1*np.abs(S_V), '$S_V$')
+ssaver('./test/test_rf/test48.png')

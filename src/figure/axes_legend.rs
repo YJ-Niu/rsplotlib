@@ -517,7 +517,7 @@ where
             match ls.as_str() {
                 "--" => {
                     let dash_len = 6.0 * dash_unit;
-                    let gap_len = 4.0 * dash_unit;
+                    let gap_len = 8.0 * dash_unit;
                     let mut pos = x_line_start;
                     let mut drawing = true;
                     while pos < x_line_end {
