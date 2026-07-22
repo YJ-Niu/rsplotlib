@@ -881,21 +881,21 @@ pprint(87, mlin_100_measured2)
 
 
 # prepare figure
-fig3, axes = plt.subplots(2, 2, figsize=(8, 6))
+fig3 = plt.figure(figsize=(8, 6))
 rf.stylely()
 
-gs = axes[1, 0].get_gridspec()
-for ax in axes[1, :]:
-    ax.remove()
-axbig = fig3.add_subplot(gs[1, :])
+# 创建跨越整个第二行的大子图和第一行的两个子图
+ax00 = fig3.add_subplot(2, 2, 1)
+ax01 = fig3.add_subplot(2, 2, 2)
+axbig = fig3.add_subplot(2, 1, 2)
 
 # plot return loss
-mlin_100_measured1.plot_s_db(0, 0, ax=axes[0, 0])
-mlin_100_measured2.plot_s_db(0, 0, ax=axes[0, 1])
+mlin_100_measured1.plot_s_db(0, 0, ax=ax00)
+mlin_100_measured2.plot_s_db(0, 0, ax=ax01)
 
 # plot insertion loss
-mlin_100_measured1.plot_s_db(1, 0, ax=axes[0, 1])
-mlin_100_measured2.plot_s_db(1, 0, ax=axes[0, 1])
+mlin_100_measured1.plot_s_db(1, 0, ax=ax01)
+mlin_100_measured2.plot_s_db(1, 0, ax=ax01)
 
 # plot port and characteristic impedances
 axbig.plot(mlin_100_measured1.frequency.f_scaled, mlin_100_measured1.z0[:, 0].real, marker='d', markevery=30, label=f'line {mlin_100_measured1.name} z0')
