@@ -846,7 +846,7 @@ ssaver('./test/test_rf/test51.png')
 fig1.clear()
 plt.close()
 
-fig2, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+fig2, axes = plt.subplots(1, 2, figsize=(10, 3.5))
 # plot miscrostipline
 axes[0].plot(mlin_100.frequency.f_scaled, mlin_100.z0[:, 0].real, marker='.', label=f'line {mlin_100.name}  port z0')
 axes[0].plot(mlin.frequency.f_scaled, mlin.z0.real, label='media mlin characteristic z0')

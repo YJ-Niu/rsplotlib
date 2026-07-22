@@ -1129,6 +1129,9 @@ def plot(*args, **kwargs):
         # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
         x, x_tick_labels = _categorical(x)
         y, y_tick_labels = _categorical(y)
+        # 将 rsnumpy 数组转换为 Python list，避免类型不一致问题
+        x = _to_list(x)
+        y = _to_list(y)
         result = _route_to_ax('plot', _call, x, y, **call_kwargs)
         if x_tick_labels is not None:
             xticks(list(range(len(x_tick_labels))), x_tick_labels)
@@ -3151,7 +3154,7 @@ def _patch_axes():
                 lw = 1.5 if lw is None else float(lw)
                 if not (isinstance(marker, str) and marker.strip() not in ('', 'none')):
                     marker = None
-                entries.append((_render_mathtext(str(lbl)), color, ls, marker, lw))
+                entries.append((_render_mathtext(str(lbl)), color, ls, marker, lw, 1.0))
             return self.set_legend_entries(
                 entries, loc, facecolor, framealpha, edgecolor, fontsize)
         return _orig_legend(self, loc, facecolor, framealpha, edgecolor, fontsize)
