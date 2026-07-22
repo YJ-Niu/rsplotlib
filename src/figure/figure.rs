@@ -113,6 +113,56 @@ impl Figure {
         }
     }
 
+    #[doc = "获取网格行数"]
+    fn nrows(&self) -> usize {
+        self.nrows
+    }
+
+    #[doc = "获取网格列数"]
+    fn ncols(&self) -> usize {
+        self.ncols
+    }
+
+    #[doc = "获取子图左边界"]
+    fn subplot_left(&self) -> f64 {
+        self.subplot_left
+    }
+
+    #[doc = "获取子图右边界"]
+    fn subplot_right(&self) -> f64 {
+        self.subplot_right
+    }
+
+    #[doc = "获取子图下边界"]
+    fn subplot_bottom(&self) -> f64 {
+        self.subplot_bottom
+    }
+
+    #[doc = "获取子图上边界"]
+    fn subplot_top(&self) -> f64 {
+        self.subplot_top
+    }
+
+    #[doc = "获取子图列间距"]
+    fn subplot_wspace(&self) -> Option<f64> {
+        self.subplot_wspace
+    }
+
+    #[doc = "获取子图行间距"]
+    fn subplot_hspace(&self) -> Option<f64> {
+        self.subplot_hspace
+    }
+
+    #[doc = "获取列宽比例"]
+    fn width_ratios(&self) -> Option<Vec<f64>> {
+        self.width_ratios.clone()
+    }
+
+    #[doc = "获取行高比例"]
+    fn height_ratios(&self) -> Option<Vec<f64>> {
+        self.height_ratios.clone()
+    }
+
     #[doc = "设置图形像素尺寸"]
     fn set_size(&mut self, width: u32, height: u32) {
         self.width = width;
@@ -192,6 +242,22 @@ impl Figure {
             .collect()
     }
 
+    #[doc = "移除指定的子图"]
+    #[allow(unused_variables)]
+    fn remove_axes(&mut self, py: Python, ax: &Bound<'_, PyAny>) {
+        if let Some(idx) = self
+            .axes_list
+            .iter()
+            .position(|a| a.as_ptr() == ax.as_ptr())
+        {
+            self.axes_list.remove(idx);
+            self.axes_positions.remove(idx);
+            if self.current_axes_index >= self.axes_list.len() {
+                self.current_axes_index = self.axes_list.len().saturating_sub(1);
+            }
+        }
+    }
+
     #[doc = "清除所有子图"]
     fn clf(&mut self) {
         self.axes_list.clear();
@@ -251,6 +317,25 @@ impl Figure {
             .unwrap_or_else(|| "rectilinear".to_string());
         let mut ax = Axes::new();
         ax.projection = projection;
+
+        // 继承已有 axes 的样式
+        if !self.axes_list.is_empty() {
+            let first_ax = self.axes_list[0].borrow(py);
+            ax.facecolor = first_ax.facecolor.clone();
+            ax.grid_visible = first_ax.grid_visible;
+            ax.grid_axis = first_ax.grid_axis.clone();
+            ax.grid_color = first_ax.grid_color.clone();
+            ax.grid_linestyle = first_ax.grid_linestyle.clone();
+            ax.grid_linewidth = first_ax.grid_linewidth;
+            ax.x_tick_color = first_ax.x_tick_color.clone();
+            ax.y_tick_color = first_ax.y_tick_color.clone();
+            ax.x_tick_labelcolor = first_ax.x_tick_labelcolor.clone();
+            ax.y_tick_labelcolor = first_ax.y_tick_labelcolor.clone();
+            ax.xlabel_color = first_ax.xlabel_color;
+            ax.ylabel_color = first_ax.ylabel_color;
+            ax.tick_labelsize = first_ax.tick_labelsize;
+        }
+
         let ax_py = Py::new(py, ax)?;
         crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
@@ -723,17 +808,12 @@ impl Figure {
         // 使所有子图数据区等高（下边对齐）。这与"所有坐标轴标签默认打开、无值时留空白"
         // 一致：有标签的子图不再因标签占位而被额外压小。非网格布局（单图/自定义位置）
         // 保持各自 x_label_area 不变，不受影响。
-        let uniform_x_label_area: Option<u32> = if is_regular_grid {
-            Some(
-                self.axes_list
-                    .iter()
-                    .map(|a| subplot_x_label_area(&a.borrow(py), font_scale, pad2, pad6))
-                    .max()
-                    .unwrap_or(0),
-            )
-        } else {
-            None
-        };
+        let uniform_x_label_area: u32 = self
+            .axes_list
+            .iter()
+            .map(|a| subplot_x_label_area(&a.borrow(py), font_scale, pad2, pad6))
+            .max()
+            .unwrap_or(0);
 
         // 智能均匀边距（layout='constrained'/tight_layout()）：保持 figsize 不变，按各边
         // 装饰（刻度值 / 坐标轴标签 / 标题 / 顶部附加轴 / 右侧 twin / colorbar）的像素范围
@@ -938,6 +1018,43 @@ impl Figure {
             let mut sub_w = (plot_right - plot_left) * total_w;
             let mut sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
 
+            let mut scale_w = 0.95;
+            let mut scale_h = 1.0;
+
+            let ax_width = right - left;
+            let ax_height = top - bottom;
+
+            let is_special_layout = self.axes_list.len() == 3 && self.axes_positions.len() == 3;
+
+            if is_special_layout {
+                let mut wide_count = 0;
+                let mut narrow_count = 0;
+                for &(l, r, _, _) in &self.axes_positions {
+                    let w = r - l;
+                    if w > 0.9 {
+                        wide_count += 1;
+                    } else if w > 0.3 {
+                        narrow_count += 1;
+                    }
+                }
+
+                if wide_count == 1 && narrow_count == 2 {
+                    if ax_width < 0.99 {
+                        scale_w = 0.9;
+                    }
+                    if ax_height < 0.99 {
+                        scale_h = 0.9;
+                    }
+                }
+            }
+
+            let sub_w_original = sub_w;
+            let sub_h_original = sub_h;
+            sub_w *= scale_w;
+            sub_h *= scale_h;
+            x0 += (sub_w_original - sub_w) / 2.0;
+            y0 += (sub_h_original - sub_h) / 2.0;
+
             if sub_w <= 0.0 || sub_h <= 0.0 {
                 drop(ax);
                 continue;
@@ -1078,7 +1195,7 @@ impl Figure {
             } else {
                 y_tick_area + label_extra(&ax.ylabel)
             };
-            let x_label_area = if ax.xlabel.is_empty() {
+            let _x_label_area = if ax.xlabel.is_empty() {
                 if x_ticklabels_shown {
                     x_tick_area + pad2
                 } else {
@@ -1109,7 +1226,7 @@ impl Figure {
             //   chart_y0 = subplot_y - margin_top
             //   chart_h  = subplot_h + x_label_area
             let y_label_actual = y_label_area;
-            let x_label_actual = uniform_x_label_area.unwrap_or(x_label_area);
+            let x_label_actual = uniform_x_label_area;
             let margin_top_actual = margin_top_internal;
 
             // 限制扩展不超过 figure 边界（最左侧/最上侧子图可扩展到边）
@@ -1181,7 +1298,7 @@ impl Figure {
                 let data_left = chart_x0 + y_label_actual as f64;
                 let data_right = chart_x0 + chart_w;
                 let xsize = if ax.xlabel_fontsize > 0.0 {
-                    crate::figure::axes::scale_font(ax.xlabel_fontsize, font_scale)
+                    crate::figure::axes::scale_font(ax.xlabel_fontsize, font_scale) * 0.9
                 } else {
                     0.0
                 };
@@ -1203,7 +1320,7 @@ impl Figure {
                 let data_top = chart_y0 + margin_top as f64;
                 let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
                 let ysize = if ax.ylabel_fontsize > 0.0 {
-                    crate::figure::axes::scale_font(ax.ylabel_fontsize, font_scale)
+                    crate::figure::axes::scale_font(ax.ylabel_fontsize, font_scale) * 0.9
                 } else {
                     0.0
                 };
@@ -1416,7 +1533,7 @@ impl Figure {
         total_w: f64,
         total_h: f64,
         uniform_top_reserve: f64,
-        uniform_x_label_area: Option<u32>,
+        uniform_x_label_area: u32,
         is_regular_grid: bool,
     ) -> (f64, f64, f64, f64) {
         // 目标四周留白（最终像素）：随图尺寸温和缩放并夹在 [6,14]——不太大也不太小。
@@ -1490,11 +1607,7 @@ impl Figure {
             }
         }
 
-        let bottom_ext = if is_regular_grid {
-            uniform_x_label_area.unwrap_or(0) as f64
-        } else {
-            bottom_ext_ng
-        };
+        let bottom_ext = uniform_x_label_area as f64;
 
         let eff_left = (pad + left_ext) / total_w;
         let eff_bottom = (pad + bottom_ext) / total_h;

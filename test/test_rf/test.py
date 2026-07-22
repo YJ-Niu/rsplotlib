@@ -881,30 +881,73 @@ pprint(87, mlin_100_measured2)
 
 
 # prepare figure
-fig3 = plt.figure(figsize=(8, 6))
+fig3, axes = plt.subplots(2, 2, figsize=(10, 6))
 rf.stylely()
-
-# 创建跨越整个第二行的大子图和第一行的两个子图
-ax00 = fig3.add_subplot(2, 2, 1)
-ax01 = fig3.add_subplot(2, 2, 2)
-axbig = fig3.add_subplot(2, 1, 2)
+gs = axes[1, 0].get_gridspec()
+for ax in axes[1, :]:
+    ax.remove()
+axbig = fig3.add_subplot(gs[1, :])
 
 # plot return loss
-mlin_100_measured1.plot_s_db(0, 0, ax=ax00)
-mlin_100_measured2.plot_s_db(0, 0, ax=ax01)
+mlin_100_measured1.plot_s_db(0, 0, ax=axes[0, 0])
+mlin_100_measured2.plot_s_db(0, 0, ax=axes[0, 0])
 
 # plot insertion loss
-mlin_100_measured1.plot_s_db(1, 0, ax=ax01)
-mlin_100_measured2.plot_s_db(1, 0, ax=ax01)
-
+mlin_100_measured1.plot_s_db(1, 0, ax=axes[0, 1])
+mlin_100_measured2.plot_s_db(1, 0, ax=axes[0, 1])
 # plot port and characteristic impedances
 axbig.plot(mlin_100_measured1.frequency.f_scaled, mlin_100_measured1.z0[:, 0].real, marker='d', markevery=30, label=f'line {mlin_100_measured1.name} z0')
 axbig.plot(mlin_100_measured2.frequency.f_scaled, mlin_100_measured2.z0[:, 0].real, marker='x', markevery=30, label=f'line {mlin_100_measured2.name} z0')
 axbig.plot(mlin.frequency.f_scaled, mlin.z0.real, label='media mlin z0')
 axbig.set_ylabel('Impedance (Ohm)')
 axbig.set_xlabel(f'Frequency ({mlin.frequency.unit})')
-axbig.legend()
+plt.legend(fontsize=6)
 
 # resize plot nicely
 fig3.tight_layout()
 ssaver('./test/test_rf/test53.png')
+
+# override method
+wr10_100_measured1 = wr10_100.copy()
+wr10_100_measured1.z0[:, :] = 50
+wr10_100_measured1.name = f'{wr10_100.name} override'
+print(wr10_100_measured1)
+
+# port impedance at media construction method
+wr10_meas = RectangularWaveguide(f_wr10, a=to_meters(100, 'mil'), b=to_meters(50, 'mil'), ep_r=1.0, rho=1.68e-08, z0_override=50)
+wr10_100_measured2 = wr10_meas.line(100e-3, unit='m', name='wr10 100mm z0_port')
+print(wr10_100_measured2)
+
+# prepare figure
+fig4, axes = plt.subplots(2, 2, figsize=(10, 6))
+rf.stylely()
+gs = axes[1, 0].get_gridspec()
+for ax in axes[1, :]:
+    ax.remove()
+axbig = fig4.add_subplot(gs[1, :])
+
+# plot return loss
+wr10_100_measured1.plot_s_mag(0, 0, ax=axes[0, 0], label=wr10_100_measured1.name)
+wr10_100_measured2.plot_s_mag(0, 0, ax=axes[0, 0], label=wr10_100_measured2.name)
+
+# plot insertion loss
+wr10_100_measured1.plot_s_db(1, 0, ax=axes[0, 1], label=wr10_100_measured1.name)
+wr10_100_measured2.plot_s_db(1, 0, ax=axes[0, 1], label=wr10_100_measured2.name)
+
+# plot port and characteristic impedances
+axbig.plot(wr10_100_measured1.frequency.f_scaled, wr10_100_measured1.z0[:, 0].real,
+           marker='d', markevery=30, label=f'line {wr10_100_measured1.name} z0')
+axbig.plot(wr10_100_measured2.frequency.f_scaled, wr10_100_measured2.z0[:, 0].real,
+           marker='x', markevery=30, label=f'line {wr10_100_measured2.name} z0')
+axbig.plot(wr10.frequency.f_scaled, wr10.z0.real, label='media wr10 z0')
+axbig.set_ylabel('Impedance (Ohm)')
+s1 = wr10_100_measured1.z0[:, 0].real + wr10_100_measured2.z0[:, 0].real
+ss = max(s1) - min(s1)
+# axbig.set_ylim(min(s1)-ss*0.1, max(s1)+ss*0.1)
+print(222, min(s1)-ss*0.1, max(s1)+ss*0.1)
+axbig.set_xlabel(f'Frequency ({wr10.frequency.unit})')
+axbig.legend(fontsize=6)
+
+# resize plot nicely
+fig4.tight_layout()
+ssaver('./test/test_rf/test54.png')

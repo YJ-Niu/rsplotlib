@@ -2120,15 +2120,53 @@ class _AxesArray:
                 raise IndexError('二维索引仅适用于二维 Axes 数组')
             nrows, ncols = self.shape
             r, c = key
-            if r < 0:
-                r += nrows
-            if c < 0:
-                c += ncols
-            return self._data[r * ncols + c]
+            
+            # 处理行索引
+            if isinstance(r, slice):
+                row_indices = range(nrows)[r]
+            else:
+                r = r % nrows
+                row_indices = [r]
+            
+            # 处理列索引
+            if isinstance(c, slice):
+                col_indices = range(ncols)[c]
+            else:
+                c = c % ncols
+                col_indices = [c]
+            
+            # 收集所有匹配的 Axes
+            result = []
+            for r_idx in row_indices:
+                for c_idx in col_indices:
+                    result.append(self._data[r_idx * ncols + c_idx])
+            
+            # 根据结果形状返回
+            if len(row_indices) == 1 and len(col_indices) == 1:
+                return result[0]
+            elif len(row_indices) == 1:
+                return _AxesArray(result, (len(col_indices),))
+            elif len(col_indices) == 1:
+                return _AxesArray(result, (len(row_indices),))
+            else:
+                return _AxesArray(result, (len(row_indices), len(col_indices)))
+        
         if self.ndim == 1:
+            if isinstance(key, slice):
+                indices = range(self.shape[0])[key]
+                result = [self._data[i] for i in indices]
+                return _AxesArray(result, (len(result),))
             return self._data[key]
+        
         # 二维单整数索引返回对应行（子 _AxesArray）。
         nrows, ncols = self.shape
+        if isinstance(key, slice):
+            row_indices = range(nrows)[key]
+            result = []
+            for r_idx in row_indices:
+                result.extend(self._data[r_idx * ncols:(r_idx + 1) * ncols])
+            return _AxesArray(result, (len(row_indices), ncols))
+        
         if key < 0:
             key += nrows
         return _AxesArray(self._data[key * ncols:(key + 1) * ncols], (ncols,))
@@ -2732,6 +2770,115 @@ def colorbar(mappable=None, cax=None, ax=None, **kwargs):
 def get_cmap(name=None, lut=None):
     """获取颜色映射 (占位实现)。"""
     return name
+
+
+# ==================== Axes 类补丁 ====================
+
+def _patch_axes_get_gridspec():
+    """为 Rust Axes 类添加 get_gridspec() 支持。
+    
+    这是 matplotlib 兼容接口，用于获取子图所在的网格布局对象。
+    返回的 GridSpec 支持 gs[row, col] 和 gs[row_start:row_end, col_start:col_end] 语法。
+    """
+    from . import rsplotlib as _rs
+    from .layout.gridspec import GridSpec
+    
+    def _get_gridspec(self):
+        # 获取 Axes 所属的 Figure
+        try:
+            # 获取当前 figure
+            fig = _get_figure()
+            if fig is None:
+                return None
+            
+            # 检查 figure 是否有 nrows 和 ncols 方法
+            if hasattr(fig, 'nrows') and callable(fig.nrows):
+                nrows = fig.nrows()
+            else:
+                nrows = 1
+            
+            if hasattr(fig, 'ncols') and callable(fig.ncols):
+                ncols = fig.ncols()
+            else:
+                ncols = 1
+            
+            # 获取 figure 的边界信息
+            if hasattr(fig, 'subplot_left') and callable(fig.subplot_left):
+                left = fig.subplot_left()
+            else:
+                left = None
+            
+            if hasattr(fig, 'subplot_right') and callable(fig.subplot_right):
+                right = fig.subplot_right()
+            else:
+                right = None
+            
+            if hasattr(fig, 'subplot_bottom') and callable(fig.subplot_bottom):
+                bottom = fig.subplot_bottom()
+            else:
+                bottom = None
+            
+            if hasattr(fig, 'subplot_top') and callable(fig.subplot_top):
+                top = fig.subplot_top()
+            else:
+                top = None
+            
+            # 获取间距信息
+            if hasattr(fig, 'subplot_wspace') and callable(fig.subplot_wspace):
+                wspace = fig.subplot_wspace()
+            else:
+                wspace = None
+            
+            if hasattr(fig, 'subplot_hspace') and callable(fig.subplot_hspace):
+                hspace = fig.subplot_hspace()
+            else:
+                hspace = None
+            
+            # 获取宽度和高度比例
+            if hasattr(fig, 'width_ratios') and callable(fig.width_ratios):
+                width_ratios = fig.width_ratios()
+            else:
+                width_ratios = None
+            
+            if hasattr(fig, 'height_ratios') and callable(fig.height_ratios):
+                height_ratios = fig.height_ratios()
+            else:
+                height_ratios = None
+            
+            # 创建一个 GridSpec 对象，使用 figure 的边界信息
+            gs = GridSpec(nrows, ncols, left=left, right=right, bottom=bottom, top=top, wspace=wspace, hspace=hspace, width_ratios=width_ratios, height_ratios=height_ratios)
+            return gs
+        except Exception:
+            # 如果获取失败，返回一个默认的 GridSpec
+            return GridSpec(1, 1)
+    
+    _rs.Axes.get_gridspec = _get_gridspec
+
+
+def _patch_axes_remove():
+    """为 Rust Axes 类添加 remove() 支持。
+    
+    这是 matplotlib 兼容接口，用于从 Figure 中移除当前 Axes。
+    """
+    from . import rsplotlib as _rs
+    
+    def _remove(self):
+        # 从 Figure 中移除当前 Axes
+        try:
+            # 尝试获取当前 figure
+            fig = _get_figure()
+            if fig is None:
+                return
+            
+            # 检查当前 axes 是否在 figure 中
+            if self in fig.get_axes():
+                # 使用 figure 的 remove_axes 方法
+                if hasattr(fig, 'remove_axes'):
+                    fig.remove_axes(self)
+        except Exception:
+            pass
+    
+    _rs.Axes.remove = _remove
 
 
 # ==================== Figure 类补丁 ====================
@@ -3585,6 +3732,8 @@ def _patch_axes():
 
 _patch_figure_add_subplot()
 _patch_axes()
+_patch_axes_get_gridspec()
+_patch_axes_remove()
 
 
 style = _style_module.style
