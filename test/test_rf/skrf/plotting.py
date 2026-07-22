@@ -28,6 +28,8 @@ Plots and Charts
     plot_uncertainty_bounds_s_db
     plot_uncertainty_bounds_s_time_db
 
+    plot_violin
+
     plot_passivity
     plot_logsigma
 
@@ -51,6 +53,7 @@ Convenience plotting functions
 
 """
 from __future__ import annotations
+import rsplotlib.pyplot as plt
 
 import os
 from collections.abc import Callable
@@ -96,7 +99,9 @@ def _legend(target, *args, **kwargs):
     if 'edgecolor' not in kwargs:
         kwargs['edgecolor'] = '#999999'
     if 'facecolor' not in kwargs:
-        kwargs['facecolor'] = '#f5f5f5'
+        kwargs['facecolor'] = 'white'
+    if len(args) == 0 and 'loc' not in kwargs:
+        kwargs['loc'] = 'upper right'
     return target.legend(*args, **kwargs)
 
 
@@ -110,7 +115,7 @@ def plotting_available() -> bool:
 
 def axes_kwarg(func):
     """
-    This decorator checks if a :class:`matplotlib.axes.Axes` object is passed,
+    This decorator checks if a :class:`rsplotlib.axes.Axes` object is passed,
     if not the current axis will be gathered through :func:`plt.gca`.
 
     Raises
@@ -122,7 +127,6 @@ def axes_kwarg(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
-            import rsplotlib.pyplot as plt
             ax = kwargs.pop('ax', None)
             if ax is None:
                 ax = plt.gca()
@@ -144,7 +148,6 @@ def figure(*args, **kwargs) -> Figure:
     """
 
     try:
-        import rsplotlib.pyplot as plt
         return plt.figure(*args, **kwargs)
     except ImportError as err:
         raise RuntimeError("Plotting is not available") from err
@@ -161,14 +164,12 @@ def subplots(*args, **kwargs) -> tuple[Figure, np.ndarray]:
     """
 
     try:
-        import rsplotlib.pyplot as plt
         return plt.subplots(*args, **kwargs)
     except ImportError as err:
         raise RuntimeError("Plotting is not available") from err
 
 
 def _get_label_str(netw: Network, param: str, m: int, n: int) -> str:
-    import rsplotlib.pyplot as plt
 
     label_string = ""
     if netw.name is not None:
@@ -284,7 +285,7 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
         draw a rectangular border with axis ticks, around the perimeter
         of the figure. Not used if draw_labels = True.
         Default is False.
-    ax : :class:`matplotlib.pyplot.Axes` or None, optional
+    ax : :class:`rsplotlib.pyplot.Axes` or None, optional
         existing axes to draw smith chart on.
         Default is None (creates a new figure)
     ref_imm : number, optional
@@ -382,14 +383,10 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
 
     # draw the real axis as the chart's horizontal diameter
     ax.plot([-smithR, smithR], [0, 0], color='k', lw=0.5)
-    ax.grid(False)
     # Set axis limits by plotting white points so zooming works properly
-    ax.plot(smithR*np.array([-1.1, 1.1]), smithR * np.array([-1.1, 1.1]), 'w.', markersize=0)
+    ax.plot(smithR*np.array([-1.05, 1.05]), smithR * np.array([-1.05, 1.05]), 'w.', markersize=0)
     ax.axis('image')  # Combination of 'equal' and 'tight'
-
     if not border:
-        ax.set_xticks([])
-        ax.set_yticks([])
         for _name, spine in ax.spines.items():
             spine.set_color('none')
     if draw_labels:
@@ -402,7 +399,7 @@ def smith(smithR: Number = 1, chart_type: str = 'z', draw_labels: bool = False,
         # Make annotations only if the radius is 1
         if smithR == 1:
             # Make room for annotation
-            ax.plot(np.array([-1.25, 1.25]),
+            ax.plot(np.array([-1.1, 1.1]),
                     np.array([-1.1, 1.1]), 'w.', markersize=0)
             ax.axis('image')
 
@@ -505,13 +502,11 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
         controls the drawing of the legend. Default is True.
     axis : str, optional
         whether or not to autoscale the axis. Default is 'tight'
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None, optional.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None, optional.
         axes to draw on. Default is None (creates a new figure)
     \*args, \*\*kwargs : passed to pylab.plot
 
     """
-    import rsplotlib.pyplot as plt
-
     if ax is None:
         ax = plt.gca()
 
@@ -533,12 +528,22 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
 
     if axis is not None:
         ax.autoscale(True, 'x', True)
-        ax.autoscale(True, 'y', False)
-
-        ylim = ax.get_ylim()
-        y_range = ylim[1] - ylim[0]
+        ax.autoscale(True, 'y', True)
+        
+        y_min_val = np.min(y)
+        y_max_val = np.max(y)
+        if hasattr(y_min_val, 'tolist'):
+            y_min_val = y_min_val.tolist()
+        if hasattr(y_max_val, 'tolist'):
+            y_max_val = y_max_val.tolist()
+        
+        current_ylim = ax.get_ylim()
+        new_ylim_min = min(current_ylim[0], y_min_val)
+        new_ylim_max = max(current_ylim[1], y_max_val)
+        
+        y_range = new_ylim_max - new_ylim_min
         padding = y_range * 0.1
-        ax.set_ylim(ylim[0] - padding, ylim[1] + padding)
+        ax.set_ylim(new_ylim_min - padding, new_ylim_max + padding)
 
     if plt.isinteractive():
         plt.draw()
@@ -557,18 +562,18 @@ def plot_polar(theta: NumberLike, r: NumberLike,
     Parameters
     ----------
     theta : array-like
-        angular data to plot
+        angular data to plot (in radians)
     r : array-like
         radial data to plot
     x_label : string or None, optional
-        x-axis label. Default is None.
+        x-axis label. Default is None (unused in polar plots).
     y_label : string or None, optional.
-        y-axis label. Default is None
+        y-axis label. Default is None (unused in polar plots).
     title : string or None, optional.
         plot title. Default is None.
     show_legend : Boolean, optional.
         controls the drawing of the legend. Default is True.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure).
     \*args, \*\*kwargs : passed to pylab.plot
 
@@ -581,48 +586,26 @@ def plot_polar(theta: NumberLike, r: NumberLike,
     plot_smith : plot complex data on smith chart
 
     """
-    import rsplotlib.pyplot as plt
-
     if ax is None:
-        # no Axes passed
-        # if an existing (polar) plot is already present, grab and use its Axes
-        # otherwise, create a new polar plot and use that Axes
-        if not plt.get_fignums() or not plt.gcf().axes or plt.gca().name != 'polar':
-            ax = plt.figure().add_subplot(projection='polar')
-        else:
-            ax = plt.gca()
+        _, ax = plt.subplots(subplot_kw={'projection': 'polar'})
     else:
-        if ax.name != 'polar':
-            # The projection of an existing axes can't be changed,
-            # since specifying a projection when creating an axes determines the
-            # axes class you get, which is different for each projection type.
-            # So, passing a axe projection not polar is probably undesired
-            warnings.warn(
-                f"Projection of the Axes passed as `ax` is not 'polar' but is {
-                    ax.name}." + "See rsplotlib documentation to create a polar plot or call this function without the `ax` parameter.",
-                stacklevel=2)
+        ax_proj = getattr(ax, 'projection', 'rectilinear')
+        if ax_proj != 'polar':
+            _, ax = plt.subplots(subplot_kw={'projection': 'polar'})
 
     ax.plot(theta, r, *args, **kwargs)
-
-    if x_label is not None:
-        ax.set_xlabel(x_label)
-
-    if y_label is not None:
-        ax.set_ylabel(y_label)
 
     if title is not None:
         ax.set_title(title)
 
     if show_legend:
-        # only show legend if they provide a label
         if 'label' in kwargs:
             _legend(ax)
 
-    if axis_equal:
-        ax.axis('equal')
-
     if plt.isinteractive():
         plt.draw()
+
+    return ax
 
 
 def plot_complex_rectangular(
@@ -649,7 +632,7 @@ def plot_complex_rectangular(
         plot title. Default is 'Complex Plane'
     show_legend : Boolean, optional.
         controls the drawing of the legend. Default is True.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure)
     \*\*kwargs : passed to pylab.plot
 
@@ -689,7 +672,7 @@ def plot_complex_polar(z: NumberLike,
         plot title. Default is None.
     show_legend : Boolean, optional.
         controls the drawing of the legend. Default is True.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure).
     \*\*kwargs : passed to pylab.plot
 
@@ -745,7 +728,7 @@ def plot_smith(
         controls the drawing of the legend. Default is True.
     axis_equal: Boolean, optional.
         sets axis to be equal increments. Default is 'equal'.
-    ax : :class:`matplotlib.axes.AxesSubplot` object or None.
+    ax : :class:`rsplotlib.axes.AxesSubplot` object or None.
         axes to draw on. Default is None (creates a new figure).
     force_chart : Boolean, optional.
         forces the re-drawing of smith chart. Default is False.
@@ -764,8 +747,7 @@ def plot_smith(
     plot_complex_polar : plot complex data on polar plane
     plot_smith : plot complex data on smith chart
     """
-    import rsplotlib.pyplot as plt
-
+ 
     if ax is None:
         ax = plt.gca()
 
@@ -774,6 +756,10 @@ def plot_smith(
     if not force_chart:
         smith(ax=ax, smithR=smith_r, chart_type=chart_type,
               draw_vswr=draw_vswr, draw_labels=draw_labels)
+
+    # double the default line width for smith chart traces
+    if 'linewidth' not in kwargs and 'lw' not in kwargs:
+        kwargs['linewidth'] = 2
 
     plot_complex_rectangular(s, x_label=x_label, y_label=y_label,
                              title=title, show_legend=show_legend, axis=axis,
@@ -813,14 +799,13 @@ def subplot_params(ntwk: Network, param: str = 's', proj: str = 'db',
 
     Returns
     -------
-    f : :class:`matplotlib.pyplot.Figure`
+    f : :class:`rsplotlib.pyplot.Figure`
         rsplotlib Figure
-    ax : :class:`matplotlib.pyplot.Axes`
+    ax : :class:`rsplotlib.pyplot.Axes`
         rsplotlib Axes
 
     """
-    import rsplotlib.pyplot as plt
-
+ 
     subplot_kw = subplot_kw if subplot_kw else {}
     if newfig:
         f, axs = plt.subplots(ntwk.nports, ntwk.nports,
@@ -861,14 +846,13 @@ def shade_bands(edges: NumberLike, y_range: tuple | None = None,
         see rsplotlib.cm  or rsplotlib.colormaps for acceptable values.
         Default is 'prism'.
     \*\*kwargs : key word arguments
-        passed to `matplotlib.fill_between`
+        passed to `rsplotlib.fill_between`
 
     Examples
     --------
     >>> rf.shade_bands([325,500,750,1100], alpha=.2)
     """
-    import rsplotlib.pyplot as plt
-
+ 
     cmap = plt.cm.get_cmap(cmap)
     if not isinstance(y_range, tuple | list) or (len(y_range) != 2):
         y_range = plt.gca().get_ylim()
@@ -893,15 +877,14 @@ def save_all_figs(dir: str = './', format: None | list[str] = None,
         path to save figures into. Default is './'
     format : None or list of strings, optional.
         the types of formats to save figures as. The elements of this
-        list are passed to :func:`matplotlib.pyplot.savefig`. This is a list so that
+        list are passed to :func:`rsplotlib.pyplot.savefig`. This is a list so that
         you can save each figure in multiple formats. Default is None.
     replace_spaces : bool, optional
         default is True.
     echo : bool, optional.
         True prints filenames as they are saved. Default is True.
     """
-    import rsplotlib.pyplot as plt
-
+ 
     if echo is not None:
         warnings.warn(
             "`echo` parameter is deprecated and will be removed in future versions. "
@@ -1027,8 +1010,7 @@ def func_on_all_figs(func: Callable, *args, **kwargs):
     --------
     >>> rf.func_on_all_figs(grid, alpha=.3)
     """
-    import rsplotlib.pyplot as plt
-
+ 
     for fig_n in plt.get_fignums():
         fig = plt.figure(fig_n)
         for ax_n in fig.axes:
@@ -1056,8 +1038,7 @@ def plot_vector(a: complex, off: complex = 0+0j, **kwargs):
     -------
     quiver : rsplotlib.pyplot.quiver
     """
-    import rsplotlib.pyplot as plt
-
+ 
     return plt.quiver(off.real, off.imag, a.real, a.imag, scale_units='xy',
                       angles='xy', scale=1, **kwargs)
 
@@ -1070,8 +1051,7 @@ def colors() -> list[str]:
     -------
     colors : List[str]
     """
-    import rsplotlib.pyplot as plt
-
+ 
     return [c['color'] for c in plt.rcParams['axes.prop_cycle']]
 
 
@@ -1097,8 +1077,7 @@ def plot_passivity(netw: Network, port=None, label_prefix=None, **kwargs):
     --------
     passivity
     """
-    import rsplotlib.pyplot as plt
-
+ 
     name = '' if netw.name is None else netw.name
 
     if port is None:
@@ -1127,8 +1106,7 @@ def plot_reciprocity(netw: Network, db=False, *args, **kwargs):
     --------
     reciprocity
     """
-    import rsplotlib.pyplot as plt
-
+ 
     for m in range(netw.nports):
         for n in range(netw.nports):
             if m > n:
@@ -1160,8 +1138,7 @@ def plot_reciprocity2(netw: Network, db=False, *args, **kwargs):
     --------
     reciprocity
     """
-    import rsplotlib.pyplot as plt
-
+ 
     for m in range(netw.nports):
         for n in range(netw.nports):
             if m > n:
@@ -1250,18 +1227,15 @@ def plot_s_smith(
 
     Examples
     --------
-    >>> myntwk.plot_s_smith()
-    >>> myntwk.plot_s_smith(m=0,n=1,color='b', marker='x')
     """
     # TODO: prevent this from re-drawing smith chart if one already
     # exists on current set of axes
 
     # get current axis if user doesn't supply and axis
-    import rsplotlib.pyplot as plt
-
+ 
     if ax is None:
         ax = plt.gca()
-
+        # plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
     if m is None:
         M = range(netw.number_of_ports)
     else:
@@ -1288,6 +1262,10 @@ def plot_s_smith(
             # exists, and they didn't pass a name key in the kwargs
             if generate_label:
                 kwargs['label'] = _get_label_str(netw, "S", m, n)
+
+            # double the default line width for smith chart traces
+            if 'linewidth' not in kwargs and 'lw' not in kwargs:
+                kwargs['linewidth'] = 2
 
             # plot the desired attribute vs frequency
             ax.plot(netw.s[:, m, n].real,
@@ -1330,8 +1308,7 @@ def plot_it_all(netw: Network, *args, **kwargs):
     >>> from skrf.data import ring_slot
     >>> ring_slot.plot_it_all()
     """
-    import rsplotlib.pyplot as plt
-
+ 
     plt.clf()
     plt.subplot(221)
     netw.plot_s_db(*args, **kwargs)
@@ -1360,7 +1337,7 @@ def _mplstyle_color(value):
 
 
 def _read_mplstyle(path: str) -> dict:
-    """Parse a matplotlib style file into a ``{key: raw_value}`` dict.
+    """Parse a rsplotlib style file into a ``{key: raw_value}`` dict.
 
     Comments and blank lines are skipped and inline ``#`` comments stripped.
     Values stay as raw strings for the caller to convert.
@@ -1427,21 +1404,21 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     if font_size:
         plt.rcParams['font.size'] = font_size
 
-    ax = plt.gca()
-    fig = plt.gcf()
+    try:
+        fig = plt.gcf()
+    except RuntimeError:
+        plt.figure()
+        fig = plt.gcf()
 
     if dpi:
         fig.set_dpi(dpi)
-    if figsize and len(figsize) == 2:
-        d = dpi or 100.0
-        fig.set_size(round(figsize[0] * d), round(figsize[1] * d))
+    if figsize and len(figsize) == 2 and hasattr(fig, 'set_size_inches'):
+        fig.set_size_inches(figsize)
 
     fig_fc = _mplstyle_color(style.get('figure.facecolor'))
     if fig_fc:
         fig.set_facecolor(fig_fc)
     ax_fc = _mplstyle_color(style.get('axes.facecolor'))
-    if ax_fc:
-        ax.set_facecolor(ax_fc)
 
     # capture legend frame style so _legend() can match the axes background
     # (rsplotlib ignores legend.* rcParams). Default to a semi-transparent frame.
@@ -1469,21 +1446,24 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     tick_labelsize = _num('xtick.labelsize')
     if tick_labelsize:
         tick_kw['labelsize'] = tick_labelsize * font_scale
-    if tick_kw:
-        ax.tick_params(**tick_kw)
 
     grid_val = style.get('axes.grid', False)
     grid_on = grid_val is True or (
         isinstance(grid_val, str) and grid_val.strip().lower() in ('true', '1', 'yes', 'on'))
+    grid_c = None
+    grid_ls = None
     if grid_on:
-        grid_kw = {}
-        grid_color = _mplstyle_color(style.get('grid.color'))
-        if grid_color:
-            grid_kw['color'] = grid_color
+        grid_c = _mplstyle_color(style.get('grid.color'))
         grid_ls = style.get('grid.linestyle')
-        if grid_ls:
-            grid_kw['linestyle'] = grid_ls
-        plt.grid(True, **grid_kw)
+
+    # Apply style to all axes in the figure
+    for ax in fig.axes():
+        if ax_fc:
+            ax.set_facecolor(ax_fc)
+        if tick_kw:
+            ax.tick_params(**tick_kw)
+        if grid_on:
+            ax.grid(True, c=grid_c, ls=grid_ls)
 
 
 def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',
@@ -1511,8 +1491,8 @@ def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',
 
     Notes
     -----
-    The rsplotlib backend does not load matplotlib style files nor honor every
-    rcParam the way matplotlib does. This applies the supported subset (figure
+    The rsplotlib backend does not load rsplotlib style files nor honor every
+    rcParam the way rsplotlib does. This applies the supported subset (figure
     size/dpi, font size, figure/axes background, grid, and tick colors) directly
     to the current figure and axes, so it must be called just before plotting.
     Because it styles the *current* figure, do not create a new figure with
@@ -1520,8 +1500,7 @@ def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',
     Unsupported keys such as ``axes.prop_cycle`` (line color cycle) are ignored.
     """
     try:
-        import rsplotlib.pyplot as plt
-
+     
         from .data import pwd  # delayed to solve circular import
     except ImportError as e:
         warnings.warn(
@@ -1582,8 +1561,7 @@ def animate(self: NetworkSet, attr: str = 's_deg', ylims: tuple = (-5, 5),
     >>> ns.animate('s_deg', ylims=(-5,5), label=None)
 
     """
-    import rsplotlib.pyplot as plt
-
+ 
     was_interactive = plt.isinteractive()
     plt.ioff()
 
@@ -1677,7 +1655,6 @@ def plot_uncertainty_bounds_component(
     """
 
     kwargs_error = kwargs_error if kwargs_error else {}
-
     if m is None:
         M = range(self[0].number_of_ports)
     else:
@@ -1715,23 +1692,42 @@ def plot_uncertainty_bounds_component(
                         plot_attribute = 's_time_db'
 
             if type == 'shade':
-                ntwk_mean.plot_s_re(ax=ax, m=m, n=n, **kwargs)
+                plot_kwargs = kwargs.copy()
+                if 'label' not in plot_kwargs:
+                    set_name = getattr(self, 'name', None)
+                    if set_name:
+                        plot_kwargs['label'] = f"{set_name}, S{m+1}{n+1}"
+                    else:
+                        plot_kwargs['label'] = f"S{m+1}{n+1}"
+                if 'linewidth' not in plot_kwargs:
+                    plot_kwargs['linewidth'] = 2
+                
+                # 先绘制线条
+                ntwk_mean.plot_s_re(ax=ax, m=m, n=n, **plot_kwargs)
+                
+                # 获取线条颜色
                 if color_error is None:
-                    color_error = ax.get_lines()[-1].get_color()
-                # plot the mean via plot_s_re against frequency.f_scaled, so the
-                # fill band must share that same x scale (rsplotlib ignores the
-                # scale_frequency_ticks FuncFormatter, see Network.plot_attribute)
+                    color_error = 'blue'
+                
+                # 再绘制填充区域
                 ax.fill_between(
                     ntwk_mean.frequency.f_scaled,
                     lower_bound.real,
                     upper_bound.real,
-                    alpha=alpha,
+                    alpha=0.1,
                     color=color_error,
                     **kwargs_error)
                 # ax.plot(ntwk_mean.frequency.f_scaled, ntwk_mean.s[:,m,n],*args,**kwargs)
-
+                
             elif type == 'bar':
-                ntwk_mean.plot_s_re(ax=ax, m=m, n=n, **kwargs)
+                plot_kwargs = kwargs.copy()
+                if 'label' not in plot_kwargs:
+                    set_name = getattr(self, 'name', None)
+                    if set_name:
+                        plot_kwargs['label'] = f"{set_name}, S{m+1}{n+1}"
+                    else:
+                        plot_kwargs['label'] = f"S{m+1}{n+1}"
+                ntwk_mean.plot_s_re(ax=ax, m=m, n=n, **plot_kwargs, label=plot_kwargs['label'])
                 if color_error is None:
                     color_error = ax.get_lines()[-1].get_color()
                 ax.errorbar(ntwk_mean.frequency.f_scaled[::markevery_error],
@@ -1922,7 +1918,7 @@ def plot_violin(
     ax : rsplotlib axes object
         Axes to plot on. Default is None.
     \*\*kwargs :
-        passed to :meth:`matplotlib.pyplot.violinplot`
+        passed to :meth:`rsplotlib.pyplot.violinplot`
 
     Note
     ----
@@ -1930,7 +1926,7 @@ def plot_violin(
     similar.  Uncertainty for wrapped phase blows up at +-pi.
     """
 
-    freq = self.ntwk_set[0].f
+    freq = self.ntwk_set[0].frequency.f_scaled
 
     # default widths to 3/4 distance between frequencies
     if not widths and len(freq) > 1:
@@ -1940,17 +1936,8 @@ def plot_violin(
 
     data = np.array([getattr(p, attribute)[:, m, n] for p in self.ntwk_set])
 
-    ax.violinplot(
-        data,
-        freq,
-        widths=widths,
-        showmeans=showmeans,
-        showextrema=showextrema,
-        showmedians=showmedians,
-        quantiles=quantiles,
-        points=points,
-        bw_method=bw_method,
-        **kwargs)
+    _plot_violin_fallback(
+        ax, data, freq, widths, showmeans, showextrema, showmedians, quantiles, points, bw_method, **kwargs)
 
     ax.set_xlabel(f'Frequency ({self.ntwk_set[0].frequency.unit})')
     # use only the function of the attribute
@@ -2026,7 +2013,6 @@ def plot_uncertainty_decomposition(self: NetworkSet, m: int = 0, n: int = 0):
         second s-parameter index
 
     """
-    import rsplotlib.pyplot as plt
     if self.name is not None:
         plt.title(
             f"Uncertainty Decomposition: {
@@ -2056,8 +2042,7 @@ def plot_logsigma(self: NetworkSet, label_axis: bool = True, *args, **kwargs):
     \*args, \*\*kwargs : arguments
         passed to self.std_s.plot_s_db()
     """
-    import rsplotlib.pyplot as plt
-
+ 
     self.std_s.plot_s_db(*args, **kwargs)
     if label_axis:
         plt.ylabel('Standard Deviation(dB)')
@@ -2101,9 +2086,7 @@ def signature(
     \*args,\*\*kw : arguments, keyword arguments
         passed to :func:`~pylab.imshow`
     """
-    import rsplotlib.pyplot as plt
     from rsplotlib.dates import date2num
-
     mat = np.array([self[k].__getattribute__(component)[:, m, n]
                     for k in range(len(self))])
 
@@ -2179,7 +2162,7 @@ def plot_contour(freq: Frequency,
     title : str, optional
         Figure title. The default is ''.
     \*\*kwargs : dict
-        Other parameters passed to `matplotlib.plot()`.
+        Other parameters passed to `rsplotlib.plot()`.
 
     Returns
     -------
@@ -2189,9 +2172,7 @@ def plot_contour(freq: Frequency,
         min or max.
 
     """
-    import rsplotlib.pyplot as plt
     from rsplotlib import tri
-
     from . import Network
 
     ri = np.linspace(0, 1, 50)
@@ -2243,7 +2224,7 @@ def plot_prop_complex(netw: Network, prop_name: str,
         first index of s-parameter matrix, if None will use all
     n : int, optional
         second index of the s-parameter matrix, if None will use all
-    ax : :class:`matplotlib.Axes` object, optional
+    ax : :class:`rsplotlib.Axes` object, optional
         An existing Axes object to plot on
     show_legend : Boolean
         draw legend or not
@@ -2251,7 +2232,7 @@ def plot_prop_complex(netw: Network, prop_name: str,
         the y-axis label
 
     \*args,\**kwargs : arguments, keyword arguments
-        passed to :func:`matplotlib.plot`
+        passed to :func:`rsplotlib.plot`
 
     Note
     ----
@@ -2309,7 +2290,7 @@ def plot_prop_polar(netw: Network, prop_name: str,
         first index of s-parameter matrix, if None will use all
     n : int, optional
         second index of the s-parameter matrix, if None will use all
-    ax : :class:`matplotlib.Axes` object, optional
+    ax : :class:`rsplotlib.Axes` object, optional
         An existing Axes object to plot on
     show_legend : Boolean
         draw legend or not
@@ -2317,7 +2298,7 @@ def plot_prop_polar(netw: Network, prop_name: str,
         the y-axis label
 
     \*args,\**kwargs : arguments, keyword arguments
-        passed to :func:`matplotlib.plot`
+        passed to :func:`rsplotlib.plot`
 
     Note
     ----
@@ -2359,3 +2340,83 @@ def plot_prop_polar(netw: Network, prop_name: str,
                 z=getattr(netw, prop_name)[:, m, n],
                 show_legend=show_legend, ax=ax,
                 **kwargs)
+
+
+def _get_scalar(val):
+    try:
+        if hasattr(val, 'item'):
+            return float(val.item())
+        return float(val)
+    except Exception:
+        return float(val[0]) if hasattr(val, '__len__') and len(val) > 0 else 0.0
+
+
+def _plot_violin_fallback(ax, data, positions, widths, showmeans, showextrema, showmedians, quantiles, points, bw_method, **kwargs):
+    n_freq = len(positions)
+    n_samples = data.shape[0]
+
+    color = kwargs.get('color', 'C0')
+
+    positions_list = [_get_scalar(p) for p in positions]
+    widths_val = _get_scalar(widths)
+    if widths_val <= 0:
+        widths_val = 0.5
+
+    for i in range(n_freq):
+        freq_data = data[:, i]
+        
+        freq_data_list = [_get_scalar(v) for v in freq_data]
+        
+        mean_val = sum(freq_data_list) / len(freq_data_list)
+        variance = sum((v - mean_val)**2 for v in freq_data_list) / len(freq_data_list)
+        std_val = variance ** 0.5
+        
+        y_min_val = min(freq_data_list)
+        y_max_val = max(freq_data_list)
+        y_range = y_max_val - y_min_val
+        if y_range == 0:
+            y_range = std_val if std_val > 0 else 1.0
+        y_min_val -= y_range * 0.1
+        y_max_val += y_range * 0.1
+        
+        y_vals = np.linspace(y_min_val, y_max_val, points)
+        
+        kde_vals = np.zeros_like(y_vals)
+        for val in freq_data_list:
+            kde_vals += np.exp(-(y_vals - val)**2 / (2 * std_val**2))
+        
+        kde_vals = kde_vals / (n_samples * std_val * np.sqrt(2 * np.pi))
+        
+        max_kde_val = _get_scalar(kde_vals.max())
+        if max_kde_val > 0:
+            kde_vals = kde_vals / max_kde_val * widths_val
+        
+        pos_i = positions_list[i]
+        x_left = np.array([pos_i - _get_scalar(k) for k in kde_vals])
+        x_right = np.array([pos_i + _get_scalar(k) for k in kde_vals])
+        
+        try:
+            ax.fill_betweenx(y_vals, x_left, x_right, color=color, alpha=0.3)
+        except AttributeError:
+            try:
+                ax.fill_between(y_vals, x_left, x_right, color=color, alpha=0.3)
+            except Exception:
+                pass
+        
+        ax.plot(x_left, y_vals, color=color, linewidth=0.5)
+        ax.plot(x_right, y_vals, color=color, linewidth=0.5)
+
+        if showextrema:
+            ax.plot(np.array([pos_i, pos_i]), np.array([y_min_val, y_max_val]), color=color, linewidth=1)
+        
+        if showmedians:
+            freq_data_sorted = sorted(freq_data_list)
+            n = len(freq_data_sorted)
+            if n % 2 == 0:
+                median_val = (freq_data_sorted[n//2 - 1] + freq_data_sorted[n//2]) / 2
+            else:
+                median_val = freq_data_sorted[n//2]
+            ax.plot(np.array([pos_i - widths_val*0.2, pos_i + widths_val*0.2]), np.array([median_val, median_val]), color=color, linewidth=1.5)
+        
+        if showmeans:
+            ax.plot(np.array([pos_i - widths_val*0.3, pos_i + widths_val*0.3]), np.array([mean_val, mean_val]), color=color, linewidth=1.5, linestyle='--')

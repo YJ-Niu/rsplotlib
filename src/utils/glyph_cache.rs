@@ -5,8 +5,26 @@ use plotters_backend::{
     FontTransform,
     text_anchor::{HPos, VPos},
 };
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
+
+// 线程局部存储：当前正在绘制的文本旋转角度（度）。
+// 由 `draw_math_chart` 在调用 `draw_series` 之前设置，
+// `GlyphCacheBackend::draw_text` 读取并应用于像素级字形旋转。
+thread_local! {
+    static CURRENT_TEXT_ROTATION: Cell<f64> = const { Cell::new(0.0) };
+}
+
+/// 设置当前线程的文本旋转角度（度）。
+pub fn set_current_rotation(angle: f64) {
+    CURRENT_TEXT_ROTATION.set(angle);
+}
+
+/// 读取当前线程的文本旋转角度（度）。
+fn get_current_rotation() -> f64 {
+    CURRENT_TEXT_ROTATION.get()
+}
 
 /// 镜像 plotters 私有字体表：family -> (style_str -> (font_id, FontRef))。
 /// 与 6 处 `register_font` 一一配对写入，保证同一 (family,style) 指向同一字体。
@@ -214,11 +232,32 @@ impl<B: DrawingBackend> DrawingBackend for GlyphCacheBackend<B> {
             if let Some(cg) = cached.as_ref() {
                 let y_shift = ((size as f32) / 2.0 + cg.rect_min_y) as i32;
                 let x_shift_i = x_shift as i32;
-                for &(gx, gy, cov) in &cg.px {
-                    let fx = pos.0 + gx + x_shift_i + dx - min_x;
-                    let fy = pos.1 + gy + y_shift + dy - min_y;
-                    if fx >= 0 && fx < w as i32 && fy >= 0 && fy < h as i32 {
-                        self.inner.draw_pixel((fx, fy), color.mix(cov as f64))?;
+                let angle = get_current_rotation();
+                if angle.abs() > 0.5 {
+                    // 应用任意角度旋转
+                    let radians = angle.to_radians();
+                    let cos_a = radians.cos();
+                    let sin_a = radians.sin();
+                    let anchor_x = pos.0 + dx;
+                    let anchor_y = pos.1 + dy;
+                    for &(gx, gy, cov) in &cg.px {
+                        let rel_x = (gx + x_shift_i - min_x) as f64;
+                        let rel_y = (gy + y_shift - min_y) as f64;
+                        let rot_x = rel_x * cos_a - rel_y * sin_a;
+                        let rot_y = rel_x * sin_a + rel_y * cos_a;
+                        let fx = (anchor_x as f64 + rot_x).round() as i32;
+                        let fy = (anchor_y as f64 + rot_y).round() as i32;
+                        if fx >= 0 && fx < w as i32 && fy >= 0 && fy < h as i32 {
+                            self.inner.draw_pixel((fx, fy), color.mix(cov as f64))?;
+                        }
+                    }
+                } else {
+                    for &(gx, gy, cov) in &cg.px {
+                        let fx = pos.0 + gx + x_shift_i + dx - min_x;
+                        let fy = pos.1 + gy + y_shift + dy - min_y;
+                        if fx >= 0 && fx < w as i32 && fy >= 0 && fy < h as i32 {
+                            self.inner.draw_pixel((fx, fy), color.mix(cov as f64))?;
+                        }
                     }
                 }
             }

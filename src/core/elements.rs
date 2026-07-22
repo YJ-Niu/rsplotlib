@@ -36,6 +36,14 @@ pub struct ArrowSpec {
 }
 
 #[derive(Clone)]
+pub struct BBox {
+    pub face_color: Option<String>,
+    pub edge_color: Option<String>,
+    pub pad: f64,
+    pub alpha: f64,
+}
+
+#[derive(Clone)]
 pub enum PlotElement {
     Line {
         /// X 坐标，行主序。缺失值（Python 的 None/空串）与非法值统一以 `NaN`
@@ -54,6 +62,7 @@ pub enum PlotElement {
         markersize: Option<f64>,
         markerfacecolor: Option<String>,
         markeredgecolor: Option<String>,
+        markevery: Option<String>,
     },
     Scatter {
         x: Vec<f64>,
@@ -132,6 +141,12 @@ pub enum PlotElement {
         fontsize: f64,
         color: RgbColor,
         font_family: Option<String>,
+        ha: String,
+        va: String,
+        rotation: f64,
+        dx: f64,
+        dy: f64,
+        bbox: Option<BBox>,
     },
     HLine {
         y: f64,
@@ -194,6 +209,20 @@ pub enum PlotElement {
         labels: Option<Vec<String>>,
         vert: bool,
     },
+    Violin {
+        data: Vec<Vec<f64>>,
+        positions: Vec<f64>,
+        widths: Vec<f64>,
+        showmeans: bool,
+        showmedians: bool,
+        showextrema: bool,
+        vert: bool,
+        colors: Vec<String>,
+        label: Option<String>,
+        color_idx: usize,
+        alpha: f64,
+        points: usize,
+    },
     Annotate {
         text: String,
         xy: (f64, f64),
@@ -225,12 +254,14 @@ pub enum PlotElement {
         y2: f64,
         color: String,
         alpha: f64,
+        label: Option<String>,
     },
     VSpan {
         x1: f64,
         x2: f64,
         color: String,
         alpha: f64,
+        label: Option<String>,
     },
     AxLine {
         xy1: (f64, f64),

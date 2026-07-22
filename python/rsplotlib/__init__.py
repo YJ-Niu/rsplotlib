@@ -7,17 +7,18 @@ from . import pyplot, pylab  # noqa: F401
 from .utils import _font_resolver, style  # noqa: F401
 from .layout import gridspec  # noqa: F401
 from .ticks import ticker  # noqa: F401
+import rsplotlib.text as text
 
 GridSpec = gridspec.GridSpec
 MaxNLocator = ticker.MaxNLocator
 MultipleLocator = ticker.MultipleLocator
 AutoMinorLocator = ticker.AutoMinorLocator
 
-__version__ = "0.3.0"
+__version__ = "0.3.3"
 # 从内部 Rust 模块导出字体注册函数
 
 __all__ = list(_api_all) + [
-    'pyplot', 'style', 'gridspec', 'ticker',
+    'pyplot', 'style', 'gridspec', 'ticker', 'text',
     'GridSpec', 'MaxNLocator', 'MultipleLocator',
     'AutoMinorLocator', 'register_sans_serif_font',
 ]

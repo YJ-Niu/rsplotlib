@@ -78,7 +78,14 @@ where
             title_family,
             h_align,
             VAlign::Bottom,
+            0.0,
+            0.0,
             dy_px,
+            None,
+            x_min,
+            x_max,
+            _y_min,
+            y_max,
         )?;
     }
     Ok(())

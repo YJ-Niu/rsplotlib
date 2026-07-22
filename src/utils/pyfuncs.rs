@@ -95,11 +95,17 @@ pub fn init_axes_self_py(ax_py: &Py<Axes>, py: Python<'_>) {
 }
 
 fn _make_fig_ax(py: Python<'_>, ax: Axes) -> PyResult<(Py<Figure>, Py<Axes>)> {
-    let mut fig = Figure::new();
-    fig.axes_list.clear();
-    fig.axes_positions.clear();
-    let fig_py = Py::new(py, fig)?;
-    set_current_figure(fig_py.clone_ref(py));
+    let fig_py = match get_current_figure(py) {
+        Ok(fig) => fig.into(),
+        Err(_) => {
+            let mut fig = Figure::new();
+            fig.axes_list.clear();
+            fig.axes_positions.clear();
+            let fig_py = Py::new(py, fig)?;
+            set_current_figure(fig_py.clone_ref(py));
+            fig_py
+        }
+    };
     let ax_py = Py::new(py, ax)?;
     init_axes_self_py(&ax_py, py);
     fig_py.borrow_mut(py).axes_list.push(ax_py.clone_ref(py));
@@ -768,7 +774,7 @@ pub fn boxplot<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None))]
+#[pyo3(signature = (x, y, text, fontsize=None, color=None, c=None, family=None, ha=None, va=None, rotation=None, dx=None, dy=None, bbox=None))]
 pub fn text(
     py: Python,
     x: f64,
@@ -778,10 +784,32 @@ pub fn text(
     color: Option<String>,
     c: Option<String>,
     family: Option<String>,
+    ha: Option<String>,
+    va: Option<String>,
+    rotation: Option<f64>,
+    dx: Option<f64>,
+    dy: Option<f64>,
+    bbox: Option<Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let ax = get_current_axes(py)?;
     let mut ax_ref = ax.borrow_mut(py);
-    Axes::text(&mut ax_ref, py, x, y, text, fontsize, color, c, family);
+    Axes::text(
+        &mut ax_ref,
+        py,
+        x,
+        y,
+        text,
+        fontsize,
+        color,
+        c,
+        family,
+        ha,
+        va,
+        rotation,
+        dx,
+        dy,
+        bbox,
+    );
     Ok(())
 }
 
@@ -1087,16 +1115,18 @@ pub fn subplot<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None))]
-pub fn subplots(
-    py: Python<'_>,
+#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None, layout=None, projection=None))]
+pub fn subplots<'a>(
+    py: Python<'a>,
     nrows: usize,
     ncols: usize,
     figsize: Option<(f64, f64)>,
     dpi: Option<f64>,
     width_ratios: Option<Vec<f64>>,
     height_ratios: Option<Vec<f64>>,
-) -> PyResult<Bound<'_, PyTuple>> {
+    layout: Option<&'a str>,
+    projection: Option<&'a str>,
+) -> PyResult<Bound<'a, PyTuple>> {
     let total = nrows * ncols;
     let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
     let (width, height) = if let Some((w, h)) = figsize {
@@ -1107,13 +1137,15 @@ pub fn subplots(
         (w, h)
     };
 
+    let proj_str = projection.unwrap_or("rectilinear").to_string();
+
     let mut fig = Figure::new();
     fig.nrows = nrows;
     fig.ncols = ncols;
     fig.width = width.max(100);
     fig.height = height.max(100);
     fig.dpi = dpi_val;
-    // 仅在长度与网格轨道数一致时采纳比例，否则回退等分（渲染阶段据此按比例分配行/列）。
+    fig.constrained_layout = layout.is_some_and(|l| l == "constrained" || l == "tight");
     let width_ratios = width_ratios.filter(|r| r.len() == ncols);
     let height_ratios = height_ratios.filter(|r| r.len() == nrows);
     fig.width_ratios = width_ratios.clone();
@@ -1124,7 +1156,12 @@ pub fn subplots(
     set_current_figure(fig_py.clone_ref(py));
 
     if total == 1 {
-        let ax_py = Py::new(py, Axes::new())?;
+        let mut ax = Axes::new();
+        ax.projection = proj_str.clone();
+        if proj_str == "polar" {
+            ax.aspect = Some(1.0);
+        }
+        let ax_py = Py::new(py, ax)?;
         init_axes_self_py(&ax_py, py);
         {
             let mut fig_ref = fig_py.borrow_mut(py);
@@ -1142,9 +1179,13 @@ pub fn subplots(
         {
             let mut fig_ref = fig_py.borrow_mut(py);
             for k in 0..total {
-                let ax_py = Py::new(py, Axes::new())?;
+                let mut ax = Axes::new();
+                ax.projection = proj_str.clone();
+                if proj_str == "polar" {
+                    ax.aspect = Some(1.0);
+                }
+                let ax_py = Py::new(py, ax)?;
                 init_axes_self_py(&ax_py, py);
-                // 行号 0 在最上方：row_edges 沿「自顶部量」的正方向，top = 1 - start。
                 let (col_start, col_size) = col_edges[k % ncols];
                 let (row_start, row_size) = row_edges[k / ncols];
                 let top = 1.0 - row_start;
@@ -1225,8 +1266,26 @@ pub fn show(py: Python) -> PyResult<()> {
 }
 
 #[pyfunction]
-pub fn figure(py: Python) -> PyResult<Py<Figure>> {
-    let fig = Figure::new();
+#[pyo3(signature = (figsize=None, dpi=None, layout=None))]
+pub fn figure(
+    py: Python,
+    figsize: Option<(f64, f64)>,
+    dpi: Option<f64>,
+    layout: Option<&str>,
+) -> PyResult<Py<Figure>> {
+    let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
+    let (width, height) = if let Some((w, h)) = figsize {
+        ((w * dpi_val).round() as u32, (h * dpi_val).round() as u32)
+    } else {
+        let w = (DEFAULT_FIGSIZE.0 * dpi_val).round() as u32;
+        let h = (DEFAULT_FIGSIZE.1 * dpi_val).round() as u32;
+        (w, h)
+    };
+    let mut fig = Figure::new();
+    fig.width = width.max(100);
+    fig.height = height.max(100);
+    fig.dpi = dpi_val;
+    fig.constrained_layout = layout.is_some_and(|l| l == "constrained" || l == "tight");
     let fig_py = Py::new(py, fig)?;
     set_current_figure(fig_py.clone_ref(py));
     Ok(fig_py)
@@ -1393,32 +1452,34 @@ pub fn minorticks_off(py: Python<'_>) -> PyResult<()> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (y1, y2, color=None, alpha=0.3))]
+#[pyo3(signature = (ymin, ymax, color=None, alpha=0.3, label=None))]
 pub fn axhspan(
     py: Python<'_>,
-    y1: f64,
-    y2: f64,
+    ymin: f64,
+    ymax: f64,
     color: Option<String>,
     alpha: f64,
+    label: Option<String>,
 ) -> PyResult<()> {
     get_current_axes(py)?
         .borrow_mut(py)
-        .axhspan(y1, y2, color, alpha);
+        .axhspan(ymin, ymax, color, alpha, label);
     Ok(())
 }
 
 #[pyfunction]
-#[pyo3(signature = (x1, x2, color=None, alpha=0.3))]
+#[pyo3(signature = (xmin, xmax, color=None, alpha=0.3, label=None))]
 pub fn axvspan(
     py: Python<'_>,
-    x1: f64,
-    x2: f64,
+    xmin: f64,
+    xmax: f64,
     color: Option<String>,
     alpha: f64,
+    label: Option<String>,
 ) -> PyResult<()> {
     get_current_axes(py)?
         .borrow_mut(py)
-        .axvspan(x1, x2, color, alpha);
+        .axvspan(xmin, xmax, color, alpha, label);
     Ok(())
 }
 

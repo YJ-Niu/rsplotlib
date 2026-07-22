@@ -212,6 +212,55 @@ pub fn compute_bounds(
                     y_sticky_min = true;
                 }
             }
+            PlotElement::Violin {
+                data,
+                positions,
+                widths,
+                vert,
+                ..
+            } => {
+                let is_vertical = *vert;
+                for (di, dataset) in data.iter().enumerate() {
+                    if dataset.is_empty() {
+                        continue;
+                    }
+                    let pos = *positions.get(di).unwrap_or(&(di as f64));
+                    let width = *widths.get(di).unwrap_or(&0.5);
+
+                    let min_val = *dataset
+                        .iter()
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+                    let max_val = *dataset
+                        .iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+
+                    let (dx_min, dx_max, dy_min, dy_max) = if is_vertical {
+                        (pos - width, pos + width, min_val, max_val)
+                    } else {
+                        (min_val, max_val, pos - width, pos + width)
+                    };
+
+                    let tvx_min = tx(dx_min);
+                    let tvx_max = tx(dx_max);
+                    let tvy_min = ty(dy_min);
+                    let tvy_max = ty(dy_max);
+
+                    if tvx_min > f64::NEG_INFINITY && tvx_min < x_min {
+                        x_min = tvx_min;
+                    }
+                    if tvx_max > x_max {
+                        x_max = tvx_max;
+                    }
+                    if tvy_min > f64::NEG_INFINITY && tvy_min < y_min {
+                        y_min = tvy_min;
+                    }
+                    if tvy_max > y_max {
+                        y_max = tvy_max;
+                    }
+                }
+            }
             PlotElement::Image { img_w, img_h, .. } => {
                 if *img_w == 0 || *img_h == 0 {
                     continue;
@@ -570,12 +619,12 @@ pub fn compute_bounds(
     }
 
     if x_min == f64::INFINITY {
-        x_min = 0.0;
-        x_max = 1.0;
+        x_min = -2.0;
+        x_max = 2.0;
     }
     if y_min == f64::INFINITY {
-        y_min = 0.0;
-        y_max = 1.0;
+        y_min = -2.0;
+        y_max = 2.0;
     }
 
     let x_range = x_max - x_min;

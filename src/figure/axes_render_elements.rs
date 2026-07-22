@@ -1075,8 +1075,6 @@ fn element_below_grid(el: &PlotElement) -> bool {
             | PlotElement::BarH { .. }
             | PlotElement::FillBetween { .. }
             | PlotElement::Stack { .. }
-            | PlotElement::HSpan { .. }
-            | PlotElement::VSpan { .. }
             | PlotElement::Scatter { .. }
             | PlotElement::ScatterMulti { .. }
     )
@@ -1448,6 +1446,9 @@ where
     };
 
     for el in elements {
+        if matches!(el, PlotElement::Text { .. }) {
+            continue;
+        }
         // matplotlib 默认 axisbelow='line'：按元素归属的网格分层跳过不属于本趟的元素。
         // Hist 例外——柱在网格下、step 轮廓在网格上，其分支内部各自按 layer 判断。
         if !matches!(el, PlotElement::Hist { .. })
@@ -1468,7 +1469,8 @@ where
                 markersize,
                 markerfacecolor,
                 markeredgecolor,
-                ..
+                markevery,
+                label: _,
             } => {
                 let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
                 let rgb = to_plotters_color(col);
@@ -1558,7 +1560,7 @@ where
                             } else {
                                 let p = match linestyle.as_str() {
                                     // dashed (lines.dashed_pattern): 划 3.7, 隙 1.6
-                                    "--" => Some(vec![(3.7 * ds, true), (1.6 * ds, false)]),
+                                    "--" => Some(vec![(3.7 * ds, true), (3.2 * ds, false)]),
                                     // dotted (lines.dotted_pattern): 点 1, 隙 1.65
                                     ":" => Some(vec![(1.0 * ds, true), (1.65 * ds, false)]),
                                     // dashdot (lines.dashdot_pattern): 划 6.4, 隙 1.6, 点 1, 隙 1.6
@@ -1666,7 +1668,14 @@ where
                         let diameter_px = ms * marker_scale;
                         diameter_px / 2.0
                     };
-                    for (xv, yv) in x.iter().zip(y.iter()) {
+                    let step = markevery
+                        .as_deref()
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(1);
+                    for (i, (xv, yv)) in x.iter().zip(y.iter()).enumerate() {
+                        if i % step != 0 {
+                            continue;
+                        }
                         let txv = tx(*xv);
                         let tyv = ty(*yv) - y_half_px;
                         if txv.is_finite() && tyv.is_finite() {
@@ -1914,6 +1923,183 @@ where
                     }
                 }
             }
+            PlotElement::Violin {
+                data,
+                positions,
+                widths,
+                showmeans,
+                showmedians,
+                showextrema,
+                vert,
+                colors,
+                alpha: _,
+                color_idx,
+                label: _,
+                points,
+            } => {
+                let _n_datasets = data.len();
+                let is_vertical = *vert;
+
+                let to_xy = |pos: f64, val: f64| -> (f64, f64) {
+                    if is_vertical {
+                        (tx(pos), ty(val))
+                    } else {
+                        (tx(val), ty(pos))
+                    }
+                };
+
+                let col_str = colors.first().map(|s| s.as_str()).unwrap_or("");
+                let col = parse_color(col_str, *color_idx).unwrap_or(default_color(*color_idx));
+                let rgb = to_plotters_color(col);
+                let fill_style: ShapeStyle = rgb.mix(0.6).filled();
+                let stroke_style = rgb.stroke_width(1);
+
+                for (di, dataset) in data.iter().enumerate() {
+                    if dataset.is_empty() {
+                        continue;
+                    }
+
+                    let pos = *positions.get(di).unwrap_or(&(di as f64));
+                    let width = *widths.get(di).unwrap_or(&0.5) * 0.5;
+
+                    let mean_val: f64 = dataset.iter().sum::<f64>() / dataset.len() as f64;
+                    let variance: f64 =
+                        dataset.iter().map(|&x| (x - mean_val).powi(2)).sum::<f64>()
+                            / dataset.len() as f64;
+                    let std_val = variance.sqrt();
+
+                    let min_val = *dataset
+                        .iter()
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+                    let max_val = *dataset
+                        .iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+
+                    let median_val = {
+                        let mut sorted = dataset.clone();
+                        sorted
+                            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        let n = sorted.len();
+                        if n % 2 == 0 {
+                            (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+                        } else {
+                            sorted[n / 2]
+                        }
+                    };
+
+                    let num_points = *points;
+                    let y_min_plot = min_val;
+                    let y_max_plot = max_val;
+                    let y_range = y_max_plot - y_min_plot;
+                    let dy = y_range / (num_points - 1) as f64;
+
+                    let mut left_pts: Vec<(f64, f64)> = Vec::with_capacity(num_points);
+                    let mut right_pts: Vec<(f64, f64)> = Vec::with_capacity(num_points);
+
+                    for i in 0..num_points {
+                        let y_val = y_min_plot + i as f64 * dy;
+                        let kde_val: f64 = dataset
+                            .iter()
+                            .map(|&x| (-0.5 * ((x - y_val) / std_val).powi(2)).exp())
+                            .sum::<f64>()
+                            / (dataset.len() as f64
+                                * std_val
+                                * (2.0 * std::f64::consts::PI).sqrt());
+
+                        let max_kde: f64 = (0..num_points)
+                            .map(|j| {
+                                let y = y_min_plot + j as f64 * dy;
+                                dataset
+                                    .iter()
+                                    .map(|&x| (-0.5 * ((x - y) / std_val).powi(2)).exp())
+                                    .sum::<f64>()
+                            })
+                            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                            .unwrap_or(1.0);
+                        let max_kde = max_kde
+                            / (dataset.len() as f64
+                                * std_val
+                                * (2.0 * std::f64::consts::PI).sqrt());
+
+                        let scaled_width = if max_kde > 0.0 {
+                            (kde_val / max_kde) * width
+                        } else {
+                            0.0
+                        };
+
+                        let (x_left, x_right) = (pos - scaled_width, pos + scaled_width);
+
+                        left_pts.push(to_xy(x_left, y_val));
+                        right_pts.push(to_xy(x_right, y_val));
+                    }
+
+                    let mut fill_pts = left_pts.clone();
+                    fill_pts.extend(right_pts.iter().rev());
+
+                    if layer == GridLayer::AboveGrid {
+                        chart
+                            .draw_series(std::iter::once(Polygon::new(fill_pts, fill_style)))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!(
+                                    "Failed to draw violin fill: {}",
+                                    e
+                                ))
+                            })?;
+
+                        if *showextrema {
+                            let line_pts = vec![to_xy(pos, min_val), to_xy(pos, max_val)];
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    line_pts,
+                                    stroke_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "Failed to draw violin extrema: {}",
+                                        e
+                                    ))
+                                })?;
+                        }
+
+                        if *showmedians {
+                            let half_width = width * 0.2;
+                            let (x1, x2) = (pos - half_width, pos + half_width);
+                            let median_line = vec![to_xy(x1, median_val), to_xy(x2, median_val)];
+                            let median_style = rgb.stroke_width(2);
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    median_line,
+                                    median_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "Failed to draw violin median: {}",
+                                        e
+                                    ))
+                                })?;
+                        }
+
+                        if *showmeans {
+                            let half_width = width * 0.3;
+                            let (x1, x2) = (pos - half_width, pos + half_width);
+                            let mean_line = vec![to_xy(x1, mean_val), to_xy(x2, mean_val)];
+                            let mean_style = rgb.stroke_width(2);
+                            chart
+                                .draw_series(std::iter::once(PathElement::new(
+                                    mean_line, mean_style,
+                                )))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "Failed to draw violin mean: {}",
+                                        e
+                                    ))
+                                })?;
+                        }
+                    }
+                }
+            }
             PlotElement::Image {
                 pixels,
                 img_w,
@@ -1962,35 +2148,6 @@ where
                     )?;
                 }
             }
-            PlotElement::Text {
-                x,
-                y,
-                text,
-                fontsize,
-                color,
-                font_family,
-            } => {
-                let txv = tx(*x);
-                let tyv = ty(*y);
-                if !txv.is_finite() || !tyv.is_finite() {
-                    continue;
-                }
-                let fs = scale_font(*fontsize, font_scale);
-                // 垂直居中对齐：让 (x, y) 落在文字的几何中心，
-                // 与 axhline/axvline 在同一坐标时的视觉位置一致。
-                mathtext::draw_math_chart(
-                    chart,
-                    txv,
-                    tyv,
-                    text,
-                    fs,
-                    to_plotters_color(*color),
-                    font_family.as_deref(),
-                    HAlign::Left,
-                    VAlign::Center,
-                    0.0,
-                )?;
-            }
             PlotElement::HLine {
                 y,
                 color,
@@ -2024,6 +2181,7 @@ where
                 y2,
                 color,
                 alpha,
+                label: _,
             } => {
                 let ty1 = ty(*y1);
                 let ty2 = ty(*y2);
@@ -2048,6 +2206,7 @@ where
                 x2,
                 color,
                 alpha,
+                label: _,
             } => {
                 let tx1 = tx(*x1);
                 let tx2 = tx(*x2);
@@ -2760,6 +2919,80 @@ where
                     halign,
                     VAlign::Center,
                     0.0,
+                    0.0,
+                    0.0,
+                    None,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
+                )?;
+            }
+            PlotElement::Text { .. } => {}
+        }
+    }
+
+    if layer == GridLayer::AboveGrid {
+        for el in elements {
+            if !matches!(el, PlotElement::Text { .. }) {
+                continue;
+            }
+            if let PlotElement::Text {
+                x,
+                y,
+                text,
+                fontsize,
+                color,
+                font_family,
+                ha,
+                va,
+                rotation,
+                dx,
+                dy,
+                bbox,
+            } = el
+            {
+                let txv = tx(*x);
+                let tyv = ty(*y);
+                if !txv.is_finite() || !tyv.is_finite() {
+                    continue;
+                }
+                let fs = scale_font(*fontsize, font_scale);
+                let h_align = match ha.as_str() {
+                    "left" => HAlign::Left,
+                    "right" => HAlign::Right,
+                    _ => HAlign::Center,
+                };
+                let v_align = match va.as_str() {
+                    "top" => VAlign::Top,
+                    "bottom" => VAlign::Bottom,
+                    _ => VAlign::Center,
+                };
+
+                let bbox_tuple = bbox.as_ref().map(|b| {
+                    let fc = b.face_color.as_deref().unwrap_or("");
+                    let ec = b.edge_color.as_deref().unwrap_or("");
+                    (fc, ec, b.pad, b.alpha)
+                });
+
+                mathtext::draw_math_chart(
+                    chart,
+                    txv,
+                    tyv,
+                    text,
+                    fs,
+                    to_plotters_color(*color),
+                    font_family.as_deref(),
+                    h_align,
+                    v_align,
+                    *rotation,
+                    *dx,
+                    *dy,
+                    bbox_tuple,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
                 )?;
             }
         }

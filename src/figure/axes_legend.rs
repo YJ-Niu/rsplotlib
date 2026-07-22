@@ -90,6 +90,22 @@ fn collect_data_points(elements: &[PlotElement]) -> Vec<(f64, f64)> {
                     }
                 }
             }
+            PlotElement::Violin {
+                positions,
+                widths,
+                vert,
+                ..
+            } => {
+                let is_vertical = *vert;
+                for (di, &pos) in positions.iter().enumerate() {
+                    let width = *widths.get(di).unwrap_or(&0.5);
+                    if is_vertical {
+                        push_rect(&mut pts, pos - width, pos + width, 0.0, 1.0);
+                    } else {
+                        push_rect(&mut pts, 0.0, 1.0, pos - width, pos + width);
+                    }
+                }
+            }
             PlotElement::FillBetween { x, y1, y2, .. } => {
                 for (i, &xi) in x.iter().enumerate() {
                     let yl = *y1.get(i).unwrap_or(&0.0);
@@ -247,7 +263,7 @@ fn rounded_rect_points(x1: f64, y1: f64, x2: f64, y2: f64, rx: f64, ry: f64) -> 
 pub fn draw_legend<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     legend_loc: Option<&String>,
-    legend_labels: &[(String, RgbColor, String, Option<String>, f64)],
+    legend_labels: &[(String, RgbColor, String, Option<String>, f64, f64)],
     elements: &[PlotElement],
     font_scale: f64,
     x_min: f64,
@@ -295,8 +311,8 @@ where
         // 横向布局（像素）：左内边距 | 线条/marker 样本 | 间隙 | 文字 | 右内边距。
         // 宽度按最宽标签自适应，避免长文字溢出图例框。
         let pad_h_px = 8.0 * font_scale;
-        let handle_px = 34.0 * font_scale;
-        let gap_px = 7.0 * font_scale;
+        let handle_px = label_fs * 1.6;
+        let gap_px = 3.5 * font_scale;
         let max_text_px = legend_labels
             .iter()
             .map(|(label, ..)| mathtext::measure_plain(label.as_str(), None, label_fs).0)
@@ -310,36 +326,39 @@ where
         let legend_height = entry_height * entry_count as f64 + 2.0 * pad_v_px * y_per_px;
 
         // 已知固定位置直接定位；其余（含 "best" 与未识别值）自动避让数据。
-        let (box_x1, box_y1, box_x2, box_y2) = match loc.as_str() {
+        // 内边距：取数据范围的 2%，避免图例紧贴坐标轴边界
+        let px = x_range * 0.02;
+        let py = y_range * 0.02;
+        let (box_x1, mut box_y1, box_x2, box_y2) = match loc.as_str() {
             "upper right" => box_from_anchor(
                 HPos::Right,
                 VPos::Top,
-                x_max,
-                y_max,
+                x_max - px,
+                y_max - py,
                 legend_width,
                 legend_height,
             ),
             "upper left" => box_from_anchor(
                 HPos::Left,
                 VPos::Top,
-                x_min,
-                y_max,
+                x_min + px,
+                y_max - py,
                 legend_width,
                 legend_height,
             ),
             "lower right" => box_from_anchor(
                 HPos::Right,
                 VPos::Bottom,
-                x_max,
-                y_min,
+                x_max - px,
+                y_min + py,
                 legend_width,
                 legend_height,
             ),
             "lower left" => box_from_anchor(
                 HPos::Left,
                 VPos::Bottom,
-                x_min,
-                y_min,
+                x_min + px,
+                y_min + py,
                 legend_width,
                 legend_height,
             ),
@@ -354,7 +373,7 @@ where
             "right" | "center right" => box_from_anchor(
                 HPos::Right,
                 VPos::Center,
-                x_max,
+                x_max - px,
                 (y_min + y_max) / 2.0,
                 legend_width,
                 legend_height,
@@ -362,7 +381,7 @@ where
             "center left" => box_from_anchor(
                 HPos::Left,
                 VPos::Center,
-                x_min,
+                x_min + px,
                 (y_min + y_max) / 2.0,
                 legend_width,
                 legend_height,
@@ -371,7 +390,7 @@ where
                 HPos::Center,
                 VPos::Bottom,
                 (x_min + x_max) / 2.0,
-                y_min,
+                y_min + py,
                 legend_width,
                 legend_height,
             ),
@@ -379,7 +398,7 @@ where
                 HPos::Center,
                 VPos::Top,
                 (x_min + x_max) / 2.0,
-                y_max,
+                y_max - py,
                 legend_width,
                 legend_height,
             ),
@@ -419,6 +438,12 @@ where
             }
         };
 
+        let max_legend_height = y_max - y_min - 2.0 * py;
+        let legend_height = entry_height * entry_count as f64 + 2.0 * pad_v_px * y_per_px;
+        if legend_height > max_legend_height {
+            box_y1 = box_y2 - legend_height;
+        }
+
         // 图例框背景/边框样式：默认沿用半透明白底 + 浅灰边框；
         // 调用方（如 stylely 捕获的样式）可覆盖为任意颜色与不透明度。
         // 当背景色接近白色且未指定边框色时，自动使用稍深的灰色以确保可见性。
@@ -435,7 +460,7 @@ where
                 RgbColor(180, 180, 180)
             }
         };
-        let bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
+        let _bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
         let bg_border: ShapeStyle = to_plotters_color(ec).stroke_width(1);
 
         // 圆角半径：以像素为基准，再按数据/像素比例换算到数据坐标，
@@ -455,7 +480,7 @@ where
 
         // 半透明白色圆角填充
         chart
-            .draw_series(std::iter::once(Polygon::new(corner_pts.clone(), bg_fill)))
+            .draw_series(std::iter::once(Polygon::new(corner_pts.clone(), _bg_fill)))
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend bg: {}", e)))?;
         // 圆角边框（闭合路径）
         let mut border_pts = corner_pts;
@@ -470,9 +495,13 @@ where
         // 否则固定的数据单位间隔在不同数据范围下会失效（例如整段被一个"虚线"填满而显示为实线）。
         let dash_unit = font_scale * x_per_px;
 
-        for (i, (label, color, ls, marker_opt, lw)) in legend_labels.iter().enumerate() {
-            // 从顶部向下排列，使条目按插入顺序从上到下显示。行内垂直居中于其行高。
+        let max_entries = legend_labels.len();
+        for (i, (label, color, ls, marker_opt, lw, alpha)) in legend_labels.iter().enumerate() {
+            if i >= max_entries {
+                break;
+            }
             let y_pos = box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - i as f64 * entry_height;
+
             let x_line_start = box_x1 + pad_h_px * x_per_px;
             let x_line_end = x_line_start + handle_px * x_per_px;
             let x_text = x_line_end + gap_px * x_per_px;
@@ -484,11 +513,22 @@ where
             let legend_stroke = (lw_px as i32 - 1).max(1) as u32;
             let line_style: ShapeStyle = rgb.stroke_width(legend_stroke);
 
-            // 根据线型绘制图例线段
+            // 根据线型绘制图例线段或填充色块
             match ls.as_str() {
+                "fill" => {
+                    let rect_height = handle_px * y_per_px * 0.6;
+                    let y_bottom = y_pos - rect_height / 2.0;
+                    let y_top = y_pos + rect_height / 2.0;
+                    chart
+                        .draw_series(std::iter::once(Rectangle::new(
+                            [(x_line_start, y_bottom), (x_line_end, y_top)],
+                            rgb.mix(*alpha).filled(),
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("Legend fill: {}", e)))?;
+                }
                 "--" => {
                     let dash_len = 6.0 * dash_unit;
-                    let gap_len = 4.0 * dash_unit;
+                    let gap_len = 8.0 * dash_unit;
                     let mut pos = x_line_start;
                     let mut drawing = true;
                     while pos < x_line_end {
@@ -560,7 +600,6 @@ where
                     }
                 }
                 _ => {
-                    // 实线
                     chart
                         .draw_series(std::iter::once(PathElement::new(
                             vec![(x_line_start, y_pos), (x_line_end, y_pos)],
@@ -581,8 +620,6 @@ where
                 )?;
             }
 
-            // 图例文字相对线条/marker 略微上移以视觉居中：普通文字上移 20%，
-            // 含数学排版（上/下标、分式、根号等）的文字块更高，上移 45%。
             let text_nudge = if mathtext::contains_ir(label) {
                 -0.45 * label_fs
             } else {
@@ -598,7 +635,14 @@ where
                 None,
                 HAlign::Left,
                 VAlign::Top,
+                0.0,
+                0.0,
                 text_nudge,
+                None,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
             )?;
         }
     }

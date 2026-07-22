@@ -145,3 +145,42 @@ def _flatten(values):
     else:
         out.append(float(values))
     return out
+
+
+class _ColorConverter:
+    def to_rgba_array(self, colors, alpha=None):
+        if not isinstance(colors, (list, tuple)):
+            colors = [colors]
+        result = []
+        for color in colors:
+            if color is None or color == 'none':
+                rgba = [0.0, 0.0, 0.0, 0.0]
+            elif color == 'k' or color == 'black':
+                rgba = [0.0, 0.0, 0.0, 1.0]
+            elif color == 'w' or color == 'white':
+                rgba = [1.0, 1.0, 1.0, 1.0]
+            elif color == 'r' or color == 'red':
+                rgba = [1.0, 0.0, 0.0, 1.0]
+            elif color == 'g' or color == 'green':
+                rgba = [0.0, 1.0, 0.0, 1.0]
+            elif color == 'b' or color == 'blue':
+                rgba = [0.0, 0.0, 1.0, 1.0]
+            elif color == 'c' or color == 'cyan':
+                rgba = [0.0, 1.0, 1.0, 1.0]
+            elif color == 'm' or color == 'magenta':
+                rgba = [1.0, 0.0, 1.0, 1.0]
+            elif color == 'y' or color == 'yellow':
+                rgba = [1.0, 1.0, 0.0, 1.0]
+            elif isinstance(color, (list, tuple)) and len(color) in (3, 4):
+                rgba = list(color)
+                if len(rgba) == 3:
+                    rgba.append(1.0)
+            else:
+                rgba = [0.0, 0.0, 0.0, 1.0]
+            if alpha is not None:
+                rgba[3] = alpha
+            result.append(rgba)
+        return result
+
+
+colorConverter = _ColorConverter()

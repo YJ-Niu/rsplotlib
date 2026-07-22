@@ -936,6 +936,37 @@ fn rule_stroke(thick: f64) -> u32 {
     ((thick).round() as i64).max(1) as u32
 }
 
+fn align_offset_for_bbox(h: HAlign, v: VAlign, width: f64, height: f64) -> (f64, f64) {
+    let ox = match h {
+        HAlign::Left => 0.0,
+        HAlign::Center => -width / 2.0,
+        HAlign::Right => -width,
+    };
+    let oy = match v {
+        VAlign::Top => -height,
+        VAlign::Center => -height / 2.0,
+        VAlign::Bottom => 0.0,
+        VAlign::Baseline => -height * 0.2,
+    };
+    (ox, oy)
+}
+
+fn parse_bbox_color(color: &str) -> RGBColor {
+    let color_lower = color.to_lowercase();
+    match color_lower.as_str() {
+        "white" => RGBColor(255, 255, 255),
+        "black" => RGBColor(0, 0, 0),
+        "red" => RGBColor(255, 0, 0),
+        "green" => RGBColor(0, 128, 0),
+        "blue" => RGBColor(0, 0, 255),
+        "yellow" => RGBColor(255, 255, 0),
+        "cyan" => RGBColor(0, 255, 255),
+        "magenta" => RGBColor(255, 0, 255),
+        "gray" | "grey" => RGBColor(128, 128, 128),
+        _ => RGBColor(255, 255, 255),
+    }
+}
+
 /// 在 chart（数据坐标）上绘制可能含数学 IR 的文本。纯文本走单行快路径。
 #[allow(clippy::too_many_arguments)]
 pub fn draw_math_chart<DB: DrawingBackend>(
@@ -948,22 +979,144 @@ pub fn draw_math_chart<DB: DrawingBackend>(
     family: Option<&str>,
     h: HAlign,
     v: VAlign,
+    rotation: f64,
+    dx_px: f64,
     dy_px: f64,
+    bbox: Option<(&str, &str, f64, f64)>,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
 {
+    fn line_offset(angle: f64, off: f64) -> (f64, f64) {
+        let radians = angle.to_radians();
+        (radians.sin() * off, -radians.cos() * off)
+    }
+    let lines: Vec<&str> = s.split('\n').collect();
+    if lines.len() > 1 {
+        let line_height = size * 1.2;
+        for (idx, line) in lines.iter().enumerate() {
+            let line_off = (lines.len() as f64 - 1.0 - idx as f64) * line_height;
+            let (ldx, ldy) = line_offset(rotation, line_off);
+            draw_math_chart(
+                chart,
+                x,
+                y,
+                line,
+                size,
+                color,
+                family,
+                h,
+                v,
+                rotation,
+                dx_px + ldx,
+                dy_px + ldy,
+                None,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+            )?;
+        }
+        return Ok(());
+    }
     let plain = to_plain(s);
     let fam = font_stack::resolve_font_family(&plain, family);
-    let nudge = dy_px.round() as i32;
+    let dx = dx_px.round() as i32;
+    let dy = dy_px.round() as i32;
+    // 始终使用 FontTransform::None，实际旋转由 GlyphCacheBackend 处理
+    let rotation_transform = FontTransform::None;
+    // 把旋转角度传递给 GlyphCacheBackend，用于像素级旋转
+    crate::utils::glyph_cache::set_current_rotation(rotation);
+
+    // 离开函数作用域时恢复旋转为 0，避免影响后续坐标轴标签等文字
+    struct ResetRotation;
+    impl Drop for ResetRotation {
+        fn drop(&mut self) {
+            crate::utils::glyph_cache::set_current_rotation(0.0);
+        }
+    }
+    let _reset = ResetRotation;
+
+    if let Some((face_color, edge_color, pad, alpha)) = bbox {
+        let text_width_px = if contains_ir(s) {
+            let l = layout(&parse(s), size, &fam);
+            l.width
+        } else {
+            s.chars().count() as f64 * size * 0.6
+        };
+        let text_height_px = size * 1.2;
+        let pad_size_px = pad * size * 0.2;
+
+        let x_range = x_max - x_min;
+        let y_range = y_max - y_min;
+
+        let chart_area = chart.plotting_area();
+        let (pw, ph) = chart_area.dim_in_pixel();
+
+        let x_per_px = if pw > 0 {
+            x_range / pw as f64
+        } else {
+            x_range * 0.001
+        };
+        let y_per_px = if ph > 0 {
+            y_range / ph as f64
+        } else {
+            y_range * 0.001
+        };
+
+        let text_width_data = text_width_px * x_per_px;
+        let text_height_data = text_height_px * y_per_px;
+        let pad_size_data = pad_size_px * x_per_px;
+
+        let (ox, oy) = align_offset_for_bbox(h, v, text_width_data, text_height_data);
+        let x_min_rect = x + ox - pad_size_data;
+        let x_max_rect = x + ox + text_width_data + pad_size_data;
+        let y_min_rect = y + oy - pad_size_data;
+        let y_max_rect = y + oy + text_height_data + pad_size_data;
+
+        if !face_color.is_empty() && face_color != "none" {
+            let rgb = parse_bbox_color(face_color);
+            let style = if alpha >= 1.0 {
+                rgb.filled()
+            } else {
+                rgb.mix(alpha).filled()
+            };
+            chart
+                .draw_series(std::iter::once(Rectangle::new(
+                    [(x_min_rect, y_min_rect), (x_max_rect, y_max_rect)],
+                    style,
+                )))
+                .map_err(|e| PyRuntimeError::new_err(format!("bbox fill: {}", e)))?;
+        }
+        if !edge_color.is_empty() && edge_color != "none" {
+            let rgb = parse_bbox_color(edge_color);
+            let style = if alpha >= 1.0 {
+                rgb.filled().stroke_width(1)
+            } else {
+                rgb.mix(alpha).filled().stroke_width(1)
+            };
+            chart
+                .draw_series(std::iter::once(Rectangle::new(
+                    [(x_min_rect, y_min_rect), (x_max_rect, y_max_rect)],
+                    style,
+                )))
+                .map_err(|e| PyRuntimeError::new_err(format!("bbox edge: {}", e)))?;
+        }
+    }
+
     if !contains_ir(s) {
         let style = FontDesc::from((fam.as_str(), size))
             .color(&color)
-            .pos(plotters_pos(h, v));
+            .pos(plotters_pos(h, v))
+            .transform(rotation_transform);
         chart
             .draw_series(std::iter::once(
                 plotters::element::EmptyElement::at((x, y))
-                    + plotters::element::Text::new(s.to_string(), (0, nudge), style),
+                    + plotters::element::Text::new(s.to_string(), (dx, dy), style),
             ))
             .map_err(|e| PyRuntimeError::new_err(format!("math text: {}", e)))?;
         return Ok(());
@@ -973,21 +1126,22 @@ where
     for r in &l.runs {
         let style = FontDesc::from((fam.as_str(), r.size))
             .color(&color)
-            .pos(Pos::new(HPos::Left, VPos::Center));
-        let dx = (ox + r.dx).round() as i32;
-        let dy = (oy + r.dy).round() as i32 + nudge;
+            .pos(Pos::new(HPos::Left, VPos::Center))
+            .transform(rotation_transform.clone());
+        let tx = (ox + r.dx).round() as i32 + dx;
+        let ty = (oy + r.dy).round() as i32 + dy;
         chart
             .draw_series(std::iter::once(
                 plotters::element::EmptyElement::at((x, y))
-                    + plotters::element::Text::new(r.text.clone(), (dx, dy), style),
+                    + plotters::element::Text::new(r.text.clone(), (tx, ty), style),
             ))
             .map_err(|e| PyRuntimeError::new_err(format!("math run: {}", e)))?;
     }
     for r in &l.rules {
         let style = color.stroke_width(rule_stroke(r.thick));
-        let x0 = (ox + r.x0).round() as i32;
-        let x1 = (ox + r.x1).round() as i32;
-        let yy = (oy + r.y).round() as i32 + nudge;
+        let x0 = (ox + r.x0).round() as i32 + dx;
+        let x1 = (ox + r.x1).round() as i32 + dx;
+        let yy = (oy + r.y).round() as i32 + dy;
         chart
             .draw_series(std::iter::once(
                 plotters::element::EmptyElement::at((x, y))

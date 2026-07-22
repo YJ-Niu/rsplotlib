@@ -129,7 +129,7 @@ impl Figure {
     }
 
     #[pyo3(signature = (left=None, right=None, bottom=None, top=None, wspace=None, hspace=None))]
-    fn subplots_adjust(
+    pub fn subplots_adjust(
         &mut self,
         left: Option<f64>,
         right: Option<f64>,
@@ -184,6 +184,14 @@ impl Figure {
         self.current_axes_index = 0;
     }
 
+    #[doc = "返回所有子图的列表"]
+    fn axes<'a>(&self, py: Python<'a>) -> Vec<Bound<'a, Axes>> {
+        self.axes_list
+            .iter()
+            .map(|ax| ax.bind(py).clone())
+            .collect()
+    }
+
     #[doc = "清除所有子图"]
     fn clf(&mut self) {
         self.axes_list.clear();
@@ -236,7 +244,13 @@ impl Figure {
         } else {
             (0.0, 1.0, 0.0, 1.0)
         };
-        let ax = Axes::new();
+        let projection = spec
+            .getattr("projection")
+            .ok()
+            .and_then(|p| p.extract::<String>().ok())
+            .unwrap_or_else(|| "rectilinear".to_string());
+        let mut ax = Axes::new();
+        ax.projection = projection;
         let ax_py = Py::new(py, ax)?;
         crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
@@ -246,6 +260,7 @@ impl Figure {
     }
 
     #[doc = "按图内相对位置直接添加子图。\n\nleft/bottom/width/height 均为 [0,1] 使用区（去除四周边距后的绘图区）分数，\n与 matplotlib Figure.add_axes([left, bottom, width, height]) 语义一致。\nsubplot_mosaic 等自定义布局据此放置带间距的跨格子图。"]
+    #[pyo3(signature = (left, bottom, width, height, projection=None))]
     fn add_axes(
         &mut self,
         py: Python,
@@ -253,8 +268,10 @@ impl Figure {
         bottom: f64,
         width: f64,
         height: f64,
+        projection: Option<String>,
     ) -> PyResult<Py<Axes>> {
-        let ax = Axes::new();
+        let mut ax = Axes::new();
+        ax.projection = projection.unwrap_or_else(|| "rectilinear".to_string());
         let ax_py = Py::new(py, ax)?;
         crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
@@ -262,6 +279,14 @@ impl Figure {
             .push((left, left + width, bottom, bottom + height));
         self.current_axes_index = self.axes_list.len() - 1;
         Ok(ax_py)
+    }
+
+    #[doc = "返回所有坐标轴对象列表"]
+    fn get_axes<'a>(&self, py: Python<'a>) -> Vec<Bound<'a, Axes>> {
+        self.axes_list
+            .iter()
+            .map(|ax| ax.bind(py).clone())
+            .collect()
     }
 
     #[doc = "保存图形到文件\n\n参数:\n    filename: 文件名, 支持 .png/.jpg/.svg\n    dpi: 可选分辨率, 默认与创建时一致"]
@@ -748,8 +773,18 @@ impl Figure {
             let mut max_left_ext = 0u32; // 右列子图向左延伸像素（y 刻度值 + y 标签）
             let mut max_x_half = 0u32; // 有右邻居的子图最右 x 刻度值半宽像素
             for (i, ax_py) in self.axes_list.iter().enumerate() {
+                let ((x_min, x_max), (y_min, y_max));
+                {
+                    let ax = ax_py.borrow(py);
+                    ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
+                    let is_polar = ax.projection.eq_ignore_ascii_case("polar");
+                    if is_polar && ax.polar_bounds.is_none() {
+                        drop(ax);
+                        let mut ax_mut = ax_py.borrow_mut(py);
+                        ax_mut.polar_bounds = Some(((x_min, x_max), (y_min, y_max)));
+                    }
+                }
                 let ax = ax_py.borrow(py);
-                let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
                 let col = i % self.ncols;
                 let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
                 let tick_label_h = tick_font_size.ceil() as u32;
@@ -858,10 +893,24 @@ impl Figure {
         let row_edges = track_edges(self.nrows, self.height_ratios.as_deref(), grid_hspace);
 
         for (i, ax_py) in self.axes_list.iter().enumerate() {
+            let ((x_min, x_max), (y_min, y_max));
+            let is_polar;
+            {
+                let ax = ax_py.borrow(py);
+                ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
+                is_polar = ax.projection.eq_ignore_ascii_case("polar");
+            }
+            if is_polar {
+                let mut ax_mut = ax_py.borrow_mut(py);
+                if ax_mut.polar_bounds.is_none() && ax_mut.ylim.is_none() {
+                    ax_mut.polar_bounds = Some(((x_min, x_max), (y_min, y_max)));
+                }
+                if ax_mut.aspect.is_none() {
+                    ax_mut.aspect = Some(1.0);
+                }
+            }
+
             let ax = ax_py.borrow(py);
-
-            let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
-
             let (left, right, bottom, top) = if is_regular_grid {
                 let (col_start, col_size) = col_edges[i % self.ncols];
                 let (row_start, row_size) = row_edges[i / self.ncols];
@@ -1100,6 +1149,8 @@ impl Figure {
                 .build_cartesian_2d(x_min..x_max, y_min..y_max)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to build chart: {}", e)))?;
 
+            let _is_polar = ax.projection.eq_ignore_ascii_case("polar");
+
             // 将标题信息存到 axes 之外用：传入 subplot 在 figure 中的位置，用于在 figure root 上绘制
             let fig_subplot_info = (x0, y0, sub_w, sub_h);
             ax.render(
@@ -1237,6 +1288,14 @@ impl Figure {
             let data_right = chart_x0 + chart_w;
             let data_top = chart_y0 + margin_top as f64;
             let data_bottom = chart_y0 + chart_h - x_label_actual as f64;
+
+            // 表格：在画布坐标系中绘制，位于子图区域下方
+            if let Some(table) = &ax.table {
+                crate::figure::axes_table::draw_table(
+                    &root, table, font_scale, x0, y0, sub_w, sub_h,
+                )?;
+            }
+
             drop(ax);
             for twin_py in &twin_axes {
                 // 先禁用 twin 自身的框线与内置刻度，使其 render 只绘制数据（折线/图例）；
