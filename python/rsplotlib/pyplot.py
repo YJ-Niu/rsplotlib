@@ -1680,36 +1680,44 @@ def axvline(x=0, **kwargs):
     return _rsplotlib.axvline(x, kwargs.get('color'), kwargs.get('linestyle'), kwargs.get('linewidth'))
 
 
-def axhspan(ymin, ymax, **kwargs):
+def axhspan(ymin=None, ymax=None, **kwargs):
     """绘制水平区间填充 (在 y 方向高亮一个区间)。
 
     用法:
         plt.axhspan(0.0, 1.0, color='yellow', alpha=0.3)
+        plt.axhspan(ymin=0.0, ymax=1.0, label='Range')
 
     Args:
         ymin: y 轴下限
         ymax: y 轴上限
         color: 填充颜色 (默认蓝灰色)
         alpha: 透明度 (0.0-1.0, 默认 0.3)
+        label: 图例标签
         **kwargs: 其他关键字参数
     """
-    return _rsplotlib.axhspan(ymin, ymax, kwargs.get('color'), kwargs.get('alpha', 0.3))
+    ymin = ymin if ymin is not None else kwargs.get('ymin')
+    ymax = ymax if ymax is not None else kwargs.get('ymax')
+    return _rsplotlib.axhspan(ymin, ymax, kwargs.get('color'), kwargs.get('alpha', 0.3), kwargs.get('label'))
 
 
-def axvspan(xmin, xmax, **kwargs):
+def axvspan(xmin=None, xmax=None, **kwargs):
     """绘制垂直区间填充 (在 x 方向高亮一个区间)。
 
     用法:
         plt.axvspan(0.0, 1.0, color='yellow', alpha=0.3)
+        plt.axvspan(xmin=0.0, xmax=1.0, label='Range')
 
     Args:
         xmin: x 轴下限
         xmax: x 轴上限
         color: 填充颜色 (默认蓝灰色)
         alpha: 透明度 (0.0-1.0, 默认 0.3)
+        label: 图例标签
         **kwargs: 其他关键字参数
     """
-    return _rsplotlib.axvspan(xmin, xmax, kwargs.get('color'), kwargs.get('alpha', 0.3))
+    xmin = xmin if xmin is not None else kwargs.get('xmin')
+    xmax = xmax if xmax is not None else kwargs.get('xmax')
+    return _rsplotlib.axvspan(xmin, xmax, kwargs.get('color'), kwargs.get('alpha', 0.3), kwargs.get('label'))
 
 
 def axline(xy1, xy2, **kwargs):

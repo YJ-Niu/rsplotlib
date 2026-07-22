@@ -768,9 +768,39 @@ print(222, np.angle(S_V), 1.1*np.abs(S_V), S_V)
 
 BW = Q.BW
 pprint(80, f'Bandwidth: {BW} Hz')
+fig, ax = plt.subplots()
+rf.stylely()
 
-# fig, ax = plt.subplots()
-# resonator.plot_s_db(label='Parallel RLC ', lw=2, ax=ax)
-# ax.axvspan(xmin=Q.f_L-Q.BW/2, xmax=Q.f_L+Q.BW/2, alpha=0.3, label='Bandwidth')
-# ax.legend()
-# ssaver('./test/test_rf/test49.png')
+resonator.plot_s_db(label='Parallel RLC ', lw=2, ax=ax)
+ax.axvspan(xmin=(Q.f_L-Q.BW/2)/1e6, xmax=(Q.f_L+Q.BW/2)/1e6, alpha=0.3, label='Bandwidth')
+ax.legend()
+ssaver('./test/test_rf/test49.png')
+
+# frequency
+f_rg58 = Frequency(1, 5, 101, 'GHz')
+
+# media with z0_port the port impedance of the VNA
+rg58 = Coaxial(f_rg58, Dint=0.91e-3, Dout=2.95e-3, epsilon_r=2.3, z0_port=50)
+pprint(81, rg58)
+
+pprint(82, f'z0 = {rg58.z0[0]}')
+pprint(83, f'z0_port = {rg58.z0_port[0]}')
+pprint(84, f'gamma = {rg58.gamma[0]}')
+
+rg58_line = rg58.line(100, unit='mm', name='100 mm, z0 Ohm')
+pprint(85, rg58_line)
+
+rg58_25ohm_line = rg58.line(100, unit='mm', z0=25, name='100 mm, 25 Ohm')
+pprint(86, rg58_25ohm_line)
+
+fig, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+# return loss
+rg58_line.plot_s_db(0, 0, ax=axes[0])
+rg58_25ohm_line.plot_s_db(0, 0, ax=axes[0])
+axes[0].set_title('Return Loss')
+rg58_line.plot_s_db(1, 0, ax=axes[1])
+rg58_25ohm_line.plot_s_db(1, 0, ax=axes[1])
+axes[1].set_title('Insertion Loss')
+plt.tight_layout()
+rf.stylely()
+ssaver('./test/test_rf/test50.png')

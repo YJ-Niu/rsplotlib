@@ -1452,32 +1452,34 @@ pub fn minorticks_off(py: Python<'_>) -> PyResult<()> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (y1, y2, color=None, alpha=0.3))]
+#[pyo3(signature = (ymin, ymax, color=None, alpha=0.3, label=None))]
 pub fn axhspan(
     py: Python<'_>,
-    y1: f64,
-    y2: f64,
+    ymin: f64,
+    ymax: f64,
     color: Option<String>,
     alpha: f64,
+    label: Option<String>,
 ) -> PyResult<()> {
     get_current_axes(py)?
         .borrow_mut(py)
-        .axhspan(y1, y2, color, alpha);
+        .axhspan(ymin, ymax, color, alpha, label);
     Ok(())
 }
 
 #[pyfunction]
-#[pyo3(signature = (x1, x2, color=None, alpha=0.3))]
+#[pyo3(signature = (xmin, xmax, color=None, alpha=0.3, label=None))]
 pub fn axvspan(
     py: Python<'_>,
-    x1: f64,
-    x2: f64,
+    xmin: f64,
+    xmax: f64,
     color: Option<String>,
     alpha: f64,
+    label: Option<String>,
 ) -> PyResult<()> {
     get_current_axes(py)?
         .borrow_mut(py)
-        .axvspan(x1, x2, color, alpha);
+        .axvspan(xmin, xmax, color, alpha, label);
     Ok(())
 }
 

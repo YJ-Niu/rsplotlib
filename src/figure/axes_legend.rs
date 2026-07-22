@@ -263,7 +263,7 @@ fn rounded_rect_points(x1: f64, y1: f64, x2: f64, y2: f64, rx: f64, ry: f64) -> 
 pub fn draw_legend<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     legend_loc: Option<&String>,
-    legend_labels: &[(String, RgbColor, String, Option<String>, f64)],
+    legend_labels: &[(String, RgbColor, String, Option<String>, f64, f64)],
     elements: &[PlotElement],
     font_scale: f64,
     x_min: f64,
@@ -497,7 +497,7 @@ where
 
         let max_entries =
             ((box_y2 - box_y1 - 2.0 * pad_v_px * y_per_px) / entry_height).floor() as usize;
-        for (i, (label, color, ls, marker_opt, lw)) in legend_labels.iter().enumerate() {
+        for (i, (label, color, ls, marker_opt, lw, alpha)) in legend_labels.iter().enumerate() {
             if i >= max_entries {
                 break;
             }
@@ -513,8 +513,19 @@ where
             let legend_stroke = (lw_px as i32 - 1).max(1) as u32;
             let line_style: ShapeStyle = rgb.stroke_width(legend_stroke);
 
-            // 根据线型绘制图例线段
+            // 根据线型绘制图例线段或填充色块
             match ls.as_str() {
+                "fill" => {
+                    let rect_height = handle_px * y_per_px * 0.6;
+                    let y_bottom = y_pos - rect_height / 2.0;
+                    let y_top = y_pos + rect_height / 2.0;
+                    chart
+                        .draw_series(std::iter::once(Rectangle::new(
+                            [(x_line_start, y_bottom), (x_line_end, y_top)],
+                            rgb.mix(*alpha).filled(),
+                        )))
+                        .map_err(|e| PyRuntimeError::new_err(format!("Legend fill: {}", e)))?;
+                }
                 "--" => {
                     let dash_len = 6.0 * dash_unit;
                     let gap_len = 8.0 * dash_unit;
@@ -589,7 +600,6 @@ where
                     }
                 }
                 _ => {
-                    // 实线
                     chart
                         .draw_series(std::iter::once(PathElement::new(
                             vec![(x_line_start, y_pos), (x_line_end, y_pos)],

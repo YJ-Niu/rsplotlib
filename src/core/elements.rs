@@ -254,12 +254,14 @@ pub enum PlotElement {
         y2: f64,
         color: String,
         alpha: f64,
+        label: Option<String>,
     },
     VSpan {
         x1: f64,
         x2: f64,
         color: String,
         alpha: f64,
+        label: Option<String>,
     },
     AxLine {
         xy1: (f64, f64),

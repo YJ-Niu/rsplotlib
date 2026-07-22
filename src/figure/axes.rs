@@ -800,7 +800,7 @@ pub struct Axes {
     pub grid_visible: bool,
     pub legend_loc: Option<String>,
     pub element_count: usize,
-    pub legend_labels: Vec<(String, RgbColor, String, Option<String>, f64)>,
+    pub legend_labels: Vec<(String, RgbColor, String, Option<String>, f64, f64)>,
     pub legend_facecolor: Option<String>,
     pub legend_framealpha: Option<f64>,
     pub legend_edgecolor: Option<String>,
@@ -1250,7 +1250,7 @@ impl Axes {
             let c =
                 parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
             self.legend_labels
-                .push((lbl, c, linestyle_val, None, linewidth));
+                .push((lbl, c, linestyle_val, None, linewidth, 1.0));
         }
         let line = Line2D {
             parent: self.self_py.as_ref().map(|p| p.clone_ref(py)),
@@ -1296,7 +1296,7 @@ impl Axes {
             let col =
                 parse_color(&c.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
             self.legend_labels
-                .push((lbl, col, "-".to_string(), Some(marker_val), 1.5));
+                .push((lbl, col, "-".to_string(), Some(marker_val), 1.5, 1.0));
         }
         Ok(())
     }
@@ -1334,7 +1334,7 @@ impl Axes {
                 .map(|c| parse_color(c, idx).unwrap_or_else(|_| default_color(idx)))
                 .unwrap_or_else(|| default_color(idx));
             self.legend_labels
-                .push((lbl, col, "-".to_string(), None, 1.5));
+                .push((lbl, col, "-".to_string(), None, 1.5, 1.0));
         }
         Ok(())
     }
@@ -1372,7 +1372,7 @@ impl Axes {
                 .map(|c| parse_color(c, idx).unwrap_or_else(|_| default_color(idx)))
                 .unwrap_or_else(|| default_color(idx));
             self.legend_labels
-                .push((lbl, col, "-".to_string(), None, 1.5));
+                .push((lbl, col, "-".to_string(), None, 1.5, 1.0));
         }
         Ok(())
     }
@@ -1657,7 +1657,7 @@ impl Axes {
             let col_str = colors.get(di).cloned().unwrap_or_default();
             let col = parse_color(&col_str, idx + di).unwrap_or_else(|_| default_color(idx + di));
             self.legend_labels
-                .push((lbl.clone(), col, "-".to_string(), None, 1.5));
+                .push((lbl.clone(), col, "-".to_string(), None, 1.5, 1.0));
         }
 
         // 返回值 n(计数) 与 bin_edges
@@ -2098,7 +2098,7 @@ impl Axes {
     #[pyo3(signature = (entries, loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]
     pub fn set_legend_entries(
         &mut self,
-        entries: Vec<(String, String, String, Option<String>, f64)>,
+        entries: Vec<(String, String, String, Option<String>, f64, f64)>,
         loc: &str,
         facecolor: Option<String>,
         framealpha: Option<f64>,
@@ -2107,9 +2107,9 @@ impl Axes {
     ) {
         self.legend_labels = entries
             .into_iter()
-            .map(|(label, color, linestyle, marker, linewidth)| {
+            .map(|(label, color, linestyle, marker, linewidth, alpha)| {
                 let rgb = parse_color(&color, 0).unwrap_or(RgbColor(0, 0, 0));
-                (label, rgb, linestyle, marker, linewidth)
+                (label, rgb, linestyle, marker, linewidth, alpha)
             })
             .collect();
         self.legend_loc = Some(loc.to_string());
@@ -2514,7 +2514,7 @@ impl Axes {
             let col =
                 parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
             self.legend_labels
-                .push((lbl, col, "-".to_string(), None, 1.5));
+                .push((lbl, col, "-".to_string(), None, 1.5, 1.0));
         }
         Ok(())
     }
@@ -2561,7 +2561,7 @@ impl Axes {
                 )
                 .unwrap_or_else(|_| default_color(idx + i));
                 self.legend_labels
-                    .push((lbl, col, "-".to_string(), None, 1.5));
+                    .push((lbl, col, "-".to_string(), None, 1.5, 1.0));
             }
         }
         Ok(())
@@ -2616,7 +2616,7 @@ impl Axes {
             let col =
                 parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
             self.legend_labels
-                .push((lbl, col, "-".to_string(), Some(fmt.to_string()), 1.5));
+                .push((lbl, col, "-".to_string(), Some(fmt.to_string()), 1.5, 1.0));
         }
         Ok(())
     }
@@ -2650,6 +2650,7 @@ impl Axes {
                 linefmt.to_string(),
                 Some(markerfmt.to_string()),
                 1.5,
+                1.0,
             ));
         }
         Ok(())
@@ -2686,7 +2687,7 @@ impl Axes {
             let col =
                 parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
             self.legend_labels
-                .push((lbl, col, linestyle.to_string(), None, linewidth));
+                .push((lbl, col, linestyle.to_string(), None, linewidth, 1.0));
         }
         Ok(())
     }
@@ -2850,26 +2851,56 @@ impl Axes {
         Ok(())
     }
 
-    #[doc = "绘制水平区间填充 (在 y 方向高亮 y1 到 y2 的水平带)\n\n参数:\n    y1: y 轴下限\n    y2: y 轴上限\n    color: 填充颜色\n    alpha: 透明度 (0.0-1.0, 默认 0.3)"]
-    #[pyo3(signature = (y1, y2, color=None, alpha=0.3))]
-    pub fn axhspan(&mut self, y1: f64, y2: f64, color: Option<String>, alpha: f64) {
+    #[doc = "绘制水平区间填充 (在 y 方向高亮 ymin 到 ymax 的水平带)\n\n参数:\n    ymin: y 轴下限\n    ymax: y 轴上限\n    color: 填充颜色\n    alpha: 透明度 (0.0-1.0, 默认 0.3)\n    label: 图例标签"]
+    #[pyo3(signature = (ymin, ymax, color=None, alpha=0.3, label=None))]
+    pub fn axhspan(
+        &mut self,
+        ymin: f64,
+        ymax: f64,
+        color: Option<String>,
+        alpha: f64,
+        label: Option<String>,
+    ) {
+        let color_str = color.clone().unwrap_or_default();
+        let label_clone = label.clone();
         self.elements.push(PlotElement::HSpan {
-            y1,
-            y2,
-            color: color.unwrap_or_default(),
+            y1: ymin,
+            y2: ymax,
+            color: color_str.clone(),
             alpha,
+            label,
         });
+        if let Some(lbl) = label_clone {
+            let col = parse_color(color_str.as_str(), 0).unwrap_or(RgbColor(128, 128, 128));
+            self.legend_labels
+                .push((lbl, col, "fill".to_string(), None, 1.0, alpha));
+        }
     }
 
-    #[doc = "绘制垂直区间填充 (在 x 方向高亮 x1 到 x2 的垂直带)\n\n参数:\n    x1: x 轴下限\n    x2: x 轴上限\n    color: 填充颜色\n    alpha: 透明度 (0.0-1.0, 默认 0.3)"]
-    #[pyo3(signature = (x1, x2, color=None, alpha=0.3))]
-    pub fn axvspan(&mut self, x1: f64, x2: f64, color: Option<String>, alpha: f64) {
+    #[doc = "绘制垂直区间填充 (在 x 方向高亮 xmin 到 xmax 的垂直带)\n\n参数:\n    xmin: x 轴下限\n    xmax: x 轴上限\n    color: 填充颜色\n    alpha: 透明度 (0.0-1.0, 默认 0.3)\n    label: 图例标签"]
+    #[pyo3(signature = (xmin, xmax, color=None, alpha=0.3, label=None))]
+    pub fn axvspan(
+        &mut self,
+        xmin: f64,
+        xmax: f64,
+        color: Option<String>,
+        alpha: f64,
+        label: Option<String>,
+    ) {
+        let color_str = color.clone().unwrap_or_default();
+        let label_clone = label.clone();
         self.elements.push(PlotElement::VSpan {
-            x1,
-            x2,
-            color: color.unwrap_or_default(),
+            x1: xmin,
+            x2: xmax,
+            color: color_str.clone(),
             alpha,
+            label,
         });
+        if let Some(lbl) = label_clone {
+            let col = parse_color(color_str.as_str(), 0).unwrap_or(RgbColor(128, 128, 128));
+            self.legend_labels
+                .push((lbl, col, "fill".to_string(), None, 1.0, alpha));
+        }
     }
 
     #[doc = "通过两点绘制任意斜率的直线 (贯穿整张图)\n\n参数:\n    xy1: 起点坐标 (x1, y1)\n    xy2: 终点坐标 (x2, y2)\n    color: 线颜色\n    linestyle: 线型\n    linewidth: 线宽"]
@@ -3329,8 +3360,10 @@ impl Axes {
         };
         let num_rings = (max_r / step).floor() as usize;
         let ring_values: Vec<f64> = (1..=num_rings).map(|i| step * i as f64).collect();
-        let ring_radii = ring_values.clone();
-        let outer_r = max_r;
+        // 添加一个额外的最外圈圆环（不显示标签），提供额外留白
+        let mut ring_radii: Vec<f64> = ring_values.clone();
+        ring_radii.push(max_r * 1.2);
+        let outer_r = max_r * 1.2;
 
         for &r in &ring_radii {
             let mut points = Vec::new();
@@ -3368,16 +3401,17 @@ impl Axes {
                 })?;
 
             let label_r = match i {
-                0 | 3 | 6 | 9 => outer_r * 1.05,
-                1 | 2 | 7 | 8 => outer_r * 1.08,
-                4 | 5 | 10 | 11 => outer_r * 1.1,
+                0 | 3 | 6 | 9 | 4 => outer_r * 1.05,
+                1 | 2 => outer_r * 1.03,
+                5 | 7 | 8 => outer_r * 1.08,
+                10 | 11 => outer_r * 1.1,
                 _ => outer_r * 1.08,
             };
             let label_x = center_x + label_r * theta.cos();
             let label_y = center_y + label_r * theta.sin();
             let (h_align, v_align) = match i {
                 0 => (HAlign::Left, VAlign::Center),
-                3 => (HAlign::Center, VAlign::Bottom),
+                3 => (HAlign::Center, VAlign::Center),
                 6 => (HAlign::Right, VAlign::Center),
                 9 => (HAlign::Center, VAlign::Top),
                 1 | 2 => (HAlign::Left, VAlign::Center),

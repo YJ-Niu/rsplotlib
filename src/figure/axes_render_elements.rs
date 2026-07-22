@@ -1075,8 +1075,6 @@ fn element_below_grid(el: &PlotElement) -> bool {
             | PlotElement::BarH { .. }
             | PlotElement::FillBetween { .. }
             | PlotElement::Stack { .. }
-            | PlotElement::HSpan { .. }
-            | PlotElement::VSpan { .. }
             | PlotElement::Scatter { .. }
             | PlotElement::ScatterMulti { .. }
     )
@@ -2183,6 +2181,7 @@ where
                 y2,
                 color,
                 alpha,
+                label: _,
             } => {
                 let ty1 = ty(*y1);
                 let ty2 = ty(*y2);
@@ -2207,6 +2206,7 @@ where
                 x2,
                 color,
                 alpha,
+                label: _,
             } => {
                 let tx1 = tx(*x1);
                 let tx2 = tx(*x2);
