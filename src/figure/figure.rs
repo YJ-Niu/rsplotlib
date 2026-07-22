@@ -1018,7 +1018,7 @@ impl Figure {
             let mut sub_w = (plot_right - plot_left) * total_w;
             let mut sub_h = (plot_top_frac - plot_bottom_frac) * total_h;
 
-            let mut scale_w = 0.95;
+            let mut scale_w = 1.0;
             let mut scale_h = 1.0;
 
             let ax_width = right - left;
