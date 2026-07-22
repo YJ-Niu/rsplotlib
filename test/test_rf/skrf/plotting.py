@@ -1409,7 +1409,6 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     except RuntimeError:
         plt.figure()
         fig = plt.gcf()
-    ax = plt.gca()
 
     if dpi:
         fig.set_dpi(dpi)
@@ -1420,8 +1419,6 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     if fig_fc:
         fig.set_facecolor(fig_fc)
     ax_fc = _mplstyle_color(style.get('axes.facecolor'))
-    if ax_fc:
-        ax.set_facecolor(ax_fc)
 
     # capture legend frame style so _legend() can match the axes background
     # (rsplotlib ignores legend.* rcParams). Default to a semi-transparent frame.
@@ -1449,21 +1446,24 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     tick_labelsize = _num('xtick.labelsize')
     if tick_labelsize:
         tick_kw['labelsize'] = tick_labelsize * font_scale
-    if tick_kw:
-        ax.tick_params(**tick_kw)
 
     grid_val = style.get('axes.grid', False)
     grid_on = grid_val is True or (
         isinstance(grid_val, str) and grid_val.strip().lower() in ('true', '1', 'yes', 'on'))
+    grid_c = None
+    grid_ls = None
     if grid_on:
-        grid_kw = {}
-        grid_color = _mplstyle_color(style.get('grid.color'))
-        if grid_color:
-            grid_kw['color'] = grid_color
+        grid_c = _mplstyle_color(style.get('grid.color'))
         grid_ls = style.get('grid.linestyle')
-        if grid_ls:
-            grid_kw['linestyle'] = grid_ls
-        plt.grid(True, **grid_kw)
+
+    # Apply style to all axes in the figure
+    for ax in fig.axes():
+        if ax_fc:
+            ax.set_facecolor(ax_fc)
+        if tick_kw:
+            ax.tick_params(**tick_kw)
+        if grid_on:
+            ax.grid(True, c=grid_c, ls=grid_ls)
 
 
 def stylely(rc_dict: dict = None, style_file: str = 'skrf.mplstyle',

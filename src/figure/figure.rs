@@ -184,6 +184,14 @@ impl Figure {
         self.current_axes_index = 0;
     }
 
+    #[doc = "返回所有子图的列表"]
+    fn axes<'a>(&self, py: Python<'a>) -> Vec<Bound<'a, Axes>> {
+        self.axes_list
+            .iter()
+            .map(|ax| ax.bind(py).clone())
+            .collect()
+    }
+
     #[doc = "清除所有子图"]
     fn clf(&mut self) {
         self.axes_list.clear();
