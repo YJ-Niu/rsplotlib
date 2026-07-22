@@ -31,5 +31,10 @@ classifiers = [
 ]
 keywords = ["plotting", "matplotlib", "visualization", "rust", "scientific"]
 
+# Dependencies
+dependencies = [
+    "rsnumpy",
+]
+
 [tool.maturin]
 python-source = "python"

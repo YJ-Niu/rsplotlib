@@ -447,7 +447,7 @@ pub const DEFAULT_FONT_SCALE: f64 = 2.0;
 /// 完成，以免波及用户显式指定的字号。
 pub fn scale_font(size: f64, font_scale: f64) -> f64 {
     let figsize_factor = FONT_SIZE_FACTOR.with(|c| c.get());
-    (size * font_scale * figsize_factor).round()
+    (size * font_scale * figsize_factor * 0.8).round()
 }
 
 /// 解析 matplotlib `arrowprops` dict 为 [`ArrowSpec`]。
