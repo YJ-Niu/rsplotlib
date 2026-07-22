@@ -13,6 +13,7 @@ use crate::core::colors::{
 };
 use crate::core::elements::{ArrowSpec, PlotElement};
 use crate::utils::font_stack;
+use crate::utils::mathtext::{HAlign, VAlign};
 
 /// 将 Python 对象（list、numpy 数组等）转换为 Vec<f64>
 fn py_to_vec_f64(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
@@ -874,6 +875,10 @@ pub struct Axes {
     /// 二级 y 轴（secondary_yaxis）。
     pub secondary_y: Option<SecondaryAxisSpec>,
     pub table: Option<TableSpec>,
+    /// 投影类型："rectilinear"（默认直角坐标）或 "polar"（极坐标）
+    pub projection: String,
+    /// 极坐标图的固定边界，一旦设置后不再重新计算
+    pub polar_bounds: Option<((f64, f64), (f64, f64))>,
 }
 
 impl Clone for Axes {
@@ -961,6 +966,8 @@ impl Clone for Axes {
             secondary_x: None,
             secondary_y: None,
             table: self.table.clone(),
+            projection: self.projection.clone(),
+            polar_bounds: self.polar_bounds,
         }
     }
 }
@@ -1134,6 +1141,8 @@ impl Axes {
             secondary_x: None,
             secondary_y: None,
             table: None,
+            projection: "rectilinear".to_string(),
+            polar_bounds: None,
         }
     }
 
@@ -2213,6 +2222,11 @@ impl Axes {
         }
     }
 
+    /// 获取投影类型（matplotlib 兼容）
+    pub fn get_projection(&self) -> PyResult<String> {
+        Ok(self.projection.clone())
+    }
+
     #[pyo3(signature = (bottom=None, top=None, emit=true, auto=None))]
     pub fn set_ylim(
         &mut self,
@@ -3191,24 +3205,409 @@ impl Axes {
 
 impl Axes {
     pub fn compute_bounds(&self) -> ((f64, f64), (f64, f64)) {
-        let xlog = self.xscale == "log";
-        let ylog = self.yscale == "log";
-        let ((mut x_min, mut x_max), (mut y_min, mut y_max)) =
-            crate::figure::axes_bounds::compute_bounds(
+        if self.projection.eq_ignore_ascii_case("polar") {
+            if let Some((y_min, y_max)) = self.ylim {
+                let bound = y_max.max(y_min.abs()).max(1.0);
+                let margin = bound * 0.25;
+                let bound = bound + margin;
+                return ((-bound, bound), (-bound, bound));
+            }
+
+            if let Some(bounds) = self.polar_bounds {
+                return bounds;
+            }
+
+            let mut max_r = 0.0;
+            for elem in &self.elements {
+                match elem {
+                    PlotElement::Line { y, .. } => {
+                        for &r in y {
+                            if r > max_r {
+                                max_r = r;
+                            }
+                        }
+                    }
+                    PlotElement::Scatter { y, .. } => {
+                        for &r in y {
+                            if r > max_r {
+                                max_r = r;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            max_r = max_r.max(1.0);
+            let margin = max_r * 0.25;
+            let bound = max_r + margin;
+            ((-bound, bound), (-bound, bound))
+        } else {
+            let xlog = self.xscale == "log";
+            let ylog = self.yscale == "log";
+            let ((mut x_min, mut x_max), (mut y_min, mut y_max)) =
+                crate::figure::axes_bounds::compute_bounds(
+                    &self.elements,
+                    self.xlim,
+                    self.ylim,
+                    xlog,
+                    ylog,
+                );
+            // 应用轴反转
+            if self.x_axis_inverted {
+                std::mem::swap(&mut x_min, &mut x_max);
+            }
+            if self.y_axis_inverted {
+                std::mem::swap(&mut y_min, &mut y_max);
+            }
+            ((x_min, x_max), (y_min, y_max))
+        }
+    }
+
+    fn render_polar<DB: DrawingBackend>(
+        &self,
+        _py: Python<'_>,
+        chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+        (x_min, x_max): (f64, f64),
+        (y_min, y_max): (f64, f64),
+        font_scale: f64,
+        marker_scale: f64,
+        _bitmap: bool,
+        _ss: f64,
+    ) -> PyResult<()>
+    where
+        DB::ErrorType: 'static,
+    {
+        let center_x = 0.0;
+        let center_y = 0.0;
+
+        let max_r = if let Some((_, y_max)) = self.ylim {
+            y_max
+        } else {
+            // 从数据元素中计算最大半径，与 compute_bounds 保持一致
+            let mut max_r = 0.0;
+            for elem in &self.elements {
+                match elem {
+                    PlotElement::Line { y, .. } => {
+                        for &r in y {
+                            if r > max_r {
+                                max_r = r;
+                            }
+                        }
+                    }
+                    PlotElement::Scatter { y, .. } => {
+                        for &r in y {
+                            if r > max_r {
+                                max_r = r;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            max_r.max(1.0)
+        };
+
+        let grid_color = self
+            .grid_color
+            .as_deref()
+            .and_then(|c| parse_color(c, 0).ok())
+            .unwrap_or(RgbColor(192, 192, 192));
+        let grid_lw = self.grid_linewidth.unwrap_or(0.5);
+        let grid_style: ShapeStyle =
+            to_plotters_color(grid_color).stroke_width(grid_lw.round().max(1.0) as u32);
+
+        // 根据 max_r 动态生成圆环刻度值，标签与实际位置 1:1 对应
+        // 选择步长使圆环数量在 4-6 个之间
+        let step = if max_r <= 0.5 {
+            0.1
+        } else if max_r <= 1.0 {
+            0.2
+        } else if max_r <= 2.0 {
+            0.5
+        } else {
+            (max_r / 5.0).ceil() * 1.0
+        };
+        let num_rings = (max_r / step).floor() as usize;
+        let ring_values: Vec<f64> = (1..=num_rings).map(|i| step * i as f64).collect();
+        let ring_radii = ring_values.clone();
+        let outer_r = max_r;
+
+        for &r in &ring_radii {
+            let mut points = Vec::new();
+            for angle in 0..=360 {
+                let theta = angle as f64 * std::f64::consts::PI / 180.0;
+                let x = center_x + r * theta.cos();
+                let y = center_y + r * theta.sin();
+                points.push((x, y));
+            }
+            chart
+                .draw_series(std::iter::once(PathElement::new(points, grid_style)))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw polar ring: {}", e))
+                })?;
+        }
+
+        let num_radial = 12;
+        let angle_labels = [
+            "0", "30", "60", "90", "120", "150", "180", "210", "240", "270", "300", "330",
+        ];
+        let label_font_size = font_scale * 18.0;
+        let label_color = RGBColor(80, 80, 80);
+
+        for (i, label) in angle_labels.iter().enumerate() {
+            let theta = i as f64 * 2.0 * std::f64::consts::PI / num_radial as f64;
+            let x_end = center_x + outer_r * theta.cos();
+            let y_end = center_y + outer_r * theta.sin();
+            chart
+                .draw_series(std::iter::once(PathElement::new(
+                    vec![(center_x, center_y), (x_end, y_end)],
+                    grid_style,
+                )))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw radial line: {}", e))
+                })?;
+
+            let label_r = match i {
+                0 | 3 | 6 | 9 => outer_r * 1.05,
+                1 | 2 | 7 | 8 => outer_r * 1.08,
+                4 | 5 | 10 | 11 => outer_r * 1.1,
+                _ => outer_r * 1.08,
+            };
+            let label_x = center_x + label_r * theta.cos();
+            let label_y = center_y + label_r * theta.sin();
+            let (h_align, v_align) = match i {
+                0 => (HAlign::Left, VAlign::Center),
+                3 => (HAlign::Center, VAlign::Bottom),
+                6 => (HAlign::Right, VAlign::Center),
+                9 => (HAlign::Center, VAlign::Top),
+                1 | 2 => (HAlign::Left, VAlign::Center),
+                4 | 5 => (HAlign::Center, VAlign::Center),
+                7 | 8 => (HAlign::Center, VAlign::Center),
+                10 | 11 => (HAlign::Center, VAlign::Center),
+                _ => (HAlign::Right, VAlign::Center),
+            };
+            crate::utils::mathtext::draw_math_chart(
+                chart,
+                label_x,
+                label_y,
+                label,
+                label_font_size,
+                label_color,
+                None,
+                h_align,
+                v_align,
+                0.0,
+                0.0,
+                0.0,
+                None,
+                -outer_r * 1.2,
+                outer_r * 1.2,
+                -outer_r * 1.2,
+                outer_r * 1.2,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw angle label: {}", e)))?;
+        }
+
+        for (&r, &val) in ring_radii.iter().zip(ring_values.iter()) {
+            let label_x = center_x + r * 1.02;
+            let label_y = center_y;
+            let label_text = format!("{:.2}", val);
+            crate::utils::mathtext::draw_math_chart(
+                chart,
+                label_x,
+                label_y,
+                &label_text,
+                label_font_size / 2.0,
+                label_color,
+                None,
+                HAlign::Left,
+                VAlign::Center,
+                0.0,
+                0.0,
+                0.0,
+                None,
+                -max_r,
+                max_r,
+                -max_r,
+                max_r,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw radius label: {}", e)))?;
+        }
+
+        for elem in &self.elements {
+            match elem {
+                PlotElement::Line {
+                    x,
+                    y,
+                    color,
+                    linewidth,
+                    linestyle,
+                    marker,
+                    markersize,
+                    markerfacecolor,
+                    markeredgecolor,
+                    color_idx,
+                    ..
+                } => {
+                    let col = parse_color(color, *color_idx).unwrap_or(default_color(*color_idx));
+                    let rgb = to_plotters_color(col);
+
+                    if linestyle != " " {
+                        let mut points = Vec::new();
+                        for i in 0..x.len() {
+                            let theta = x[i];
+                            let r = y[i];
+                            let px = center_x + r * theta.cos();
+                            let py = center_y + r * theta.sin();
+                            points.push((px, py));
+                        }
+                        let lw_px = ((*linewidth) * font_scale).max(1.0).round() as u32;
+                        let line_style: ShapeStyle = rgb.stroke_width(lw_px);
+                        chart
+                            .draw_series(LineSeries::new(points, line_style))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!("Failed to draw line: {}", e))
+                            })?;
+                    }
+
+                    if let Some(marker_val) = marker {
+                        let ms = markersize.unwrap_or(6.0);
+                        let fc = markerfacecolor.clone().unwrap_or_else(|| color.clone());
+                        let ec = markeredgecolor.clone().unwrap_or_else(|| color.clone());
+                        let fc_col = parse_color(&fc, 0).unwrap_or(col);
+                        let ec_col = parse_color(&ec, 0).unwrap_or(col);
+                        let fc_rgb = to_plotters_color(fc_col);
+                        let ec_rgb = to_plotters_color(ec_col);
+                        for i in 0..x.len() {
+                            let theta = x[i];
+                            let r = y[i];
+                            let px = center_x + r * theta.cos();
+                            let py = center_y + r * theta.sin();
+                            crate::core::marker::draw_marker(
+                                chart,
+                                marker_val,
+                                px,
+                                py,
+                                ms * marker_scale,
+                                fc_rgb,
+                                ec_rgb,
+                                1.0,
+                                0.0,
+                            )?;
+                        }
+                    }
+                }
+                PlotElement::Scatter {
+                    x, y, c, marker, s, ..
+                } => {
+                    let col = parse_color(c, 0).unwrap_or(default_color(0));
+                    let rgb = to_plotters_color(col);
+                    for i in 0..x.len() {
+                        let theta = x[i];
+                        let r = y[i];
+                        let px = center_x + r * theta.cos();
+                        let py = center_y + r * theta.sin();
+                        crate::core::marker::draw_marker(
+                            chart,
+                            marker,
+                            px,
+                            py,
+                            *s * marker_scale,
+                            rgb,
+                            rgb,
+                            1.0,
+                            0.0,
+                        )?;
+                    }
+                }
+                PlotElement::Text {
+                    x,
+                    y,
+                    text,
+                    fontsize,
+                    color,
+                    font_family,
+                    ha,
+                    va,
+                    rotation,
+                    dx: _,
+                    dy: _,
+                    bbox: _,
+                } => {
+                    let theta = *x;
+                    let r = *y;
+                    let px = center_x + r * theta.cos();
+                    let py = center_y + r * theta.sin();
+                    if !px.is_finite() || !py.is_finite() {
+                        continue;
+                    }
+                    let fs = scale_font(*fontsize, font_scale);
+                    let h_align = match ha.as_str() {
+                        "left" => HAlign::Left,
+                        "right" => HAlign::Right,
+                        _ => HAlign::Center,
+                    };
+                    let v_align = match va.as_str() {
+                        "top" => VAlign::Top,
+                        "bottom" => VAlign::Bottom,
+                        _ => VAlign::Center,
+                    };
+                    let rgb = to_plotters_color(*color);
+                    crate::utils::mathtext::draw_math_chart(
+                        chart,
+                        px,
+                        py,
+                        text,
+                        fs,
+                        rgb,
+                        font_family.clone().as_deref(),
+                        h_align,
+                        v_align,
+                        *rotation,
+                        0.0,
+                        0.0,
+                        None,
+                        -max_r,
+                        max_r,
+                        -max_r,
+                        max_r,
+                    )
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw text: {}", e)))?;
+                }
+                _ => {}
+            }
+        }
+
+        // 渲染图例（极坐标图）
+        if !self.legend_labels.is_empty() {
+            let legend_facecolor = self
+                .legend_facecolor
+                .as_deref()
+                .map(|c| parse_color(c, 0).unwrap_or(RgbColor(255, 255, 255)));
+            let legend_edgecolor = self
+                .legend_edgecolor
+                .as_deref()
+                .map(|c| parse_color(c, 0).unwrap_or(RgbColor(180, 180, 180)));
+            crate::figure::axes_legend::draw_legend(
+                chart,
+                self.legend_loc.as_ref(),
+                &self.legend_labels,
                 &self.elements,
-                self.xlim,
-                self.ylim,
-                xlog,
-                ylog,
-            );
-        // 应用轴反转
-        if self.x_axis_inverted {
-            std::mem::swap(&mut x_min, &mut x_max);
+                font_scale,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                false, // xlog: 极坐标没有对数刻度
+                false, // ylog: 极坐标没有对数刻度
+                legend_facecolor,
+                self.legend_framealpha,
+                legend_edgecolor,
+                self.legend_fontsize,
+            )?;
         }
-        if self.y_axis_inverted {
-            std::mem::swap(&mut y_min, &mut y_max);
-        }
-        ((x_min, x_max), (y_min, y_max))
+
+        Ok(())
     }
 
     pub fn render<DB: DrawingBackend>(
@@ -3245,391 +3644,482 @@ impl Axes {
             (dim.0, dim.1)
         };
 
+        let is_polar = self.projection.eq_ignore_ascii_case("polar");
         let xlog = self.xscale == "log";
         let ylog = self.yscale == "log";
 
-        // 计算主/副刻度
-        let x_tick_font_size = scale_font(self.tick_labelsize, font_scale);
-        let ticks_info = crate::figure::axes_mesh::compute_ticks(
-            py,
-            &self.xticks_val,
-            &self.yticks_val,
-            &self.xaxis_major_locator,
-            &self.yaxis_major_locator,
-            &self.xaxis_minor_locator,
-            &self.yaxis_minor_locator,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            plot_pixel_width,
-            plot_pixel_height,
-            self.minor_grid_x_visible,
-            self.minor_grid_y_visible,
-            self.minor_grid_visible,
-            x_tick_font_size,
-            xlog,
-        );
+        if is_polar {
+            self.render_polar(
+                py,
+                chart,
+                (x_min, x_max),
+                (y_min, y_max),
+                font_scale,
+                marker_scale,
+                bitmap,
+                ss,
+            )?;
+        } else {
+            let x_tick_font_size = scale_font(self.tick_labelsize, font_scale);
 
-        // 计算网格线颜色/线宽/样式
-        let grid_style = crate::figure::axes_mesh::compute_grid_style(
-            &self.grid_color,
-            self.grid_linewidth,
-            &self.grid_linestyle,
-            &self.minor_grid_color,
-            self.minor_grid_linewidth,
-            &self.minor_grid_linestyle,
-        );
+            let ticks_info = crate::figure::axes_mesh::compute_ticks(
+                py,
+                &self.xticks_val,
+                &self.yticks_val,
+                &self.xaxis_major_locator,
+                &self.yaxis_major_locator,
+                &self.xaxis_minor_locator,
+                &self.yaxis_minor_locator,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                plot_pixel_width,
+                plot_pixel_height,
+                self.minor_grid_x_visible,
+                self.minor_grid_y_visible,
+                self.minor_grid_visible,
+                x_tick_font_size,
+                xlog,
+            );
 
-        // 配置并绘制 mesh（与 ChartContext 的借用密切相关，必须内联）
-        {
-            let frame_color = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
-            let frame_lw = self.spine_linewidth.round().max(1.0) as u32;
-            let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw);
-            let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
-            // plotters 的 configure_mesh 只有单一 axis_desc_style（x_desc 与 y_desc 共用），
-            // 无法给 xlabel/ylabel 各自设样式。这里让二者共用一套：优先采用 xlabel 的
-            // fontdict（family/size/color），其次 ylabel，最后回退默认。TextStyle 借用
-            // desc_family 字符串，故其必须与 mesh_builder 同作用域。
-            let x_has_custom = self.xlabel_family.is_some()
-                || self.xlabel_fontsize > 0.0
-                || !(self.xlabel_color.0 == 0
-                    && self.xlabel_color.1 == 0
-                    && self.xlabel_color.2 == 0);
-            let y_has_custom = self.ylabel_family.is_some()
-                || self.ylabel_fontsize > 0.0
-                || !(self.ylabel_color.0 == 0
-                    && self.ylabel_color.1 == 0
-                    && self.ylabel_color.2 == 0);
-            let (desc_family_opt, desc_fontsize, desc_color) = if x_has_custom {
-                (
-                    self.xlabel_family.clone(),
-                    self.xlabel_fontsize,
-                    self.xlabel_color,
-                )
-            } else if y_has_custom {
-                (
-                    self.ylabel_family.clone(),
-                    self.ylabel_fontsize,
-                    self.ylabel_color,
-                )
-            } else {
-                (None, 0.0, RgbColor(0, 0, 0))
-            };
-            // family：显式指定优先，否则按标签文本自动选字（含 CJK 回退）。
-            let desc_text = if !self.xlabel.is_empty() {
-                self.xlabel.as_str()
-            } else {
-                self.ylabel.as_str()
-            };
-            let axis_desc_family =
-                font_stack::resolve_font_family(desc_text, desc_family_opt.as_deref());
-            let axis_desc_size = if desc_fontsize > 0.0 {
-                scale_font(desc_fontsize, font_scale)
-            } else {
-                label_size
-            };
-            let axis_desc_rgb = to_plotters_color(desc_color);
-            // 类别型 x 轴：同时提供刻度位置 (xticks_val) 与字符串标签 (xtick_labels) 时，
-            // 把落在这些位置的刻度渲染成对应字符串（如柱状图的类别名），其余刻度回退为
-            // 数值格式。plotters 仅按数量自动布点，故用位置匹配 (容差 1e-6) 做映射。
-            // 在 mesh_builder 之前声明，保证其生命周期长于持有其引用的 builder。
-            let xtick_label_map: Vec<(f64, String)> = match (&self.xticks_val, &self.xtick_labels) {
-                (Some(ticks), Some(labels)) => {
-                    ticks.iter().cloned().zip(labels.iter().cloned()).collect()
-                }
-                _ => Vec::new(),
-            };
-            let has_xcat = !xtick_label_map.is_empty();
-            let x_cat_fmt = move |v: &f64| -> String {
-                for (t, l) in &xtick_label_map {
-                    if (t - *v).abs() < 1e-6 {
-                        return crate::utils::mathtext::to_plain(l);
-                    }
-                }
-                crate::figure::axes_mesh::format_linear_tick(*v)
-            };
-            // 类别型 y 轴：与 x 轴对称（如 barh 的类别名），落在 yticks_val 位置的刻度渲染
-            // 为对应字符串标签，其余回退数值格式。
-            let ytick_label_map: Vec<(f64, String)> = match (&self.yticks_val, &self.ytick_labels) {
-                (Some(ticks), Some(labels)) => {
-                    ticks.iter().cloned().zip(labels.iter().cloned()).collect()
-                }
-                _ => Vec::new(),
-            };
-            let has_ycat = !ytick_label_map.is_empty();
-            let y_cat_fmt = move |v: &f64| -> String {
-                for (t, l) in &ytick_label_map {
-                    if (t - *v).abs() < 1e-6 {
-                        return crate::utils::mathtext::to_plain(l);
-                    }
-                }
-                crate::figure::axes_mesh::format_linear_tick(*v)
-            };
-            // 主刻度线像素长度（matplotlib 风格，向外）。plotters 中 label_dist = 2*tick_px。
-            let tick_px = (3.5 * font_scale).round().max(1.0) as i32;
-            // 仅主轴（非 twin）的底部 x 轴：抑制 plotters 内置刻度标签文本，改在 mesh
-            // 绘制后手动绘制，使标签相对 plotters 默认位置再下移 2 个最终像素（渲染像素 =
-            // round(2*ss)）。刻度线仍由 plotters 在相同 key points 处绘制，保证标签与刻度线
-            // 水平对齐。twin 轴的 x 标签在顶部，位置不同，故不处理。
-            let x_axis_on = self.spine_bottom || self.spine_top;
-            let y_axis_on = self.spine_left || self.spine_right;
-            // 刻度线（marks）/ 刻度标签（labels）各侧独立可见性。plotters 仅渲染底部 x、
-            // 左侧 y（top/right 无刻度），故以 bottom/left 为准；label* 控制标签、tick* 控制线。
-            let x_labels_visible = self.label_bottom;
-            let y_labels_visible = self.label_left;
-            let x_marks_visible = self.tick_bottom;
-            let y_marks_visible = self.tick_left;
-            // 用户显式设置空刻度（plt.xticks([]) / plt.yticks([])）：此时最终刻度为空，
-            // 应完全不画刻度线与刻度值（包括 0），而不是回退到默认最少 2 个标签。
-            let x_ticks_empty = ticks_info.xticks.is_empty();
-            let y_ticks_empty = ticks_info.yticks.is_empty();
-            let do_manual_x = !self.is_twin_x
-                && !self.is_twin_y
-                && x_axis_on
-                && x_labels_visible
-                && !x_ticks_empty;
-            // 取 plotters 实际用于底部 x 标签的 key points（与刻度线位置一致）。
-            let x_key_points: Vec<f64> = if do_manual_x {
-                let n_x = ticks_info.xticks.len().max(2);
-                chart
-                    .plotting_area()
-                    .as_coord_spec()
-                    .x_spec()
-                    .key_points(BoldPoints(n_x))
-            } else {
-                Vec::new()
-            };
+            // 计算网格线颜色/线宽/样式
+            let grid_style = crate::figure::axes_mesh::compute_grid_style(
+                &self.grid_color,
+                self.grid_linewidth,
+                &self.grid_linestyle,
+                &self.minor_grid_color,
+                self.minor_grid_linewidth,
+                &self.minor_grid_linestyle,
+            );
 
-            // tick_params(labelcolor=...) 刻度标签颜色（默认黑）；x/y 各自解析。
-            let x_label_rgb = self
-                .x_tick_labelcolor
-                .as_deref()
-                .and_then(|s| parse_color(s, 0).ok())
-                .map(to_plotters_color)
-                .unwrap_or(BLACK);
-            let y_label_rgb = self
-                .y_tick_labelcolor
-                .as_deref()
-                .and_then(|s| parse_color(s, 0).ok())
-                .map(to_plotters_color)
-                .unwrap_or(BLACK);
-            // tick_params(color=...) 刻度线颜色：plotters mesh 的 axis_style 会把刻度线
-            // 与轴线、且 x/y 一并染色，无法逐轴独立控制。故对设置了颜色的一侧关闭 plotters
-            // 内置刻度线（set_tick_mark_size=0），改用手动短线覆盖（仅对该侧生效，轴线保持默认色）。
-            let x_tick_style: Option<ShapeStyle> = self
-                .x_tick_color
-                .as_deref()
-                .and_then(|s| parse_color(s, 0).ok())
-                .map(|c| to_plotters_color(c).stroke_width(frame_lw));
-            let y_tick_style: Option<ShapeStyle> = self
-                .y_tick_color
-                .as_deref()
-                .and_then(|s| parse_color(s, 0).ok())
-                .map(|c| to_plotters_color(c).stroke_width(frame_lw));
-            let do_manual_y_ticks = y_tick_style.is_some()
-                && !self.is_twin_x
-                && !self.is_twin_y
-                && (self.spine_left || self.spine_right)
-                && (self.tick_left || self.tick_right)
-                && !y_ticks_empty;
-            let y_key_points: Vec<f64> = if do_manual_y_ticks {
-                let n_y = ticks_info.yticks.len().max(2);
-                chart
-                    .plotting_area()
-                    .as_coord_spec()
-                    .y_spec()
-                    .key_points(BoldPoints(n_y))
-            } else {
-                Vec::new()
-            };
-
-            let mut mesh_builder = chart.configure_mesh();
-            mesh_builder
-                .x_labels(
-                    if x_ticks_empty || (!x_labels_visible && !x_marks_visible) {
-                        0
-                    } else {
-                        ticks_info.xticks.len().max(2)
-                    },
-                )
-                .y_labels(
-                    if y_ticks_empty || (!y_labels_visible && !y_marks_visible) {
-                        0
-                    } else {
-                        ticks_info.yticks.len().max(2)
-                    },
-                )
-                .x_label_style(("sans-serif", label_size).into_font().color(&x_label_rgb))
-                .y_label_style(("sans-serif", label_size).into_font().color(&y_label_rgb))
-                .bold_line_style(frame_style);
-
-            // xlabel/ylabel 用 plotters 内置 x_desc/y_desc 自动定位，共用 axis_desc_style。
-            // 但 plotters 只能居中；当 loc 非居中时，此处传空串禁用内置绘制，
-            // 改由 figure.rs 在 root 上按绝对像素手动绘制（见 axes_title::draw_{x,y}label_manual）。
-            // 居中且**含数学 IR** 的标签同样传空串禁用内置绘制，改由 figure.rs 走二维排版引擎
-            // （xlabel 水平二维；ylabel 旋转二维），以真实呈现上/下标、分式、根号等。
-            // 仅「居中 + 纯文本」才由 plotters 内置绘制。
-            let x_desc_text = if self.xlabel_loc == "center"
-                && !crate::utils::mathtext::contains_ir(&self.xlabel)
+            // 配置并绘制 mesh（与 ChartContext 的借用密切相关，必须内联）
             {
-                self.xlabel.clone()
-            } else {
-                String::new()
-            };
-            let y_desc_text = if self.ylabel_loc == "center"
-                && !crate::utils::mathtext::contains_ir(&self.ylabel)
-            {
-                self.ylabel.clone()
-            } else {
-                String::new()
-            };
-            mesh_builder
-                .x_desc(x_desc_text)
-                .y_desc(y_desc_text)
-                .axis_desc_style(
-                    (axis_desc_family.as_str(), axis_desc_size)
-                        .into_font()
-                        .color(&axis_desc_rgb),
-                );
-
-            if xlog {
-                mesh_builder.x_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
-            }
-            if ylog {
-                mesh_builder.y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
-            } else {
-                mesh_builder
-                    .y_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
-                mesh_builder
-                    .x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
-            }
-            // 类别标签覆盖 x 轴数值格式（plotters 后一次 x_label_formatter 覆盖前一次）。
-            if has_xcat {
-                mesh_builder.x_label_formatter(&x_cat_fmt);
-            }
-            // 类别标签覆盖 y 轴数值格式（barh 等场景）。
-            if has_ycat {
-                mesh_builder.y_label_formatter(&y_cat_fmt);
-            }
-
-            if !self.spine_bottom && !self.spine_top {
-                mesh_builder.disable_x_axis();
-            }
-            if !self.spine_left && !self.spine_right {
-                mesh_builder.disable_y_axis();
-            }
-
-            // matplotlib 风格刻度线：向外、长度约 3.5pt（正值 = 向外）。plotters 默认刻度长为
-            // 绘图区 5%，本项目自定义布局下极短（~1px），故显式设为固定像素 tick_px。
-            // draw_impl 中 label_dist = 2*tick_size：仅当 spine 存在却要隐藏刻度线
-            // （bottom/left=False）时把该侧尺寸置 0；spine 本身不可见时刻度线已随之消失，
-            // 仍保留 tick_px 以维持标签与边框间距（否则 label_dist=0 会让标签贴到边）。
-            let x_tick_sz = if !x_marks_visible && x_axis_on {
-                0
-            } else {
-                tick_px
-            };
-            let y_tick_sz = if !y_marks_visible && y_axis_on {
-                0
-            } else {
-                tick_px
-            };
-            mesh_builder
-                .set_tick_mark_size(LabelAreaPosition::Bottom, x_tick_sz)
-                .set_tick_mark_size(LabelAreaPosition::Left, y_tick_sz);
-
-            // x 标签：do_manual_x 时改为手动绘制（空串抑制内置文本，刻度线保留）；
-            // labelbottom=False 时同样置空以隐藏底部 x 标签。
-            if do_manual_x || !x_labels_visible {
-                mesh_builder.x_label_formatter(&|_: &f64| String::new());
-            }
-            // labelleft=False：隐藏左侧 y 标签（y 标签由 plotters 直接绘制，置空即可）。
-            if !y_labels_visible {
-                mesh_builder.y_label_formatter(&|_: &f64| String::new());
-            }
-
-            // 手动绘制 mesh：禁用内置网格线（由 axes_grid 模块统一绘制）
-            mesh_builder
-                .disable_x_mesh()
-                .disable_y_mesh()
-                .draw()
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
-            // mesh 绘制完成后释放 mesh_builder 对 chart 的可变借用，以便后续手动叠画
-            // 刻度标签 / 刻度线（x 手动标签、x/y 彩色刻度覆盖）。
-            drop(mesh_builder);
-
-            // 手动绘制底部 x 刻度标签：相对 plotters 默认位置（label_dist = 2*tick_px）
-            // 再向下偏移 2 个最终像素（渲染像素 = round(2*ss)）。锚点 (t, y_min) 映射到
-            // 绘图区底边，Text 的像素偏移 (0, offset_y) 使文字顶端下移，与刻度线对齐。
-            if do_manual_x {
-                let (x_lo, x_hi) = (x_min.min(x_max), x_min.max(x_max));
-                // 若设置了主刻度 formatter（如 ConciseDateFormatter），一次性对落在数据区内
-                // 的刻度点调用 format_ticks 生成标签（其粒度依赖整体跨度），再按顺序取用。
-                let vis_points: Vec<f64> = x_key_points
-                    .iter()
-                    .cloned()
-                    .filter(|t| *t >= x_lo && *t <= x_hi)
-                    .collect();
-                let fmt_labels: Option<Vec<String>> =
-                    self.xaxis_major_formatter.as_ref().and_then(|fmt| {
-                        let pts = PyList::new(py, vis_points.iter().copied()).ok()?;
-                        fmt.bind(py)
-                            .call_method1("format_ticks", (pts,))
-                            .ok()?
-                            .extract::<Vec<String>>()
-                            .ok()
-                    });
-                let offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
-                let text_style: TextStyle = ("sans-serif", label_size)
-                    .into_font()
-                    .color(&x_label_rgb)
-                    .pos(Pos::new(HPos::Center, VPos::Top));
-                let mut vis_i = 0usize;
-                for &t in &x_key_points {
-                    if t < x_lo || t > x_hi {
-                        continue;
-                    }
-                    let text = if let Some(labels) = &fmt_labels {
-                        labels
-                            .get(vis_i)
-                            .cloned()
-                            .unwrap_or_else(|| crate::figure::axes_mesh::format_linear_tick(t))
-                    } else if xlog {
-                        format!("{:.1e}", 10.0f64.powf(t))
-                    } else if has_xcat {
-                        x_cat_fmt(&t)
-                    } else {
-                        crate::figure::axes_mesh::format_linear_tick(t)
+                let frame_color = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
+                let frame_lw = self.spine_linewidth.round().max(1.0) as u32;
+                let frame_style: ShapeStyle = to_plotters_color(frame_color).stroke_width(frame_lw);
+                let label_size: f64 = scale_font(self.tick_labelsize, font_scale);
+                // plotters 的 configure_mesh 只有单一 axis_desc_style（x_desc 与 y_desc 共用），
+                // 无法给 xlabel/ylabel 各自设样式。这里让二者共用一套：优先采用 xlabel 的
+                // fontdict（family/size/color），其次 ylabel，最后回退默认。TextStyle 借用
+                // desc_family 字符串，故其必须与 mesh_builder 同作用域。
+                let x_has_custom = self.xlabel_family.is_some()
+                    || self.xlabel_fontsize > 0.0
+                    || !(self.xlabel_color.0 == 0
+                        && self.xlabel_color.1 == 0
+                        && self.xlabel_color.2 == 0);
+                let y_has_custom = self.ylabel_family.is_some()
+                    || self.ylabel_fontsize > 0.0
+                    || !(self.ylabel_color.0 == 0
+                        && self.ylabel_color.1 == 0
+                        && self.ylabel_color.2 == 0);
+                let (desc_family_opt, desc_fontsize, desc_color) = if x_has_custom {
+                    (
+                        self.xlabel_family.clone(),
+                        self.xlabel_fontsize,
+                        self.xlabel_color,
+                    )
+                } else if y_has_custom {
+                    (
+                        self.ylabel_family.clone(),
+                        self.ylabel_fontsize,
+                        self.ylabel_color,
+                    )
+                } else {
+                    (None, 0.0, RgbColor(0, 0, 0))
+                };
+                // family：显式指定优先，否则按标签文本自动选字（含 CJK 回退）。
+                let desc_text = if !self.xlabel.is_empty() {
+                    self.xlabel.as_str()
+                } else {
+                    self.ylabel.as_str()
+                };
+                let axis_desc_family =
+                    font_stack::resolve_font_family(desc_text, desc_family_opt.as_deref());
+                let axis_desc_size = if desc_fontsize > 0.0 {
+                    scale_font(desc_fontsize, font_scale)
+                } else {
+                    label_size
+                };
+                let axis_desc_rgb = to_plotters_color(desc_color);
+                // 类别型 x 轴：同时提供刻度位置 (xticks_val) 与字符串标签 (xtick_labels) 时，
+                // 把落在这些位置的刻度渲染成对应字符串（如柱状图的类别名），其余刻度回退为
+                // 数值格式。plotters 仅按数量自动布点，故用位置匹配 (容差 1e-6) 做映射。
+                // 在 mesh_builder 之前声明，保证其生命周期长于持有其引用的 builder。
+                let xtick_label_map: Vec<(f64, String)> =
+                    match (&self.xticks_val, &self.xtick_labels) {
+                        (Some(ticks), Some(labels)) => {
+                            ticks.iter().cloned().zip(labels.iter().cloned()).collect()
+                        }
+                        _ => Vec::new(),
                     };
-                    vis_i += 1;
+                let has_xcat = !xtick_label_map.is_empty();
+                let x_cat_fmt = move |v: &f64| -> String {
+                    for (t, l) in &xtick_label_map {
+                        if (t - *v).abs() < 1e-6 {
+                            return crate::utils::mathtext::to_plain(l);
+                        }
+                    }
+                    crate::figure::axes_mesh::format_linear_tick(*v)
+                };
+                // 类别型 y 轴：与 x 轴对称（如 barh 的类别名），落在 yticks_val 位置的刻度渲染
+                // 为对应字符串标签，其余回退数值格式。
+                let ytick_label_map: Vec<(f64, String)> =
+                    match (&self.yticks_val, &self.ytick_labels) {
+                        (Some(ticks), Some(labels)) => {
+                            ticks.iter().cloned().zip(labels.iter().cloned()).collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                let has_ycat = !ytick_label_map.is_empty();
+                let y_cat_fmt = move |v: &f64| -> String {
+                    for (t, l) in &ytick_label_map {
+                        if (t - *v).abs() < 1e-6 {
+                            return crate::utils::mathtext::to_plain(l);
+                        }
+                    }
+                    crate::figure::axes_mesh::format_linear_tick(*v)
+                };
+                // 主刻度线像素长度（matplotlib 风格，向外）。plotters 中 label_dist = 2*tick_px。
+                let tick_px = (3.5 * font_scale).round().max(1.0) as i32;
+                // 仅主轴（非 twin）的底部 x 轴：抑制 plotters 内置刻度标签文本，改在 mesh
+                // 绘制后手动绘制，使标签相对 plotters 默认位置再下移 2 个最终像素（渲染像素 =
+                // round(2*ss)）。刻度线仍由 plotters 在相同 key points 处绘制，保证标签与刻度线
+                // 水平对齐。twin 轴的 x 标签在顶部，位置不同，故不处理。
+                let x_axis_on = self.spine_bottom || self.spine_top;
+                let y_axis_on = self.spine_left || self.spine_right;
+                // 刻度线（marks）/ 刻度标签（labels）各侧独立可见性。plotters 仅渲染底部 x、
+                // 左侧 y（top/right 无刻度），故以 bottom/left 为准；label* 控制标签、tick* 控制线。
+                let x_labels_visible = self.label_bottom;
+                let y_labels_visible = self.label_left;
+                let x_marks_visible = self.tick_bottom;
+                let y_marks_visible = self.tick_left;
+                // 用户显式设置空刻度（plt.xticks([]) / plt.yticks([])）：此时最终刻度为空，
+                // 应完全不画刻度线与刻度值（包括 0），而不是回退到默认最少 2 个标签。
+                let x_ticks_empty = ticks_info.xticks.is_empty();
+                let y_ticks_empty = ticks_info.yticks.is_empty();
+                let do_manual_x = !self.is_twin_x
+                    && !self.is_twin_y
+                    && x_axis_on
+                    && x_labels_visible
+                    && !x_ticks_empty;
+                // 取 plotters 实际用于底部 x 标签的 key points（与刻度线位置一致）。
+                let x_key_points: Vec<f64> = if do_manual_x {
+                    let n_x = ticks_info.xticks.len().max(2);
                     chart
-                        .draw_series(std::iter::once(
-                            plotters::element::EmptyElement::at((t, y_min))
-                                + plotters::element::Text::new(
-                                    text,
-                                    (0, offset_y),
-                                    text_style.clone(),
-                                ),
-                        ))
-                        .map_err(|e| {
-                            PyRuntimeError::new_err(format!("Failed to draw x tick label: {}", e))
-                        })?;
-                    // tick_params(color=...): 在 plotters 黑刻度线上叠画同几何的彩色短线覆盖之
-                    // （向外 tick_px 像素，锚点为绘图区底边）。保留 plotters 刻度尺寸不动，
-                    // 避免改变标签间距。
-                    if let Some(style) = &x_tick_style {
+                        .plotting_area()
+                        .as_coord_spec()
+                        .x_spec()
+                        .key_points(BoldPoints(n_x))
+                } else {
+                    Vec::new()
+                };
+
+                // tick_params(labelcolor=...) 刻度标签颜色（默认黑）；x/y 各自解析。
+                let x_label_rgb = self
+                    .x_tick_labelcolor
+                    .as_deref()
+                    .and_then(|s| parse_color(s, 0).ok())
+                    .map(to_plotters_color)
+                    .unwrap_or(BLACK);
+                let y_label_rgb = self
+                    .y_tick_labelcolor
+                    .as_deref()
+                    .and_then(|s| parse_color(s, 0).ok())
+                    .map(to_plotters_color)
+                    .unwrap_or(BLACK);
+                // tick_params(color=...) 刻度线颜色：plotters mesh 的 axis_style 会把刻度线
+                // 与轴线、且 x/y 一并染色，无法逐轴独立控制。故对设置了颜色的一侧关闭 plotters
+                // 内置刻度线（set_tick_mark_size=0），改用手动短线覆盖（仅对该侧生效，轴线保持默认色）。
+                let x_tick_style: Option<ShapeStyle> = self
+                    .x_tick_color
+                    .as_deref()
+                    .and_then(|s| parse_color(s, 0).ok())
+                    .map(|c| to_plotters_color(c).stroke_width(frame_lw));
+                let y_tick_style: Option<ShapeStyle> = self
+                    .y_tick_color
+                    .as_deref()
+                    .and_then(|s| parse_color(s, 0).ok())
+                    .map(|c| to_plotters_color(c).stroke_width(frame_lw));
+                let do_manual_y_ticks = y_tick_style.is_some()
+                    && !self.is_twin_x
+                    && !self.is_twin_y
+                    && (self.spine_left || self.spine_right)
+                    && (self.tick_left || self.tick_right)
+                    && !y_ticks_empty;
+                let y_key_points: Vec<f64> = if do_manual_y_ticks {
+                    let n_y = ticks_info.yticks.len().max(2);
+                    chart
+                        .plotting_area()
+                        .as_coord_spec()
+                        .y_spec()
+                        .key_points(BoldPoints(n_y))
+                } else {
+                    Vec::new()
+                };
+
+                let mut mesh_builder = chart.configure_mesh();
+                mesh_builder
+                    .x_labels(
+                        if x_ticks_empty || (!x_labels_visible && !x_marks_visible) {
+                            0
+                        } else {
+                            ticks_info.xticks.len().max(2)
+                        },
+                    )
+                    .y_labels(
+                        if y_ticks_empty || (!y_labels_visible && !y_marks_visible) {
+                            0
+                        } else {
+                            ticks_info.yticks.len().max(2)
+                        },
+                    )
+                    .x_label_style(("sans-serif", label_size).into_font().color(&x_label_rgb))
+                    .y_label_style(("sans-serif", label_size).into_font().color(&y_label_rgb))
+                    .bold_line_style(frame_style);
+
+                // xlabel/ylabel 用 plotters 内置 x_desc/y_desc 自动定位，共用 axis_desc_style。
+                // 但 plotters 只能居中；当 loc 非居中时，此处传空串禁用内置绘制，
+                // 改由 figure.rs 在 root 上按绝对像素手动绘制（见 axes_title::draw_{x,y}label_manual）。
+                // 居中且**含数学 IR** 的标签同样传空串禁用内置绘制，改由 figure.rs 走二维排版引擎
+                // （xlabel 水平二维；ylabel 旋转二维），以真实呈现上/下标、分式、根号等。
+                // 仅「居中 + 纯文本」才由 plotters 内置绘制。
+                let x_desc_text = if self.xlabel_loc == "center"
+                    && !crate::utils::mathtext::contains_ir(&self.xlabel)
+                {
+                    self.xlabel.clone()
+                } else {
+                    String::new()
+                };
+                let y_desc_text = if self.ylabel_loc == "center"
+                    && !crate::utils::mathtext::contains_ir(&self.ylabel)
+                {
+                    self.ylabel.clone()
+                } else {
+                    String::new()
+                };
+                mesh_builder
+                    .x_desc(x_desc_text)
+                    .y_desc(y_desc_text)
+                    .axis_desc_style(
+                        (axis_desc_family.as_str(), axis_desc_size)
+                            .into_font()
+                            .color(&axis_desc_rgb),
+                    );
+
+                if xlog {
+                    mesh_builder.x_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
+                }
+                if ylog {
+                    mesh_builder.y_label_formatter(&|v| format!("{:.1e}", 10.0f64.powf(*v)));
+                } else {
+                    mesh_builder
+                        .y_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
+                    mesh_builder
+                        .x_label_formatter(&|v| crate::figure::axes_mesh::format_linear_tick(*v));
+                }
+                // 类别标签覆盖 x 轴数值格式（plotters 后一次 x_label_formatter 覆盖前一次）。
+                if has_xcat {
+                    mesh_builder.x_label_formatter(&x_cat_fmt);
+                }
+                // 类别标签覆盖 y 轴数值格式（barh 等场景）。
+                if has_ycat {
+                    mesh_builder.y_label_formatter(&y_cat_fmt);
+                }
+
+                if !self.spine_bottom && !self.spine_top {
+                    mesh_builder.disable_x_axis();
+                }
+                if !self.spine_left && !self.spine_right {
+                    mesh_builder.disable_y_axis();
+                }
+
+                // matplotlib 风格刻度线：向外、长度约 3.5pt（正值 = 向外）。plotters 默认刻度长为
+                // 绘图区 5%，本项目自定义布局下极短（~1px），故显式设为固定像素 tick_px。
+                // draw_impl 中 label_dist = 2*tick_size：仅当 spine 存在却要隐藏刻度线
+                // （bottom/left=False）时把该侧尺寸置 0；spine 本身不可见时刻度线已随之消失，
+                // 仍保留 tick_px 以维持标签与边框间距（否则 label_dist=0 会让标签贴到边）。
+                let x_tick_sz = if !x_marks_visible && x_axis_on {
+                    0
+                } else {
+                    tick_px
+                };
+                let y_tick_sz = if !y_marks_visible && y_axis_on {
+                    0
+                } else {
+                    tick_px
+                };
+                mesh_builder
+                    .set_tick_mark_size(LabelAreaPosition::Bottom, x_tick_sz)
+                    .set_tick_mark_size(LabelAreaPosition::Left, y_tick_sz);
+
+                // x 标签：do_manual_x 时改为手动绘制（空串抑制内置文本，刻度线保留）；
+                // labelbottom=False 时同样置空以隐藏底部 x 标签。
+                if do_manual_x || !x_labels_visible {
+                    mesh_builder.x_label_formatter(&|_: &f64| String::new());
+                }
+                // labelleft=False：隐藏左侧 y 标签（y 标签由 plotters 直接绘制，置空即可）。
+                if !y_labels_visible {
+                    mesh_builder.y_label_formatter(&|_: &f64| String::new());
+                }
+
+                // 手动绘制 mesh：禁用内置网格线（由 axes_grid 模块统一绘制）
+                mesh_builder
+                    .disable_x_mesh()
+                    .disable_y_mesh()
+                    .draw()
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw mesh: {}", e)))?;
+                // mesh 绘制完成后释放 mesh_builder 对 chart 的可变借用，以便后续手动叠画
+                // 刻度标签 / 刻度线（x 手动标签、x/y 彩色刻度覆盖）。
+                drop(mesh_builder);
+
+                // 手动绘制底部 x 刻度标签：相对 plotters 默认位置（label_dist = 2*tick_px）
+                // 再向下偏移 2 个最终像素（渲染像素 = round(2*ss)）。锚点 (t, y_min) 映射到
+                // 绘图区底边，Text 的像素偏移 (0, offset_y) 使文字顶端下移，与刻度线对齐。
+                if do_manual_x {
+                    let (x_lo, x_hi) = (x_min.min(x_max), x_min.max(x_max));
+                    // 若设置了主刻度 formatter（如 ConciseDateFormatter），一次性对落在数据区内
+                    // 的刻度点调用 format_ticks 生成标签（其粒度依赖整体跨度），再按顺序取用。
+                    let vis_points: Vec<f64> = x_key_points
+                        .iter()
+                        .cloned()
+                        .filter(|t| *t >= x_lo && *t <= x_hi)
+                        .collect();
+                    let fmt_labels: Option<Vec<String>> =
+                        self.xaxis_major_formatter.as_ref().and_then(|fmt| {
+                            let pts = PyList::new(py, vis_points.iter().copied()).ok()?;
+                            fmt.bind(py)
+                                .call_method1("format_ticks", (pts,))
+                                .ok()?
+                                .extract::<Vec<String>>()
+                                .ok()
+                        });
+                    let offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
+                    let text_style: TextStyle = ("sans-serif", label_size)
+                        .into_font()
+                        .color(&x_label_rgb)
+                        .pos(Pos::new(HPos::Center, VPos::Top));
+                    let mut vis_i = 0usize;
+                    for &t in &x_key_points {
+                        if t < x_lo || t > x_hi {
+                            continue;
+                        }
+                        let text = if let Some(labels) = &fmt_labels {
+                            labels
+                                .get(vis_i)
+                                .cloned()
+                                .unwrap_or_else(|| crate::figure::axes_mesh::format_linear_tick(t))
+                        } else if xlog {
+                            format!("{:.1e}", 10.0f64.powf(t))
+                        } else if has_xcat {
+                            x_cat_fmt(&t)
+                        } else {
+                            crate::figure::axes_mesh::format_linear_tick(t)
+                        };
+                        vis_i += 1;
                         chart
                             .draw_series(std::iter::once(
                                 plotters::element::EmptyElement::at((t, y_min))
+                                    + plotters::element::Text::new(
+                                        text,
+                                        (0, offset_y),
+                                        text_style.clone(),
+                                    ),
+                            ))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!(
+                                    "Failed to draw x tick label: {}",
+                                    e
+                                ))
+                            })?;
+                        // tick_params(color=...): 在 plotters 黑刻度线上叠画同几何的彩色短线覆盖之
+                        // （向外 tick_px 像素，锚点为绘图区底边）。保留 plotters 刻度尺寸不动，
+                        // 避免改变标签间距。
+                        if let Some(style) = &x_tick_style {
+                            chart
+                                .draw_series(std::iter::once(
+                                    plotters::element::EmptyElement::at((t, y_min))
+                                        + plotters::element::PathElement::new(
+                                            vec![(0, 0), (0, tick_px)],
+                                            *style,
+                                        ),
+                                ))
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "Failed to draw x tick mark: {}",
+                                        e
+                                    ))
+                                })?;
+                        }
+                    }
+                }
+
+                // tick_params(color=...) 的 y 侧：在 plotters 左侧黑刻度线上叠画同几何彩色短线
+                // （向外 tick_px 像素，锚点为绘图区左边）。y 标签仍由 plotters 绘制（其颜色见
+                // y_label_style），此处仅覆盖刻度线，不改变标签间距。
+                if do_manual_y_ticks && let Some(style) = &y_tick_style {
+                    let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
+                    for &t in &y_key_points {
+                        if t < y_lo || t > y_hi {
+                            continue;
+                        }
+                        chart
+                            .draw_series(std::iter::once(
+                                plotters::element::EmptyElement::at((x_min, t))
                                     + plotters::element::PathElement::new(
-                                        vec![(0, 0), (0, tick_px)],
+                                        vec![(0, 0), (-tick_px, 0)],
                                         *style,
                                     ),
                             ))
                             .map_err(|e| {
                                 PyRuntimeError::new_err(format!(
-                                    "Failed to draw x tick mark: {}",
+                                    "Failed to draw y tick mark: {}",
+                                    e
+                                ))
+                            })?;
+                    }
+                }
+
+                // 手动绘制左侧 y 刻度标签：当所有 spine 隐藏时，plotters 会 disable_y_axis
+                // 连带移除内置 y 标签；但若 labelleft 仍为真且刻度非空（如 test9 的
+                // tick_params(left=False)+spines 全隐藏但保留 yticklabels），需镜像 do_manual_x
+                // 手动补画。锚点 (x_min, t) 映射到绘图区左边，右对齐 + 垂直居中，向左偏移
+                // label_dist=2*tick_px，使标签落在预留的左边距内。
+                let do_manual_y_labels = !self.is_twin_x
+                    && !self.is_twin_y
+                    && !y_axis_on
+                    && y_labels_visible
+                    && !y_ticks_empty;
+                if do_manual_y_labels {
+                    let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
+                    let offset_x = tick_px * 2;
+                    let text_style: TextStyle = ("sans-serif", label_size)
+                        .into_font()
+                        .color(&y_label_rgb)
+                        .pos(Pos::new(HPos::Right, VPos::Center));
+                    for &t in &ticks_info.yticks {
+                        if t < y_lo || t > y_hi {
+                            continue;
+                        }
+                        let text = if has_ycat {
+                            y_cat_fmt(&t)
+                        } else if ylog {
+                            format!("{:.1e}", 10.0f64.powf(t))
+                        } else {
+                            crate::figure::axes_mesh::format_linear_tick(t)
+                        };
+                        chart
+                            .draw_series(std::iter::once(
+                                plotters::element::EmptyElement::at((x_min, t))
+                                    + plotters::element::Text::new(
+                                        text,
+                                        (-offset_x, 0),
+                                        text_style.clone(),
+                                    ),
+                            ))
+                            .map_err(|e| {
+                                PyRuntimeError::new_err(format!(
+                                    "Failed to draw y tick label: {}",
                                     e
                                 ))
                             })?;
@@ -3637,221 +4127,153 @@ impl Axes {
                 }
             }
 
-            // tick_params(color=...) 的 y 侧：在 plotters 左侧黑刻度线上叠画同几何彩色短线
-            // （向外 tick_px 像素，锚点为绘图区左边）。y 标签仍由 plotters 绘制（其颜色见
-            // y_label_style），此处仅覆盖刻度线，不改变标签间距。
-            if do_manual_y_ticks && let Some(style) = &y_tick_style {
-                let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
-                for &t in &y_key_points {
-                    if t < y_lo || t > y_hi {
-                        continue;
-                    }
+            // 手动绘制顶部和右侧 spine（plotters mesh 只绘制左侧和底部边框）
+            {
+                let spine_col = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
+                let spine_rgb = to_plotters_color(spine_col);
+                let spine_lw = self.spine_linewidth.round().max(1.0) as u32;
+                let spine_style: ShapeStyle = spine_rgb.stroke_width(spine_lw);
+                if self.spine_top {
                     chart
-                        .draw_series(std::iter::once(
-                            plotters::element::EmptyElement::at((x_min, t))
-                                + plotters::element::PathElement::new(
-                                    vec![(0, 0), (-tick_px, 0)],
-                                    *style,
-                                ),
-                        ))
+                        .draw_series(std::iter::once(PathElement::new(
+                            vec![(x_min, y_max), (x_max, y_max)],
+                            spine_style,
+                        )))
                         .map_err(|e| {
-                            PyRuntimeError::new_err(format!("Failed to draw y tick mark: {}", e))
+                            PyRuntimeError::new_err(format!("Failed to draw top spine: {}", e))
+                        })?;
+                }
+                if self.spine_right {
+                    chart
+                        .draw_series(std::iter::once(PathElement::new(
+                            vec![(x_max, y_min), (x_max, y_max)],
+                            spine_style,
+                        )))
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!("Failed to draw right spine: {}", e))
                         })?;
                 }
             }
 
-            // 手动绘制左侧 y 刻度标签：当所有 spine 隐藏时，plotters 会 disable_y_axis
-            // 连带移除内置 y 标签；但若 labelleft 仍为真且刻度非空（如 test9 的
-            // tick_params(left=False)+spines 全隐藏但保留 yticklabels），需镜像 do_manual_x
-            // 手动补画。锚点 (x_min, t) 映射到绘图区左边，右对齐 + 垂直居中，向左偏移
-            // label_dist=2*tick_px，使标签落在预留的左边距内。
-            let do_manual_y_labels = !self.is_twin_x
-                && !self.is_twin_y
-                && !y_axis_on
-                && y_labels_visible
-                && !y_ticks_empty;
-            if do_manual_y_labels {
-                let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
-                let offset_x = tick_px * 2;
-                let text_style: TextStyle = ("sans-serif", label_size)
-                    .into_font()
-                    .color(&y_label_rgb)
-                    .pos(Pos::new(HPos::Right, VPos::Center));
-                for &t in &ticks_info.yticks {
-                    if t < y_lo || t > y_hi {
-                        continue;
-                    }
-                    let text = if has_ycat {
-                        y_cat_fmt(&t)
-                    } else if ylog {
-                        format!("{:.1e}", 10.0f64.powf(t))
-                    } else {
-                        crate::figure::axes_mesh::format_linear_tick(t)
-                    };
-                    chart
-                        .draw_series(std::iter::once(
-                            plotters::element::EmptyElement::at((x_min, t))
-                                + plotters::element::Text::new(
-                                    text,
-                                    (-offset_x, 0),
-                                    text_style.clone(),
-                                ),
-                        ))
-                        .map_err(|e| {
-                            PyRuntimeError::new_err(format!("Failed to draw y tick label: {}", e))
-                        })?;
+            // matplotlib 默认 axisbelow='line'：先绘制归属网格下方的填充元素
+            // （bar/barh/hist 柱、fill_between、stackplot、scatter、axhspan/axvspan），
+            // 使随后绘制的网格线覆盖其上。
+            crate::figure::axes_render_elements::render_elements(
+                chart,
+                &self.elements,
+                crate::figure::axes_render_elements::GridLayer::BelowGrid,
+                font_scale,
+                marker_scale,
+                xlog,
+                ylog,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                bitmap,
+            )?;
+
+            // 绘制主网格线
+            if self.grid_visible {
+                let major_ls = grid_style.major_ls.as_deref();
+                if self.grid_axis == "both" || self.grid_axis == "x" {
+                    crate::figure::axes_grid::draw_grid_lines(
+                        chart,
+                        true,
+                        &ticks_info.xticks,
+                        grid_style.major_color,
+                        grid_style.major_lw,
+                        major_ls,
+                        false,
+                        font_scale,
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                    )?;
+                }
+                if self.grid_axis == "both" || self.grid_axis == "y" {
+                    crate::figure::axes_grid::draw_grid_lines(
+                        chart,
+                        false,
+                        &ticks_info.yticks,
+                        grid_style.major_color,
+                        grid_style.major_lw,
+                        major_ls,
+                        false,
+                        font_scale,
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                    )?;
                 }
             }
+
+            // 绘制副网格线
+            if self.minor_grid_visible {
+                let minor_ls = grid_style.minor_ls.as_deref();
+                // 过滤掉与主刻度位置重叠的副刻度，避免副网格线覆盖主网格线
+                let xmin_filtered = ticks_info.xminor.as_ref().map(|minor| {
+                    crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.xticks)
+                });
+                let ymin_filtered = ticks_info.yminor.as_ref().map(|minor| {
+                    crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.yticks)
+                });
+                let show_x_minor = self.minor_grid_x_visible || !self.minor_grid_y_visible;
+                let show_y_minor = self.minor_grid_y_visible || !self.minor_grid_x_visible;
+                if show_x_minor && let Some(ref ticks) = xmin_filtered {
+                    crate::figure::axes_grid::draw_grid_lines(
+                        chart,
+                        true,
+                        ticks,
+                        grid_style.minor_color,
+                        grid_style.minor_lw,
+                        minor_ls,
+                        true,
+                        font_scale,
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                    )?;
+                }
+                if show_y_minor && let Some(ref ticks) = ymin_filtered {
+                    crate::figure::axes_grid::draw_grid_lines(
+                        chart,
+                        false,
+                        ticks,
+                        grid_style.minor_color,
+                        grid_style.minor_lw,
+                        minor_ls,
+                        true,
+                        font_scale,
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                    )?;
+                }
+            }
+
+            // 渲染网格上方的数据元素（折线、hist step 轮廓、误差棒、文本、饼图等）
+            crate::figure::axes_render_elements::render_elements(
+                chart,
+                &self.elements,
+                crate::figure::axes_render_elements::GridLayer::AboveGrid,
+                font_scale,
+                marker_scale,
+                xlog,
+                ylog,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                bitmap,
+            )?;
         }
 
-        // 手动绘制顶部和右侧 spine（plotters mesh 只绘制左侧和底部边框）
-        {
-            let spine_col = parse_color(&self.spine_color, 0).unwrap_or(RgbColor(0, 0, 0));
-            let spine_rgb = to_plotters_color(spine_col);
-            let spine_lw = self.spine_linewidth.round().max(1.0) as u32;
-            let spine_style: ShapeStyle = spine_rgb.stroke_width(spine_lw);
-            if self.spine_top {
-                chart
-                    .draw_series(std::iter::once(PathElement::new(
-                        vec![(x_min, y_max), (x_max, y_max)],
-                        spine_style,
-                    )))
-                    .map_err(|e| {
-                        PyRuntimeError::new_err(format!("Failed to draw top spine: {}", e))
-                    })?;
-            }
-            if self.spine_right {
-                chart
-                    .draw_series(std::iter::once(PathElement::new(
-                        vec![(x_max, y_min), (x_max, y_max)],
-                        spine_style,
-                    )))
-                    .map_err(|e| {
-                        PyRuntimeError::new_err(format!("Failed to draw right spine: {}", e))
-                    })?;
-            }
-        }
-
-        // matplotlib 默认 axisbelow='line'：先绘制归属网格下方的填充元素
-        // （bar/barh/hist 柱、fill_between、stackplot、scatter、axhspan/axvspan），
-        // 使随后绘制的网格线覆盖其上。
-        crate::figure::axes_render_elements::render_elements(
-            chart,
-            &self.elements,
-            crate::figure::axes_render_elements::GridLayer::BelowGrid,
-            font_scale,
-            marker_scale,
-            xlog,
-            ylog,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            bitmap,
-        )?;
-
-        // 绘制主网格线
-        if self.grid_visible {
-            let major_ls = grid_style.major_ls.as_deref();
-            if self.grid_axis == "both" || self.grid_axis == "x" {
-                crate::figure::axes_grid::draw_grid_lines(
-                    chart,
-                    true,
-                    &ticks_info.xticks,
-                    grid_style.major_color,
-                    grid_style.major_lw,
-                    major_ls,
-                    false,
-                    font_scale,
-                    x_min,
-                    x_max,
-                    y_min,
-                    y_max,
-                )?;
-            }
-            if self.grid_axis == "both" || self.grid_axis == "y" {
-                crate::figure::axes_grid::draw_grid_lines(
-                    chart,
-                    false,
-                    &ticks_info.yticks,
-                    grid_style.major_color,
-                    grid_style.major_lw,
-                    major_ls,
-                    false,
-                    font_scale,
-                    x_min,
-                    x_max,
-                    y_min,
-                    y_max,
-                )?;
-            }
-        }
-
-        // 绘制副网格线
-        if self.minor_grid_visible {
-            let minor_ls = grid_style.minor_ls.as_deref();
-            // 过滤掉与主刻度位置重叠的副刻度，避免副网格线覆盖主网格线
-            let xmin_filtered = ticks_info.xminor.as_ref().map(|minor| {
-                crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.xticks)
-            });
-            let ymin_filtered = ticks_info.yminor.as_ref().map(|minor| {
-                crate::figure::axes_grid::filter_minor_ticks(minor, &ticks_info.yticks)
-            });
-            let show_x_minor = self.minor_grid_x_visible || !self.minor_grid_y_visible;
-            let show_y_minor = self.minor_grid_y_visible || !self.minor_grid_x_visible;
-            if show_x_minor && let Some(ref ticks) = xmin_filtered {
-                crate::figure::axes_grid::draw_grid_lines(
-                    chart,
-                    true,
-                    ticks,
-                    grid_style.minor_color,
-                    grid_style.minor_lw,
-                    minor_ls,
-                    true,
-                    font_scale,
-                    x_min,
-                    x_max,
-                    y_min,
-                    y_max,
-                )?;
-            }
-            if show_y_minor && let Some(ref ticks) = ymin_filtered {
-                crate::figure::axes_grid::draw_grid_lines(
-                    chart,
-                    false,
-                    ticks,
-                    grid_style.minor_color,
-                    grid_style.minor_lw,
-                    minor_ls,
-                    true,
-                    font_scale,
-                    x_min,
-                    x_max,
-                    y_min,
-                    y_max,
-                )?;
-            }
-        }
-
-        // 渲染网格上方的数据元素（折线、hist step 轮廓、误差棒、文本、饼图等）
-        crate::figure::axes_render_elements::render_elements(
-            chart,
-            &self.elements,
-            crate::figure::axes_render_elements::GridLayer::AboveGrid,
-            font_scale,
-            marker_scale,
-            xlog,
-            ylog,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            bitmap,
-        )?;
-
-        if let Some(loc) = &self.legend_loc.clone()
-            && !self.legend_labels.is_empty()
-        {
+        if !self.legend_labels.is_empty() {
             let legend_facecolor = self
                 .legend_facecolor
                 .as_deref()
@@ -3862,7 +4284,7 @@ impl Axes {
                 .map(|c| parse_color(c, 0).unwrap_or(RgbColor(180, 180, 180)));
             crate::figure::axes_legend::draw_legend(
                 chart,
-                Some(loc),
+                self.legend_loc.as_ref(),
                 &self.legend_labels,
                 &self.elements,
                 font_scale,
@@ -3894,7 +4316,6 @@ impl Axes {
             y_min,
             y_max,
         )?;
-
         Ok(())
     }
 

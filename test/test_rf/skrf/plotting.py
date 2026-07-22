@@ -562,13 +562,13 @@ def plot_polar(theta: NumberLike, r: NumberLike,
     Parameters
     ----------
     theta : array-like
-        angular data to plot
+        angular data to plot (in radians)
     r : array-like
         radial data to plot
     x_label : string or None, optional
-        x-axis label. Default is None.
+        x-axis label. Default is None (unused in polar plots).
     y_label : string or None, optional.
-        y-axis label. Default is None
+        y-axis label. Default is None (unused in polar plots).
     title : string or None, optional.
         plot title. Default is None.
     show_legend : Boolean, optional.
@@ -586,47 +586,26 @@ def plot_polar(theta: NumberLike, r: NumberLike,
     plot_smith : plot complex data on smith chart
 
     """
- 
     if ax is None:
-        # no Axes passed
-        # if an existing (polar) plot is already present, grab and use its Axes
-        # otherwise, create a new polar plot and use that Axes
-        if not plt.get_fignums() or not plt.gcf().axes or plt.gca().name != 'polar':
-            ax = plt.figure().add_subplot(projection='polar')
-        else:
-            ax = plt.gca()
+        _, ax = plt.subplots(subplot_kw={'projection': 'polar'})
     else:
-        if ax.name != 'polar':
-            # The projection of an existing axes can't be changed,
-            # since specifying a projection when creating an axes determines the
-            # axes class you get, which is different for each projection type.
-            # So, passing a axe projection not polar is probably undesired
-            warnings.warn(
-                f"Projection of the Axes passed as `ax` is not 'polar' but is {
-                    ax.name}." + "See rsplotlib documentation to create a polar plot or call this function without the `ax` parameter.",
-                stacklevel=2)
+        ax_proj = getattr(ax, 'projection', 'rectilinear')
+        if ax_proj != 'polar':
+            _, ax = plt.subplots(subplot_kw={'projection': 'polar'})
 
     ax.plot(theta, r, *args, **kwargs)
-
-    if x_label is not None:
-        ax.set_xlabel(x_label)
-
-    if y_label is not None:
-        ax.set_ylabel(y_label)
 
     if title is not None:
         ax.set_title(title)
 
     if show_legend:
-        # only show legend if they provide a label
         if 'label' in kwargs:
             _legend(ax)
 
-    if axis_equal:
-        ax.axis('equal')
-
     if plt.isinteractive():
         plt.draw()
+
+    return ax
 
 
 def plot_complex_rectangular(

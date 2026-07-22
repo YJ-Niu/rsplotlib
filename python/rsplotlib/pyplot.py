@@ -1624,7 +1624,6 @@ def text(x, y, s, fontdict=None, **kwargs):
         fontdict: 字体属性字典 (可选)
         **kwargs: 支持 fontsize, color/c, family, ha, va, rotation, dx, dy 等参数
     """
-    import sys
     fontsize = kwargs.get('fontsize', fontdict.get('fontsize', 12) if fontdict else 12)
     color = kwargs.get('color', fontdict.get('color', 'black') if fontdict else 'black')
     c = kwargs.get('c', None)
@@ -2151,6 +2150,7 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
         fig, ax = plt.subplots()                    # 单图 (1x1)
         fig, axes = plt.subplots(2, 2)             # 2x2 网格
         fig, axes = plt.subplots(1, 2, figsize=(10, 5))  # 自定义尺寸
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})  # 极坐标
 
     Args:
         nrows: 子图行数 (默认 1)
@@ -2158,7 +2158,7 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
         figsize: 图的尺寸 (width, height), 单位英寸
         dpi: 分辨率 (每英寸点数)
         squeeze: 是否压缩返回的 Axes 数组维度 (默认 True), 与 matplotlib 一致
-        **kwargs: 其他关键字参数
+        **kwargs: 其他关键字参数，包括 subplot_kw 用于传递子图参数如 projection
 
     Returns:
         与 matplotlib 一致的返回值 (squeeze=True 时):
@@ -2166,9 +2166,8 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
         - 1xN 或 Nx1: (Figure, 一维 ndarray[Axes])
         - MxN: (Figure, 二维 ndarray[Axes]), 支持 axs[i, j] 索引
     """
-    # width_ratios/height_ratios 可作为 subplots 的直接关键字，或经 gridspec_kw 传入
-    # （与 matplotlib 一致，直接关键字优先）。传给 Rust 侧 subplots 以按比例分配行/列尺寸。
     gridspec_kw = kwargs.get('gridspec_kw') or {}
+    subplot_kw = kwargs.get('subplot_kw') or {}
     width_ratios = kwargs.get('width_ratios')
     if width_ratios is None:
         width_ratios = gridspec_kw.get('width_ratios')
@@ -2179,7 +2178,8 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
     height_ratios = _to_list(height_ratios) if height_ratios is not None else None
 
     layout = kwargs.get('layout')
-    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi, width_ratios, height_ratios, layout)
+    projection = subplot_kw.get('projection')
+    result = _rsplotlib.subplots(nrows, ncols, figsize, dpi, width_ratios, height_ratios, layout, projection)
     fig = result[0]
 
     # gridspec_kw={'wspace':.., 'hspace':..} 与 matplotlib 一致地控制子图间距，
@@ -2897,6 +2897,11 @@ def _patch_axes():
 
     _rs.Axes.secondary_xaxis = _secondary_xaxis
     _rs.Axes.secondary_yaxis = _secondary_yaxis
+
+    def _get_projection(self):
+        return self.get_projection()
+
+    _rs.Axes.projection = property(_get_projection)
 
     # plot: 支持单参数 ax.plot(y)、格式字符串 ax.plot(y, 'o')/ax.plot(x, y, 'o:r')
     # 以及一次多条线 ax.plot(x1, y1, fmt1, x2, y2, ...)。

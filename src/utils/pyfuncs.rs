@@ -1115,7 +1115,7 @@ pub fn subplot<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None, layout=None))]
+#[pyo3(signature = (nrows=1, ncols=1, figsize=None, dpi=None, width_ratios=None, height_ratios=None, layout=None, projection=None))]
 pub fn subplots<'a>(
     py: Python<'a>,
     nrows: usize,
@@ -1125,6 +1125,7 @@ pub fn subplots<'a>(
     width_ratios: Option<Vec<f64>>,
     height_ratios: Option<Vec<f64>>,
     layout: Option<&'a str>,
+    projection: Option<&'a str>,
 ) -> PyResult<Bound<'a, PyTuple>> {
     let total = nrows * ncols;
     let dpi_val = dpi.unwrap_or(DEFAULT_DPI);
@@ -1136,6 +1137,8 @@ pub fn subplots<'a>(
         (w, h)
     };
 
+    let proj_str = projection.unwrap_or("rectilinear").to_string();
+
     let mut fig = Figure::new();
     fig.nrows = nrows;
     fig.ncols = ncols;
@@ -1143,7 +1146,6 @@ pub fn subplots<'a>(
     fig.height = height.max(100);
     fig.dpi = dpi_val;
     fig.constrained_layout = layout.is_some_and(|l| l == "constrained" || l == "tight");
-    // 仅在长度与网格轨道数一致时采纳比例，否则回退等分（渲染阶段据此按比例分配行/列）。
     let width_ratios = width_ratios.filter(|r| r.len() == ncols);
     let height_ratios = height_ratios.filter(|r| r.len() == nrows);
     fig.width_ratios = width_ratios.clone();
@@ -1154,7 +1156,12 @@ pub fn subplots<'a>(
     set_current_figure(fig_py.clone_ref(py));
 
     if total == 1 {
-        let ax_py = Py::new(py, Axes::new())?;
+        let mut ax = Axes::new();
+        ax.projection = proj_str.clone();
+        if proj_str == "polar" {
+            ax.aspect = Some(1.0);
+        }
+        let ax_py = Py::new(py, ax)?;
         init_axes_self_py(&ax_py, py);
         {
             let mut fig_ref = fig_py.borrow_mut(py);
@@ -1172,9 +1179,13 @@ pub fn subplots<'a>(
         {
             let mut fig_ref = fig_py.borrow_mut(py);
             for k in 0..total {
-                let ax_py = Py::new(py, Axes::new())?;
+                let mut ax = Axes::new();
+                ax.projection = proj_str.clone();
+                if proj_str == "polar" {
+                    ax.aspect = Some(1.0);
+                }
+                let ax_py = Py::new(py, ax)?;
                 init_axes_self_py(&ax_py, py);
-                // 行号 0 在最上方：row_edges 沿「自顶部量」的正方向，top = 1 - start。
                 let (col_start, col_size) = col_edges[k % ncols];
                 let (row_start, row_size) = row_edges[k / ncols];
                 let top = 1.0 - row_start;

@@ -236,7 +236,13 @@ impl Figure {
         } else {
             (0.0, 1.0, 0.0, 1.0)
         };
-        let ax = Axes::new();
+        let projection = spec
+            .getattr("projection")
+            .ok()
+            .and_then(|p| p.extract::<String>().ok())
+            .unwrap_or_else(|| "rectilinear".to_string());
+        let mut ax = Axes::new();
+        ax.projection = projection;
         let ax_py = Py::new(py, ax)?;
         crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
@@ -246,6 +252,7 @@ impl Figure {
     }
 
     #[doc = "按图内相对位置直接添加子图。\n\nleft/bottom/width/height 均为 [0,1] 使用区（去除四周边距后的绘图区）分数，\n与 matplotlib Figure.add_axes([left, bottom, width, height]) 语义一致。\nsubplot_mosaic 等自定义布局据此放置带间距的跨格子图。"]
+    #[pyo3(signature = (left, bottom, width, height, projection=None))]
     fn add_axes(
         &mut self,
         py: Python,
@@ -253,8 +260,10 @@ impl Figure {
         bottom: f64,
         width: f64,
         height: f64,
+        projection: Option<String>,
     ) -> PyResult<Py<Axes>> {
-        let ax = Axes::new();
+        let mut ax = Axes::new();
+        ax.projection = projection.unwrap_or_else(|| "rectilinear".to_string());
         let ax_py = Py::new(py, ax)?;
         crate::utils::pyfuncs::init_axes_self_py(&ax_py, py);
         self.axes_list.push(ax_py.clone_ref(py));
@@ -756,8 +765,18 @@ impl Figure {
             let mut max_left_ext = 0u32; // 右列子图向左延伸像素（y 刻度值 + y 标签）
             let mut max_x_half = 0u32; // 有右邻居的子图最右 x 刻度值半宽像素
             for (i, ax_py) in self.axes_list.iter().enumerate() {
+                let ((x_min, x_max), (y_min, y_max));
+                {
+                    let ax = ax_py.borrow(py);
+                    ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
+                    let is_polar = ax.projection.eq_ignore_ascii_case("polar");
+                    if is_polar && ax.polar_bounds.is_none() {
+                        drop(ax);
+                        let mut ax_mut = ax_py.borrow_mut(py);
+                        ax_mut.polar_bounds = Some(((x_min, x_max), (y_min, y_max)));
+                    }
+                }
                 let ax = ax_py.borrow(py);
-                let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
                 let col = i % self.ncols;
                 let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
                 let tick_label_h = tick_font_size.ceil() as u32;
@@ -866,10 +885,24 @@ impl Figure {
         let row_edges = track_edges(self.nrows, self.height_ratios.as_deref(), grid_hspace);
 
         for (i, ax_py) in self.axes_list.iter().enumerate() {
+            let ((x_min, x_max), (y_min, y_max));
+            let is_polar;
+            {
+                let ax = ax_py.borrow(py);
+                ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
+                is_polar = ax.projection.eq_ignore_ascii_case("polar");
+            }
+            if is_polar {
+                let mut ax_mut = ax_py.borrow_mut(py);
+                if ax_mut.polar_bounds.is_none() && ax_mut.ylim.is_none() {
+                    ax_mut.polar_bounds = Some(((x_min, x_max), (y_min, y_max)));
+                }
+                if ax_mut.aspect.is_none() {
+                    ax_mut.aspect = Some(1.0);
+                }
+            }
+
             let ax = ax_py.borrow(py);
-
-            let ((x_min, x_max), (y_min, y_max)) = ax.compute_bounds();
-
             let (left, right, bottom, top) = if is_regular_grid {
                 let (col_start, col_size) = col_edges[i % self.ncols];
                 let (row_start, row_size) = row_edges[i / self.ncols];
@@ -1107,6 +1140,8 @@ impl Figure {
                 .y_label_area_size(y_label_actual)
                 .build_cartesian_2d(x_min..x_max, y_min..y_max)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to build chart: {}", e)))?;
+
+            let _is_polar = ax.projection.eq_ignore_ascii_case("polar");
 
             // 将标题信息存到 axes 之外用：传入 subplot 在 figure 中的位置，用于在 figure root 上绘制
             let fig_subplot_info = (x0, y0, sub_w, sub_h);

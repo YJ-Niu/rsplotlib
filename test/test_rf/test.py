@@ -747,6 +747,9 @@ fitted_network = Q.fitted_network(res, frequency=new_freq)
 resonator.plot_s_mag(label='Parallel RLC ', lw=2)
 fitted_network.plot_s_mag(label='Fitted Model', lw=2, ls='--')
 ssaver('./test/test_rf/test47.png')
+fig.clear()
+plt.clf()
+plt.close()
 
 diam, S_V, S_T = Q.Q_circle()
 fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
@@ -756,4 +759,18 @@ ax.plot(np.angle(S_V), np.abs(S_V), 'ko')
 ax.plot(np.angle(S_T), np.abs(S_T), 'ko')
 ax.text(np.angle(S_T), 0.8*np.abs(S_T), '$S_T$')
 ax.text(np.angle(S_V), 1.1*np.abs(S_V), '$S_V$')
+
 ssaver('./test/test_rf/test48.png')
+
+print(111, np.angle(S_T), 0.8*np.abs(S_T), S_T)
+print(222, np.angle(S_V), 1.1*np.abs(S_V), S_V)
+
+
+BW = Q.BW
+pprint(80, f'Bandwidth: {BW} Hz')
+
+# fig, ax = plt.subplots()
+# resonator.plot_s_db(label='Parallel RLC ', lw=2, ax=ax)
+# ax.axvspan(xmin=Q.f_L-Q.BW/2, xmax=Q.f_L+Q.BW/2, alpha=0.3, label='Bandwidth')
+# ax.legend()
+# ssaver('./test/test_rf/test49.png')
