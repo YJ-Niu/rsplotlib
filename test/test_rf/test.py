@@ -14,6 +14,8 @@ from skrf.plotting import save_all_figs
 from skrf import plotting
 from skrf.circuit import Circuit
 from skrf.calibration.deembedding import OpenShort
+from skrf.constants import to_meters
+from skrf.media import MLine, RectangularWaveguide
 
 
 def pprint(n, ss):
@@ -783,9 +785,9 @@ f_rg58 = Frequency(1, 5, 101, 'GHz')
 rg58 = Coaxial(f_rg58, Dint=0.91e-3, Dout=2.95e-3, epsilon_r=2.3, z0_port=50)
 pprint(81, rg58)
 
-pprint(82, f'z0 = {rg58.z0[0]}')
-pprint(83, f'z0_port = {rg58.z0_port[0]}')
-pprint(84, f'gamma = {rg58.gamma[0]}')
+print(f'z0 = {rg58.z0[0]}')
+print(f'z0_port = {rg58.z0_port[0]}')
+print(f'gamma = {rg58.gamma[0]}')
 
 rg58_line = rg58.line(100, unit='mm', name='100 mm, z0 Ohm')
 pprint(85, rg58_line)
@@ -804,3 +806,63 @@ axes[1].set_title('Insertion Loss')
 plt.tight_layout()
 rf.stylely()
 ssaver('./test/test_rf/test50.png')
+
+rf.stylely()
+
+# create frequency axes
+f_mlin = Frequency(0.1, 10, 1001, 'GHz')
+f_wr10 = Frequency(75, 110, 1001, 'GHz')
+
+# create media from parameters
+mlin = MLine(f_mlin, w=3e-3, h=1.6e-3, t=35e-6, ep_r=4.5, rho=1.68e-08)
+print(mlin)
+wr10 = RectangularWaveguide(f_wr10, a=to_meters(100, 'mil'), b=to_meters(50, 'mil'), ep_r=1.0, rho=1.68e-08)
+print(wr10)
+
+# create the transmission line networks
+mlin_100 = mlin.line(100e-3, unit='m', name='mlin 100mm')
+print(mlin_100)
+wr10_100 = wr10.line(100e-3, unit='m', name='wr10 100mm')
+print(wr10_100)
+
+# prepare figure
+fig1, axes = plt.subplots(2, 2, figsize=(8, 6))
+rf.stylely()
+
+# plot miscrostipline
+mlin_100.plot_s_mag(0, 0, ax=axes[0, 0])
+mlin_100.plot_s_db(1, 0, ax=axes[0, 1])
+
+# plot rectangular waveguide
+wr10_100.plot_s_mag(0, 0, ax=axes[1, 0])
+wr10_100.plot_s_db(1, 0, ax=axes[1, 1])
+
+# resize plot nicely
+axes[0, 0].set_ylim((-1, 1))
+axes[1, 0].set_ylim((-1, 1))
+fig1.tight_layout()
+ssaver('./test/test_rf/test51.png')
+
+fig1.clear()
+plt.close()
+
+fig2, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+# plot miscrostipline
+axes[0].plot(mlin_100.frequency.f_scaled, mlin_100.z0[:, 0].real, marker='.', label=f'line {mlin_100.name}  port z0')
+axes[0].plot(mlin.frequency.f_scaled, mlin.z0.real, label='media mlin characteristic z0')
+axes[0].set_ylabel('Impedance (Ohm)')
+axes[0].set_xlabel(f'Frequency ({mlin.frequency.unit})')
+axes[0].set_title('Microstripline')
+axes[0].legend()
+
+# plot rectangular waveguide
+axes[1].plot(wr10_100.frequency.f_scaled, wr10_100.z0[:, 0].real, marker='.', label=f'line {wr10_100.name} port z0')
+axes[1].plot(wr10.frequency.f_scaled, wr10.z0.real, label='media wr10 characteristic z0')
+axes[1].set_ylabel('Impedance (Ohm)')
+axes[1].set_xlabel(f'Frequency ({wr10.frequency.unit})')
+axes[1].set_title('WR-10')
+axes[1].legend()
+
+# resize plot nicely
+fig2.tight_layout()
+ssaver('./test/test_rf/test52.png')
