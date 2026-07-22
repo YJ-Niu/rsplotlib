@@ -329,7 +329,7 @@ where
         // 内边距：取数据范围的 2%，避免图例紧贴坐标轴边界
         let px = x_range * 0.02;
         let py = y_range * 0.02;
-        let (box_x1, box_y1, box_x2, mut box_y2) = match loc.as_str() {
+        let (box_x1, mut box_y1, box_x2, box_y2) = match loc.as_str() {
             "upper right" => box_from_anchor(
                 HPos::Right,
                 VPos::Top,
@@ -441,7 +441,7 @@ where
         let max_legend_height = y_max - y_min - 2.0 * py;
         let legend_height = entry_height * entry_count as f64 + 2.0 * pad_v_px * y_per_px;
         if legend_height > max_legend_height {
-            box_y2 = box_y1 + max_legend_height;
+            box_y1 = box_y2 - legend_height;
         }
 
         // 图例框背景/边框样式：默认沿用半透明白底 + 浅灰边框；
@@ -501,7 +501,7 @@ where
                 break;
             }
             let y_pos = box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - i as f64 * entry_height;
-            let y_pos = y_pos.max(box_y1 + pad_v_px * y_per_px + entry_height * 0.5);
+
             let x_line_start = box_x1 + pad_h_px * x_per_px;
             let x_line_end = x_line_start + handle_px * x_per_px;
             let x_text = x_line_end + gap_px * x_per_px;

@@ -848,6 +848,7 @@ plt.close()
 
 fig2, axes = plt.subplots(1, 2, figsize=(10, 3.5))
 # plot miscrostipline
+rf.stylely()
 axes[0].plot(mlin_100.frequency.f_scaled, mlin_100.z0[:, 0].real, marker='.', label=f'line {mlin_100.name}  port z0')
 axes[0].plot(mlin.frequency.f_scaled, mlin.z0.real, label='media mlin characteristic z0')
 axes[0].set_ylabel('Impedance (Ohm)')
@@ -878,31 +879,32 @@ mlin_meas = MLine(f_mlin, w=3e-3, h=1.6e-3, t=35e-6, ep_r=4.5, rho=1.68e-08, z0_
 mlin_100_measured2 = mlin_meas.line(100e-3, unit='m', name='mlin 100mm z0_port')
 pprint(87, mlin_100_measured2)
 
-# # prepare figure
-# fig3, axes = plt.subplots(2, 2, figsize=(8, 6))
-# rf.stylely()
 
-# gs = axes[1, 0].get_gridspec()
-# for ax in axes[1, :]:
-#     ax.remove()
-# axbig = fig3.add_subplot(gs[1, :])
+# prepare figure
+fig3, axes = plt.subplots(2, 2, figsize=(8, 6))
+rf.stylely()
 
-# # plot return loss
-# mlin_100_measured1.plot_s_db(0, 0, ax=axes[0, 0])
-# mlin_100_measured2.plot_s_db(0, 0, ax=axes[0, 1])
+gs = axes[1, 0].get_gridspec()
+for ax in axes[1, :]:
+    ax.remove()
+axbig = fig3.add_subplot(gs[1, :])
 
-# # plot insertion loss
-# mlin_100_measured1.plot_s_db(1, 0, ax=axes[0, 1])
-# mlin_100_measured2.plot_s_db(1, 0, ax=axes[0, 1])
+# plot return loss
+mlin_100_measured1.plot_s_db(0, 0, ax=axes[0, 0])
+mlin_100_measured2.plot_s_db(0, 0, ax=axes[0, 1])
 
-# # plot port and characteristic impedances
-# axbig.plot(mlin_100_measured1.frequency.f_scaled, mlin_100_measured1.z0[:, 0].real, marker='d', markevery=30, label=f'line {mlin_100_measured1.name} z0')
-# axbig.plot(mlin_100_measured2.frequency.f_scaled, mlin_100_measured2.z0[:, 0].real, marker='x', markevery=30, label=f'line {mlin_100_measured2.name} z0')
-# axbig.plot(mlin.frequency.f_scaled, mlin.z0.real, label='media mlin z0')
-# axbig.set_ylabel('Impedance (Ohm)')
-# axbig.set_xlabel(f'Frequency ({mlin.frequency.unit})')
-# axbig.legend()
+# plot insertion loss
+mlin_100_measured1.plot_s_db(1, 0, ax=axes[0, 1])
+mlin_100_measured2.plot_s_db(1, 0, ax=axes[0, 1])
 
-# # resize plot nicely
-# fig3.tight_layout()
-# ssaver('./test/test_rf/test53.png')
+# plot port and characteristic impedances
+axbig.plot(mlin_100_measured1.frequency.f_scaled, mlin_100_measured1.z0[:, 0].real, marker='d', markevery=30, label=f'line {mlin_100_measured1.name} z0')
+axbig.plot(mlin_100_measured2.frequency.f_scaled, mlin_100_measured2.z0[:, 0].real, marker='x', markevery=30, label=f'line {mlin_100_measured2.name} z0')
+axbig.plot(mlin.frequency.f_scaled, mlin.z0.real, label='media mlin z0')
+axbig.set_ylabel('Impedance (Ohm)')
+axbig.set_xlabel(f'Frequency ({mlin.frequency.unit})')
+axbig.legend()
+
+# resize plot nicely
+fig3.tight_layout()
+ssaver('./test/test_rf/test53.png')
