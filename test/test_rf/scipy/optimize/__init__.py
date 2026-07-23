@@ -38,16 +38,14 @@ def fmin(func, x0, args=(), xtol=1e-4, ftol=1e-4, maxiter=None, maxfun=None,
     chi = 2.0
     psi = 0.5
     sigma = 0.5
-    nonzdelt = 0.1
+    nonzdelt = 0.05
     zdelt = 0.00025
     
     if initial_simplex is None:
         sim = np.empty((N + 1, N), dtype=float)
         sim[0] = x0
         for k in range(N):
-            y = np.empty(N, dtype=float)
-            for i in range(N):
-                y[i] = x0[i]
+            y = np.copy(x0)
             if np.abs(y[k]) > np.finfo(float).eps:
                 y[k] = (1 + nonzdelt) * y[k]
             else:
@@ -84,10 +82,6 @@ def fmin(func, x0, args=(), xtol=1e-4, ftol=1e-4, maxiter=None, maxfun=None,
         ind = np.argsort(fsim)
         sim = np.take(sim, ind, 0)
         fsim = np.take(fsim, ind, 0)
-    
-    ind = np.argsort(fsim)
-    fsim = np.take(fsim, ind, 0)
-    sim = np.take(sim, ind, 0)
     
     iterations = 1
     
@@ -137,8 +131,8 @@ def fmin(func, x0, args=(), xtol=1e-4, ftol=1e-4, maxiter=None, maxfun=None,
                             doshrink = 1
                     
                     if doshrink:
+                        sim[1:] = sim[0] + sigma * (sim[1:] - sim[0])
                         for j in one2np1:
-                            sim[j] = sim[0] + sigma * (sim[j] - sim[0])
                             fsim[j] = func(sim[j])
             
             iterations += 1
