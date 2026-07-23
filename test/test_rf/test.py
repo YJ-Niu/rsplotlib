@@ -16,7 +16,7 @@ from skrf.circuit import Circuit
 from skrf.calibration.deembedding import OpenShort
 from skrf.constants import to_meters
 from skrf.media import MLine, RectangularWaveguide
-
+from skrf.media import Freespace
 
 def pprint(n, ss):
     print(f"Network {n}")
@@ -948,3 +948,59 @@ axbig.legend(fontsize=6)
 # resize plot nicely
 fig4.tight_layout()
 ssaver('./test/test_rf/test54.png')
+
+# prepare
+fig5, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+rf.stylely()
+# plot
+for ep_r in [4.0, 4.5, 5.0]:
+    ml = MLine(f_mlin, w=3e-3, h=1.6e-3, t=35e-6, ep_r=ep_r, rho=1.68e-08, z0_port=50)
+    axes[0].plot(f_mlin.f_scaled, ml.z0.real, label=f'ep_r={ep_r:.1f}')
+    axes[1].plot(f_mlin.f_scaled, ml.beta, label=f'ep_r={ep_r:.1f}')
+
+axes[0].set_xlabel(f'Frequency ({f_mlin.unit})')
+axes[0].set_ylabel('Characteristic Impedance (Ohm)')
+axes[0].legend()
+axes[1].set_xlabel(f'Frequency ({f_mlin.unit})')
+axes[1].set_ylabel('Propagation Constant (rad/m)')
+
+axes[1].legend()
+
+# resize plot nicely
+fig5.tight_layout()
+ssaver('./test/test_rf/test55.png')
+
+freq = Frequency(10, 20, 101, 'GHz')
+air = Freespace(freq)
+pprint(88, air)
+
+pprint(89, air.z0[:2])
+
+# plane wave in Si
+si = Freespace(freq, ep_r=11.2)
+pprint(90, si.z0[:3])
+
+slab = air.thru() ** si.line(1, unit='cm') ** air.thru()
+slab.plot_s_db(n=0)
+ssaver('./test/test_rf/test56.png')
+
+pprint(91, mlin_meas.short(name='short'))
+pprint(92, mlin_meas.line(d=90, unit='deg', name='line'))
+
+delay_short = mlin_meas.line(d=90, unit='deg') ** mlin_meas.short()
+delay_short.name = 'delay short'
+pprint(93, delay_short)
+
+tee = mlin_meas.tee()
+delay_open = mlin_meas.delay_open(40, unit='deg')
+shunt_open = rf.network.connect(tee, 1, delay_open, 0)
+pprint(94, mlin_meas.shunt(delay_open))
+
+delay_short = lambda d: mlin_meas.line(d, unit='deg') ** mlin_meas.short()  # noqa: E731
+pprint(95, delay_short(90))
+
+def shunt_stub(med, d0, d1):
+    return med.line(d0, unit='deg')**med.shunt_delay_open(d1, unit='deg')
+
+
+pprint(96, shunt_stub(mlin_meas, 10, 90))

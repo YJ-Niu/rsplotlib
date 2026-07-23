@@ -12,26 +12,43 @@ import warnings as _warnings
 
 # ==================== 内部辅助函数 ====================
 
+def _round_float(value):
+    """对浮点数进行合理的四舍五入，避免精度问题"""
+    if isinstance(value, float):
+        rounded = round(value, 15)
+        rounded_int = round(rounded)
+        if abs(rounded - rounded_int) < 1e-10:
+            return rounded_int
+        return rounded
+    return value
+
+
 def _to_list(obj):
-    """将 numpy 数组或其他可迭代对象转换为 Python list"""
+    """将数组对象或其他可迭代对象转换为 Python list"""
     if obj is None:
         return None
     if hasattr(obj, 'tolist'):
-        return obj.tolist()
+        result = obj.tolist()
+        if isinstance(result, list):
+            return [_round_float(item) for item in result]
+        return _round_float(result)
     if isinstance(obj, (list, tuple)):
-        return list(obj)
-    return obj
+        return [_round_float(item) for item in obj]
+    return _round_float(obj)
 
 
 def _to_list_recursive(obj):
-    """递归转换嵌套的 numpy 数组为 Python list"""
+    """递归转换嵌套的数组对象为 Python list"""
     if obj is None:
         return None
     if hasattr(obj, 'tolist'):
-        return obj.tolist()
+        result = obj.tolist()
+        if isinstance(result, list):
+            return _to_list_recursive(result)
+        return _round_float(result)
     if isinstance(obj, (list, tuple)):
         return [_to_list_recursive(item) for item in obj]
-    return obj
+    return _round_float(obj)
 
 
 # ==================== 绘图函数 ====================

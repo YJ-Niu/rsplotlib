@@ -44,22 +44,33 @@ def rc(group, **kwargs):
 
 # ==================== 内部辅助函数 ====================
 
+def _round_float(value):
+    """对浮点数进行合理的四舍五入，避免精度问题"""
+    if isinstance(value, float):
+        rounded = round(value, 15)
+        rounded_int = round(rounded)
+        if abs(rounded - rounded_int) < 1e-10:
+            return rounded_int
+        return rounded
+    return value
+
+
 def _to_list(obj):
     """将数组对象或其他可迭代对象转换为 Python list
 
     支持带 tolist() 方法的数组对象、Python list、tuple 及其他可迭代对象。
-    标量值直接返回。
+    标量值直接返回。浮点数会进行合理的四舍五入处理。
     """
     if obj is None:
         return None
-    # 数组对象（带 tolist 方法）
     if hasattr(obj, 'tolist'):
-        return obj.tolist()
-    # Python list/tuple 或其他可迭代对象
+        result = obj.tolist()
+        if isinstance(result, list):
+            return [_round_float(item) for item in result]
+        return _round_float(result)
     if isinstance(obj, (list, tuple)):
-        return list(obj)
-    # 标量
-    return obj
+        return [_round_float(item) for item in obj]
+    return _round_float(obj)
 
 
 def _to_list_recursive(obj):
@@ -67,10 +78,13 @@ def _to_list_recursive(obj):
     if obj is None:
         return None
     if hasattr(obj, 'tolist'):
-        return obj.tolist()
+        result = obj.tolist()
+        if isinstance(result, list):
+            return _to_list_recursive(result)
+        return _round_float(result)
     if isinstance(obj, (list, tuple)):
         return [_to_list_recursive(item) for item in obj]
-    return obj
+    return _round_float(obj)
 
 
 def _buffer_kind(obj):

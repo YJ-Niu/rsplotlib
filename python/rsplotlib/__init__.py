@@ -15,7 +15,78 @@ MultipleLocator = ticker.MultipleLocator
 AutoMinorLocator = ticker.AutoMinorLocator
 
 __version__ = "0.3.3"
-# 从内部 Rust 模块导出字体注册函数
+
+
+def _round_float_for_display(value):
+    if isinstance(value, float):
+        rounded = round(value, 15)
+        rounded_int = round(rounded)
+        if abs(rounded - rounded_int) < 1e-10:
+            return rounded_int
+        return rounded
+    return value
+
+
+def _patch_rsnumpy_repr():
+    try:
+        import rsnumpy as np
+        ndarray_cls = np.ndarray
+        
+        original_repr = ndarray_cls.__repr__
+        original_str = ndarray_cls.__str__
+        
+        def patched_repr(self):
+            try:
+                data = self.tolist()
+                
+                def convert_to_python(obj):
+                    if hasattr(obj, 'tolist'):
+                        return convert_to_python(obj.tolist())
+                    elif isinstance(obj, list):
+                        return [convert_to_python(item) for item in obj]
+                    elif isinstance(obj, complex):
+                        real_part = _round_float_for_display(obj.real)
+                        imag_part = _round_float_for_display(obj.imag)
+                        return complex(real_part, imag_part)
+                    else:
+                        return _round_float_for_display(obj)
+                
+                converted_data = convert_to_python(data)
+                
+                def format_list(lst):
+                    if not lst:
+                        return "[]"
+                    first = lst[0]
+                    if isinstance(first, list):
+                        inner = ", ".join(format_list(item) for item in lst)
+                        return f"[{inner}]"
+                    elif isinstance(first, complex):
+                        formatted = [f"({x.real}+{x.imag}j)" for x in lst]
+                        return f"[{', '.join(formatted)}]"
+                    else:
+                        return str(lst)
+                
+                return format_list(converted_data)
+            except Exception:
+                ndarray_cls.__str__ = original_str
+                result = original_repr(self)
+                ndarray_cls.__str__ = patched_str
+                return result
+        
+        def patched_str(self):
+            try:
+                return patched_repr(self)
+            except Exception:
+                return original_str(self)
+        
+        ndarray_cls.__repr__ = patched_repr
+        ndarray_cls.__str__ = patched_str
+    except ImportError:
+        pass
+
+
+_patch_rsnumpy_repr()
+
 
 __all__ = list(_api_all) + [
     'pyplot', 'style', 'gridspec', 'ticker', 'text',
