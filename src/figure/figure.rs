@@ -1520,7 +1520,7 @@ impl Figure {
             let sup_size = 9.6 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
             let sup_bottom_pad = self.suptitle_pad * font_scale;
 
-            let sup_y = eff_top * total_h - sup_bottom_pad;
+            let sup_y = eff_top * total_h + sup_bottom_pad;
             let sup_x = total_w / 2.0;
 
             crate::utils::mathtext::draw_math_area(

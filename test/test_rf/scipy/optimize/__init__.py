@@ -3,8 +3,9 @@
 
 # Legacy functions - provide a simple fmin implementation to avoid import issues
 import rsnumpy as np
-import warnings
+# import warnings
 from scipy._lib._testutils import PytestTester
+# from scipy.optimize import minimize
 
 
 class _MaxFuncCallError(RuntimeError):
@@ -88,8 +89,7 @@ def fmin(func, x0, args=(), xtol=1e-4, ftol=1e-4, maxiter=None, maxfun=None,
     
     while fcalls[0] < maxfun and iterations < maxiter:
         try:
-            if (np.max(np.ravel(np.abs(sim[1:] - sim[0]))) <= xtol and
-                    np.max(np.abs(fsim[0] - fsim[1:])) <= ftol):
+            if (np.max(np.ravel(np.abs(sim[1:] - sim[0]))) <= xtol and np.max(np.abs(fsim[0] - fsim[1:])) <= ftol):
                 break
             
             xbar = np.add.reduce(sim[:-1], 0) / N
@@ -164,6 +164,17 @@ def fmin(func, x0, args=(), xtol=1e-4, ftol=1e-4, maxiter=None, maxfun=None,
 
 
 # Deprecated namespaces, to be removed in v2.0.0
+
+
+class OptimizeResult(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def __setattr__(self, name, value):
+        self[name] = value
 
 
 __all__ = [s for s in dir() if not s.startswith('_')]
