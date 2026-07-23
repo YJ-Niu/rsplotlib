@@ -941,10 +941,7 @@ axbig.plot(wr10_100_measured2.frequency.f_scaled, wr10_100_measured2.z0[:, 0].re
            marker='x', markevery=30, label=f'line {wr10_100_measured2.name} z0')
 axbig.plot(wr10.frequency.f_scaled, wr10.z0.real, label='media wr10 z0')
 axbig.set_ylabel('Impedance (Ohm)')
-s1 = wr10_100_measured1.z0[:, 0].real + wr10_100_measured2.z0[:, 0].real
-ss = max(s1) - min(s1)
 # axbig.set_ylim(min(s1)-ss*0.1, max(s1)+ss*0.1)
-print(222, min(s1)-ss*0.1, max(s1)+ss*0.1)
 axbig.set_xlabel(f'Frequency ({wr10.frequency.unit})')
 axbig.legend(fontsize=6)
 

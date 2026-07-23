@@ -45,14 +45,14 @@ def rc(group, **kwargs):
 # ==================== 内部辅助函数 ====================
 
 def _to_list(obj):
-    """将 rsnumpy 数组或其他可迭代对象转换为 Python list
+    """将数组对象或其他可迭代对象转换为 Python list
 
-    支持 rsnumpy ndarray、Python list、tuple 及其他可迭代对象。
+    支持带 tolist() 方法的数组对象、Python list、tuple 及其他可迭代对象。
     标量值直接返回。
     """
     if obj is None:
         return None
-    # rsnumpy ndarray 或其他 rsnumpy 数组对象
+    # 数组对象（带 tolist 方法）
     if hasattr(obj, 'tolist'):
         return obj.tolist()
     # Python list/tuple 或其他可迭代对象
@@ -63,7 +63,7 @@ def _to_list(obj):
 
 
 def _to_list_recursive(obj):
-    """递归转换嵌套的 rsnumpy 数组为 Python list"""
+    """递归转换嵌套的数组对象为 Python list"""
     if obj is None:
         return None
     if hasattr(obj, 'tolist'):
@@ -77,17 +77,16 @@ def _buffer_kind(obj):
     """返回 obj 的 dtype kind 字符（numpy 约定 'f'/'i'/'u'/'b'/'M'/'S'/'U'/'c'…），
     无法判定时返回 None。
 
-    优先读廉价的 obj.dtype.kind：rsnumpy 的 __array_interface__ 属性每次访问都会即时把
+    优先读廉价的 obj.dtype.kind：第三方数组库的 __array_interface__ 属性每次访问都会即时把
     整个缓冲区序列化成 bytes（百万点约 2.6ms/次，随后被丢弃），而 dtype 访问是 O(1)。
-    仅当对象没有 dtype（如 Python list、标量、或 numpy 之外仅实现数组接口的第三方缓冲）
-    时，才回退读取 __array_interface__ 的 typestr。真实 numpy 的 __array_interface__ 为
-    指针形式、开销极小，不受此影响。
+    仅当对象没有 dtype（如 Python list、标量、或仅实现数组接口的第三方缓冲）
+    时，才回退读取 __array_interface__ 的 typestr。
     """
     dt = None
     try:
         dt = getattr(obj, 'dtype', None)
     except Exception:
-        # rsnumpy 对 datetime64[h]/timedelta64 等 dtype 的 .dtype 属性会抛 TypeError
+        # 第三方数组库对 datetime64[h]/timedelta64 等 dtype 的 .dtype 属性会抛 TypeError
         # （非 AttributeError，getattr 默认值挡不住）。此处按"无法判定"处理，落到
         # __array_interface__ 回退——这些非数值 dtype 本就应返回非 fiub kind。
         dt = None
@@ -134,8 +133,8 @@ def _numeric_buffer_1d_len(obj):
 def _reduce_to_float(v):
     """把数组规约结果 (.min()/.max()) 归一为 Python float。
 
-    rsnumpy 的规约返回类型不稳定：np.linspace / np.array([...]) 返回 Python float，
-    而 np.random.rand / randint 返回 0 维 ndarray（float() 报错，但 .item() 可取标量）。
+    数组库的规约返回类型可能不稳定：有时返回 Python float，
+    有时返回 0 维 ndarray（float() 报错，但 .item() 可取标量）。
     """
     if isinstance(v, (int, float)):
         return float(v)
@@ -231,7 +230,7 @@ def _maybe_dates_to_num(seq):
 
 
 def _is_scatter_sequence(obj):
-    """判断是否为序列（含 rsnumpy 数组），但排除字符串标量。"""
+    """判断是否为序列（含数组对象），但排除字符串标量。"""
     if obj is None or isinstance(obj, str):
         return False
     return hasattr(obj, 'tolist') or isinstance(obj, (list, tuple))
@@ -314,7 +313,7 @@ def _normalize_scatter(x, y, s, c, marker, label, alpha, edgecolor, linewidth, k
         can_fast = clen is not None and not (clen in (3, 4) and clen != n)
         fast_done = False
         if can_fast:
-            # rsnumpy 的 .min()/.max() 返回类型不稳定（float 或 0 维 ndarray），
+            # 数组库的 .min()/.max() 返回类型可能不稳定（float 或 0 维 ndarray），
             # 用 _reduce_to_float 归一；缺少 min/max 等异常时回退慢路径确保不崩。
             try:
                 lo = _reduce_to_float(c.min()) if vmin is None else float(vmin)
@@ -1029,25 +1028,12 @@ def _parse_fmt(fmt):
 
 
 def _implicit_x(y):
-    """plot(y) 的隐式横坐标 = [0, 1, ..., len(y)-1]。
-
-    优先用 rsnumpy.arange(n, dtype=float) 生成 float64 数组：可经 PEP 3118 缓冲协议
-    零拷贝下沉 Rust，并让 _categorical/_maybe_dates_to_num/_to_seq 走数值缓冲快路径，
-    跳过对 list(range(n)) 的逐元素扫描与百万级 Python int 提取（大数据热路径）。
-    值 0.0..n-1 与 range 完全一致（n ≤ 2^53 精确），渲染输出逐字节不变。
-
-    rsnumpy 不可用（ImportError）或 arange 异常时回退到 list(range(n))；y 无 len 时
-    沿用原逻辑（可迭代取 list(y)，否则空）。
-    """
+    """plot(y) 的隐式横坐标 = [0, 1, ..., len(y)-1]。"""
     try:
         n = len(y)
     except Exception:
         return list(y) if hasattr(y, '__iter__') else []
-    try:
-        import rsnumpy as _rsnp
-        return _rsnp.arange(n, dtype=float)
-    except Exception:
-        return list(range(n))
+    return list(range(n))
 
 
 def _parse_plot_args(args, kwargs):
@@ -1129,7 +1115,7 @@ def plot(*args, **kwargs):
         # 分类坐标：字符串 x/y 映射到 0,1,2,... 位置，字符串作为刻度标签。
         x, x_tick_labels = _categorical(x)
         y, y_tick_labels = _categorical(y)
-        # 将 rsnumpy 数组转换为 Python list，避免类型不一致问题
+        # 将数组对象转换为 Python list，避免类型不一致问题
         x = _to_list(x)
         y = _to_list(y)
         result = _route_to_ax('plot', _call, x, y, **call_kwargs)
@@ -1155,7 +1141,7 @@ def scatter(x, y, s=None, c=None, marker=None, cmap=None, norm=None,
         plt.scatter(x, y, edgecolors='black', linewidths=1.5)  # 黑色描边
 
     Args:
-        x, y: 长度相同的数据点坐标 (list / tuple / rsnumpy array)
+        x, y: 长度相同的数据点坐标 (list / tuple / array)
         s: 点大小, 默认 100; 可为标量或与点数等长的数组
         c: 颜色; 默认蓝色; 可为颜色字符串、颜色字符串数组、数值数组
            (配合 cmap) 或 RGB(A) 二维行数组
@@ -1219,7 +1205,7 @@ def bar(x, height, width=0.8, color=None, label=None):
     """绘制柱状图。
 
     Args:
-        x: 每个柱子的 x 坐标 (list / tuple / rsnumpy array)
+        x: 每个柱子的 x 坐标 (list / tuple / array)
         height: 每个柱子的高度 (y 值)
         width: 柱子的宽度 (默认 0.8)
         color: 柱子的颜色字符串
@@ -2068,10 +2054,10 @@ def minorticks_off():
 # ==================== 子图与布局 ====================
 
 class _AxesArray:
-    """轻量 Axes 网格容器，模拟 rsnumpy 数组的常用索引方式。
+    """轻量 Axes 网格容器，模拟 numpy 数组的常用索引方式。
 
     使 plt.subplots 的返回值支持 axs[i, j] 元组索引、axs[i] 行/元素索引、
-    迭代、.flat / .flatten() / .ravel()，且不依赖 rsnumpy 或 rsnumpy。
+    迭代、.flat / .flatten() / .ravel()，且不依赖任何第三方数组库。
 
     内部以行主序扁平 list 保存 Axes；shape 为 (n,) 表示一维、(nrows, ncols)
     表示二维。
@@ -2105,7 +2091,7 @@ class _AxesArray:
         return self.shape[0]
 
     def __iter__(self):
-        # 一维：逐个产出 Axes；二维：逐行产出子 _AxesArray（与 rsnumpy 一致）。
+        # 一维：逐个产出 Axes；二维：逐行产出子 _AxesArray（与 numpy 一致）。
         if self.ndim == 1:
             return iter(self._data)
         ncols = self.shape[1]
@@ -2248,7 +2234,7 @@ def subplots(nrows=1, ncols=1, figsize=None, dpi=None, squeeze=True, **kwargs):
         flat = list(result[1])
 
     # 依 matplotlib 的 squeeze 规则确定返回形状：单行 / 单列压成一维，其余保持二维。
-    # 用模块自带的 _AxesArray 提供 axs[i, j] 索引，不依赖 rsnumpy / rsnumpy。
+    # 用模块自带的 _AxesArray 提供 axs[i, j] 索引，不依赖任何第三方数组库。
     if squeeze and nrows == 1:
         return fig, _AxesArray(flat, (ncols,))
     if squeeze and ncols == 1:
@@ -3099,10 +3085,11 @@ def _patch_axes():
                 # 画折线（不带 marker）
                 lines.append(_orig_plot(self, x, y, **call_kwargs))
                 # 用 scatter 绘制每隔 markevery 的标记点
-                import rsnumpy as np
-                x_arr = np.asarray(x)
-                y_arr = np.asarray(y)
-                indices = np.arange(0, len(x_arr), markevery)
+                x_list = x if isinstance(x, list) else list(x)
+                y_list = y if isinstance(y, list) else list(y)
+                indices = list(range(0, len(x_list), markevery))
+                x_sub = [x_list[i] for i in indices]
+                y_sub = [y_list[i] for i in indices]
                 scatter_kwargs = {'marker': marker, 's': markersize ** 2}
                 if markerfacecolor is not None:
                     scatter_kwargs['c'] = markerfacecolor
@@ -3110,7 +3097,7 @@ def _patch_axes():
                     scatter_kwargs['c'] = linecolor
                 if markeredgecolor is not None:
                     scatter_kwargs['edgecolor'] = markeredgecolor
-                self.scatter(x_arr[indices], y_arr[indices], **scatter_kwargs)
+                self.scatter(x_sub, y_sub, **scatter_kwargs)
             else:
                 # 正常绘制（所有点都标记）
                 lines.append(_orig_plot(self, x, y, **call_kwargs))
@@ -3327,7 +3314,7 @@ def _patch_axes():
     _rs.Axes.set_xlim = _set_xlim
     _rs.Axes.set_ylim = _set_ylim
 
-    # set_xticks / set_yticks: 支持第二个位置参数 labels，且把 rsnumpy 数组归一为 list。
+    # set_xticks / set_yticks: 支持第二个位置参数 labels，且把数组对象归一为 list。
     _orig_set_xticks = _rs.Axes.set_xticks
     _orig_set_yticks = _rs.Axes.set_yticks
 
@@ -3412,18 +3399,17 @@ def _patch_axes():
     _orig_text = _rs.Axes.text
 
     def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, rotation=None, horizontalalignment='center', verticalalignment='center', transform=None, bbox=None, clip_on=None, alpha=None, weight=None, dx=None, dy=None, **kwargs):
-        import rsnumpy as np
         if not isinstance(s, str):
             s = str(s)
         if fontsize is None:
             fontsize = kwargs.get('size', None)
         if hasattr(x, 'item'):
             x = x.item()
-        elif isinstance(x, np.ndarray):
+        elif not isinstance(x, (int, float)):
             x = float(x)
         if hasattr(y, 'item'):
             y = y.item()
-        elif isinstance(y, np.ndarray):
+        elif not isinstance(y, (int, float)):
             y = float(y)
         if rotation is None:
             rotation = 0.0
@@ -3455,7 +3441,7 @@ def _patch_axes():
             xycoords = 'data'
         if textcoords is not None and not isinstance(textcoords, str):
             textcoords = None
-        # 处理 xy 中的 0-d rsnumpy 数组
+        # 处理 xy 中的 0-d 数组对象
         if isinstance(xy, (list, tuple)) and len(xy) >= 2:
             def _to_float(v):
                 if hasattr(v, 'ndim') and v.ndim == 0:
@@ -3512,7 +3498,7 @@ def _patch_axes():
             setter = getattr(self, 'set_' + key, None)
             if setter is None:
                 continue
-            # rsnumpy/rsnumpy 数组转 list, 供 Rust 侧 Vec<f64> 提取; tuple 保留给 set_xlim 处理
+            # 数组对象转 list, 供 Rust 侧 Vec<f64> 提取; tuple 保留给 set_xlim 处理
             if hasattr(value, 'tolist'):
                 value = value.tolist()
             setter(value)
@@ -3559,12 +3545,8 @@ def _patch_axes():
             linestyle = collection.linestyle if collection.linestyle else '-'
             alpha = collection.alpha if collection.alpha else None
             
-            try:
-                import rsnumpy as np
-                if isinstance(segments, np.ndarray):
-                    segments = segments.tolist()
-            except ImportError:
-                pass
+            if hasattr(segments, 'tolist'):
+                segments = segments.tolist()
             
             for i, seg in enumerate(segments):
                 if len(seg) >= 2:
