@@ -130,7 +130,7 @@ def _is_sequence(obj):
 
 
 def _flatten(values):
-    """递归展开嵌套序列 / rsnumpy 数组为一维浮点列表。"""
+    """递归展开嵌套序列 / 数组对象为一维浮点列表。"""
     if values is None:
         return []
     if hasattr(values, 'tolist'):

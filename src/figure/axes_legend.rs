@@ -259,6 +259,7 @@ fn rounded_rect_points(x1: f64, y1: f64, x2: f64, y2: f64, rx: f64, ry: f64) -> 
 /// - `framealpha`: 图例框背景不透明度，`None` 时用默认 0.85
 /// - `edgecolor`: 图例框边框色，`None` 时用默认浅灰
 /// - `fontsize`: 图例文字基础字号（point），`None` 时用默认 11.0
+/// - `ncol`: 图例列数，`None` 时根据位置和空间自动判定
 #[allow(clippy::too_many_arguments)]
 pub fn draw_legend<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
@@ -276,6 +277,7 @@ pub fn draw_legend<DB: DrawingBackend>(
     framealpha: Option<f64>,
     edgecolor: Option<RgbColor>,
     fontsize: Option<f64>,
+    ncol: Option<usize>,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
@@ -308,22 +310,42 @@ where
         let base_fs = fontsize.unwrap_or(11.0);
         let label_fs = scale_font(base_fs * DEFAULT_FONT_SCALE, font_scale);
 
-        // 横向布局（像素）：左内边距 | 线条/marker 样本 | 间隙 | 文字 | 右内边距。
-        // 宽度按最宽标签自适应，避免长文字溢出图例框。
         let pad_h_px = 8.0 * font_scale;
         let handle_px = label_fs * 1.6;
         let gap_px = 3.5 * font_scale;
+        let col_gap_px = 12.0 * font_scale;
         let max_text_px = legend_labels
             .iter()
             .map(|(label, ..)| mathtext::measure_plain(label.as_str(), None, label_fs).0)
             .fold(0.0_f64, f64::max);
-        let legend_width = (pad_h_px + handle_px + gap_px + max_text_px + pad_h_px) * x_per_px;
+        let entry_width_px = pad_h_px + handle_px + gap_px + max_text_px + pad_h_px;
 
-        // 纵向：行高取字号的 1.6 倍（既不拥挤也不稀疏），上下各留 0.55 倍字号内边距。
         let row_px = label_fs * 1.6;
         let pad_v_px = label_fs * 0.55;
         let entry_height = row_px * y_per_px;
-        let legend_height = entry_height * entry_count as f64 + 2.0 * pad_v_px * y_per_px;
+
+        let ncol = if let Some(n) = ncol {
+            n.max(1).min(entry_count)
+        } else {
+            let available_width_px = (pw as f64 - 40.0 * font_scale).max(100.0);
+            let single_col_width = entry_width_px;
+            let max_possible_ncol = (available_width_px / single_col_width).floor() as usize;
+
+            let is_center_loc = matches!(loc.as_str(), "upper center" | "lower center" | "center");
+
+            if is_center_loc && max_possible_ncol >= 2 && entry_count >= 2 {
+                max_possible_ncol.min(entry_count)
+            } else {
+                1
+            }
+        };
+
+        let rows_per_col = entry_count.div_ceil(ncol);
+        let legend_width_px = entry_width_px * ncol as f64 + col_gap_px * (ncol - 1) as f64;
+        let legend_height_px = row_px * rows_per_col as f64 + 2.0 * pad_v_px;
+
+        let legend_width = legend_width_px * x_per_px;
+        let legend_height = legend_height_px * y_per_px;
 
         // 已知固定位置直接定位；其余（含 "best" 与未识别值）自动避让数据。
         // 内边距：取数据范围的 2%，避免图例紧贴坐标轴边界
@@ -495,14 +517,17 @@ where
         // 否则固定的数据单位间隔在不同数据范围下会失效（例如整段被一个"虚线"填满而显示为实线）。
         let dash_unit = font_scale * x_per_px;
 
-        let max_entries = legend_labels.len();
         for (i, (label, color, ls, marker_opt, lw, alpha)) in legend_labels.iter().enumerate() {
-            if i >= max_entries {
-                break;
-            }
-            let y_pos = box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - i as f64 * entry_height;
+            let col = i / rows_per_col;
+            let row = i % rows_per_col;
 
-            let x_line_start = box_x1 + pad_h_px * x_per_px;
+            let col_offset_px = col as f64 * (entry_width_px + col_gap_px);
+            let x_col_start = box_x1 + col_offset_px * x_per_px;
+
+            let y_pos =
+                box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - row as f64 * entry_height;
+
+            let x_line_start = x_col_start + pad_h_px * x_per_px;
             let x_line_end = x_line_start + handle_px * x_per_px;
             let x_text = x_line_end + gap_px * x_per_px;
 
