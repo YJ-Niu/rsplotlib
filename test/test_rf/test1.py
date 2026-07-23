@@ -12,8 +12,8 @@ def ssaver(name):
 
 
 rf.stylely()
-MSL100_raw = rf.Network('./test/test_rf/skrf/data/MSL100.s2p')
-MSL200_raw = rf.Network('./test/test_rf/skrf/data/MSL200.s2p')
+MSL100_raw = rf.Network('./skrf/data/MSL100.s2p')
+MSL200_raw = rf.Network('./skrf/data/MSL200.s2p')
 
 # # Keep only the data from 1MHz to 5GHz
 MSL100 = MSL100_raw['1-5000mhz']
