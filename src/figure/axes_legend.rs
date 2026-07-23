@@ -331,9 +331,18 @@ where
             let single_col_width = entry_width_px;
             let max_possible_ncol = (available_width_px / single_col_width).floor() as usize;
 
-            let is_center_loc = matches!(loc.as_str(), "upper center" | "lower center" | "center");
+            let is_top_bottom_loc = matches!(
+                loc.as_str(),
+                "upper center"
+                    | "lower center"
+                    | "upper right"
+                    | "upper left"
+                    | "lower right"
+                    | "lower left"
+                    | "best"
+            );
 
-            if is_center_loc && max_possible_ncol >= 2 && entry_count >= 2 {
+            if is_top_bottom_loc && max_possible_ncol >= 2 && entry_count >= 2 {
                 max_possible_ncol.min(entry_count)
             } else {
                 1
