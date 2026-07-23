@@ -1180,8 +1180,7 @@ class OnePort(Calibration):
                 f'ideals for {self.family} should be 1-port Networks')
         if not all([n.number_of_ports == 1 for n in self.measured]):
             raise ValueError(
-                f'measured networks for {
-                    self.family} should be 1-port Networks')
+                f'measured networks for {self.family} should be 1-port Networks')
 
     def run(self):
         """ Run the calibration algorithm.
@@ -6402,9 +6401,7 @@ class MultiportSOLT(MultiportCal):
 
         if len(ideals) < nports - 1:
             raise ValueError(
-                f"Invalid number of ideals. Expected at least {
-                    nports - 1} but got {
-                    len(ideals)}.")
+                f"Invalid number of ideals. Expected at least {nports - 1} but got {len(ideals)}.")
 
         self.thru_ports = []
         for thru in ideals[:nports-1]:

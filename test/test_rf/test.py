@@ -18,6 +18,8 @@ from skrf.constants import to_meters
 from skrf.media import MLine, RectangularWaveguide
 from skrf.media import Freespace
 from scipy.optimize import fmin
+from skrf.network import concat_ports, connect
+from skrf.constants import c
 
 def pprint(n, ss):
     print(f"Network {n}")
@@ -1032,3 +1034,245 @@ d0 = 120, 40  # initial guess
 d_opt = fmin(cost, (120, 40))
 
 pprint(97, d_opt)
+
+freq = rf.Frequency(1e-3, 10, 1001, 'ghz')
+cpw = CPW(freq, w=0.6e-3, s=0.25e-3, ep_r=10.6, z0_port=50)
+
+l1 = cpw.line(20, unit='mm')
+c1 = cpw.shunt_capacitor(C=0.15e-12)
+l1 = connect(c1, 1, l1, 0)
+li = concat_ports([l1, l1], port_order='second')
+Fix = li
+Fix.name = 'Fix'
+Fix.nudge(1e-4)
+Left = Fix
+# flip fixture for right side
+Right = Fix.flipped()
+l2 = cpw.line(50, 'mm')
+DUT = concat_ports([l2, l2], port_order='second')
+DUT.name = 'DUT'
+DUT.nudge(1e-5)
+Meas = Left ** DUT ** Right
+Meas.name = 'Meas'
+Meas.add_noise_polar(1e-5, 2)
+
+DUTd = Left.inv ** Meas ** Right.inv
+DUTd.name = 'DUTd'
+fig, axarr = plt.subplots(2, 2, sharex=True, figsize=(10, 6))
+
+ax = axarr[0, 0]
+Meas.plot_s_db(m=0, n=0, ax=ax)
+DUTd.plot_s_db(m=0, n=0, ax=ax)
+DUT.plot_s_db(m=0, n=0, ax=ax, ls=':', color='0.0')
+ax.set_title('Return Loss')
+ax.legend(loc='lower center', ncol=3)
+ax.grid(True)
+
+ax = axarr[0, 1]
+Meas.plot_s_db(m=2, n=0, ax=ax)
+DUTd.plot_s_db(m=2, n=0, ax=ax)
+DUT.plot_s_db(m=2, n=0, ax=ax, ls=':', color='0.0')
+ax.set_title('Insertion Loss')
+ax.legend(loc='lower center', ncol=3)
+ax.grid(True)
+
+ax = axarr[1, 0]
+Meas.plot_s_db(m=1, n=0, ax=ax)
+DUTd.plot_s_db(m=1, n=0, ax=ax)
+DUT.plot_s_db(m=1, n=0, ax=ax, ls=':', color='0.0')
+ax.set_title('Isolation')
+ax.legend(loc='lower center', ncol=3)
+ax.grid(True)
+
+ax = axarr[1, 1]
+Meas.plot_s_deg(m=2, n=0, ax=ax)
+DUTd.plot_s_deg(m=2, n=0, ax=ax, marker='o', markevery=25)
+DUT.plot_s_deg(m=2, n=0, ax=ax, ls=':', color='0.0')
+ax.set_title('Insertion Loss')
+ax.legend(loc='lower center', ncol=3)
+ax.grid(True)
+
+fig.tight_layout()
+ssaver('./test/test_rf/test57.png')
+
+# need this ideal s4p file to create a coax with a floating outer conductor
+xformer = r"./test/test_rf/skrf/data/Ideal_4port_xformer_hi_res.s4p"
+xformer_ntwk = rf.Network(xformer)
+xformer_ntwk1 = xformer_ntwk["0.001-2ghz"]  # band center is thus 1 GHz
+
+freq = xformer_ntwk1.frequency
+z0_ports = 25
+
+beta = freq.w / c
+line_branch = rf.media.DefinedGammaZ0(frequency=freq, z0=z0_ports, gamma=0+beta*1j)
+
+# d is 75 mm in length, which is quarterwave at 1 GHz in air
+# d = line_branch.theta_2_d(90, deg=True, bc=True)
+branch1 = line_branch.line(90, unit="deg", name="branch1")
+
+lossy_line = line_branch.resistor(0.1, name="res")
+port1 = Circuit.Port(freq, name="port1", z0=25)
+port2 = Circuit.Port(freq, name="port2", z0=25)
+
+# creating a 25-Ohm 2-port transmission line, with realistic insertion loss
+# insertion loss is equivalent to a 0.1-Ohm series resistor
+connections = [
+    [(port1, 0), (lossy_line, 0)],
+    [(lossy_line, 1), (branch1, 0)],
+    [(branch1, 1), (port2, 0)],
+]
+
+C = Circuit(connections)
+
+line1 = C.network
+line1.name = "top line"
+line2 = C.network
+line2.name = "bottom line"
+
+line = rf.media.DefinedGammaZ0(frequency=freq, z0=50)
+ferrite_resistor = line.resistor(333, name="res")
+
+port1a = Circuit.Port(frequency=freq, name="port1a", z0=50)
+port2a = Circuit.Port(frequency=freq, name="port2a", z0=25)
+port3a = Circuit.Port(frequency=freq, name="port3a", z0=25)
+ground = Circuit.Ground(frequency=freq, name="ground", z0=50)
+
+# creating a 4-port floating coax by feeding two 25-Ohm lines (twisted pair of wires)
+# with an ideal transformer, to ensure the differential nature of the twisted pair, as per Fig.2
+# the 333-Ohm resistor models the loading of the ferrite sleeve,
+# upon the outer conductor of the 4-port coax line
+conn = [
+    [(port1a, 0), (xformer_ntwk1, 0)],
+    [(xformer_ntwk1, 1), (line1, 0)],
+    [(line1, 1), (port2a, 0)],
+    [(ground, 0), (xformer_ntwk1, 2), (ferrite_resistor, 0)],
+    [(xformer_ntwk1, 3), (line2, 0)],
+    [(line2, 1), (ferrite_resistor, 1), (port3a, 0)],
+]
+
+C1 = Circuit(conn)
+balun = C1.network
+balun.name = "ideal balun"
+fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+
+balun.plot_s_db(ax=ax1, m=0, n=0, lw=2)  # S11
+balun.plot_s_db(ax=ax1, m=1, n=1, lw=2)  # S22
+ax1.set_ylim(-60, 0)
+
+balun.plot_s_db(ax=ax2, m=1, n=0, lw=2)  # S21
+ax2.set_ylim(-4, 0)
+
+fig.suptitle("Ideal 50-Ohm balun", pad=0)
+ssaver('./test/test_rf/test58.png')
+
+freq1 = rf.Frequency(start=0.01, stop=2, unit=('GHz'), npoints=2001)
+beta = freq1.w / c
+
+line1 = rf.media.DefinedGammaZ0(frequency=freq1, z0=50, gamma=0+beta*1j)
+
+ferrite_resistor = line1.resistor(333, name='res')  # model ferrite sleeve as a parallel 333 Ohm resistor
+Rp_circuit = ferrite_resistor
+
+# define a floating 4-port transmission line, using a new element in ver 1.4 of Scikit-rf
+line4p = line1.line_floating(90, unit='deg', z0=50, name='line4p')
+port1 = Circuit.Port(frequency=freq1, name='port1', z0=50)
+port2 = Circuit.Port(frequency=freq1, name='port2', z0=25)
+port3 = Circuit.Port(frequency=freq1, name='port3', z0=25)
+ground = Circuit.Ground(frequency=freq1, name='ground', z0=50)
+
+connections = [[(port1, 0), (line4p, 0)],
+               [(port2, 0), (line4p, 1)],
+               [(port3, 0), (line4p, 3), (Rp_circuit, 0)],
+               [(line4p, 2), (Rp_circuit, 1), (ground, 0)]]
+
+circuit = Circuit(connections)
+balun_circuit = circuit.network
+balun_circuit.name = 'ideal balun circuit'
+
+fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+
+balun_circuit.plot_s_db(ax=ax1, m=0, n=0, lw=2)  # S11
+balun_circuit.plot_s_db(ax=ax1, m=1, n=1, lw=2)  # S22
+ax1.set_ylim(-60, 0)
+
+balun_circuit.plot_s_db(ax=ax2, m=1, n=0, lw=2)  # S21
+ax2.set_ylim(-4, 0)
+
+fig.suptitle("Ideal 50-Ohm balun")
+plt.subplots_adjust(left=0.1, right=0.9, top=0.99, bottom=0.1)
+
+ssaver('./test/test_rf/test59.png')
+
+freq = rf.Frequency(start=0.01, stop=2, unit=('GHz'), npoints=2001)
+beta = freq.w/c
+
+line = rf.media.DefinedGammaZ0(frequency=freq, z0=50, gamma=0+beta*1j)
+ferrite_inductor = line.inductor(100e-9, name='ind')  # model ferrite sleeve as a parallel 100 nH inductor
+
+# define a floating 4-port transmission line
+line4p_a = line.line_floating(90, unit='deg', z0=50, name='line4p_a')
+line4p_b = line.line_floating(90, unit='deg', z0=50, name='line4p_b')
+
+port1 = Circuit.Port(frequency=freq, name='port1', z0=100)
+port2 = Circuit.Port(frequency=freq, name='port2', z0=25)
+ground1 = Circuit.Ground(frequency=freq, name='ground1', z0=50)
+ground2 = Circuit.Ground(frequency=freq, name='ground2', z0=50)
+
+connections = [[(port1, 0), (line4p_a, 0)],
+               [(port2, 0), (line4p_a, 1), (line4p_b, 1)],
+               [(line4p_a, 2), (line4p_b, 0), (ferrite_inductor, 0)],
+               [(line4p_a, 3), (ferrite_inductor, 1), (ground1, 0), (line4p_b, 3)],
+               [(line4p_b, 2), (ground2, 0)]]
+
+circuit = Circuit(connections)
+transf_circuit = circuit.network
+transf_circuit.name = 'ideal Guanella transformer circuit'
+
+transf_circuit.plot_s_db(m=0, n=0, lw=2)
+transf_circuit.plot_s_db(m=1, n=0, lw=2)
+transf_circuit.plot_s_db(m=1, n=1, lw=2)
+
+plt.ylim(-50, 10)
+ssaver('./test/test_rf/test60.png')
+
+# ideal transformer to convert differential ports to 50-Ohms single-ended
+xformer = r"/Users/user/Desktop/rust_project/rsplotlib/test/test_rf/skrf/data/Ideal_4port_xformer_hi_res.s4p"
+xformer_ntwk = rf.Network(xformer)
+xformer_ntwk1a = xformer_ntwk["0.001-2ghz"]
+
+freq = xformer_ntwk1a.frequency
+beta = freq.w/c
+
+line = rf.media.DefinedGammaZ0(frequency=freq, z0=50, gamma=0+beta*1j)
+C1 = line.capacitor(0.106e-12, name='cap')
+
+# define a floating 4-port transmission line
+line4p_a1 = line.line_floating(90, unit='deg', z0=50, name='line4p_a1')
+line4p_b1 = line.line_floating(90, unit='deg', z0=120, name='line4p_b1')
+line4p_c1 = line.line_floating(90, unit='deg', z0=10, name='line4p_c1')
+line4p_d1 = line.line_floating(90, unit='deg', z0=120, name='line4p_d1')
+
+port1a = Circuit.Port(frequency=freq, name='port1', z0=50)
+port2a = Circuit.Port(frequency=freq, name='port2', z0=50)
+ground1a = Circuit.Ground(frequency=freq, name='ground1', z0=50)
+ground2a = Circuit.Ground(frequency=freq, name='ground2', z0=50)
+
+connections = [[(port1a, 0), (line4p_a1, 0)],
+               [(ground1a, 0), (line4p_a1, 2), (line4p_b1, 0), (line4p_b1, 2), (line4p_b1, 3)],
+               [(line4p_a1, 1), (line4p_c1, 0)],
+               [(line4p_a1, 3), (line4p_b1, 1), (xformer_ntwk1a, 0)],
+               [(line4p_c1, 2), (xformer_ntwk1a, 2), (line4p_d1, 0)],
+               [(line4p_d1, 1), (line4p_c1, 3), (line4p_d1, 2), (line4p_d1, 3), (C1, 1), (xformer_ntwk1a, 3), (ground2a, 0)],
+               [(line4p_c1, 1), (C1, 0)],
+               [(xformer_ntwk1a, 1), (port2a, 0)]]
+
+circuit1 = Circuit(connections)
+Marchand_circuit = circuit1.network
+Marchand_circuit.name = 'Marchand circuit'
+
+Marchand_circuit.plot_s_db(m=0, n=0, lw=2)
+Marchand_circuit.plot_s_db(m=1, n=0, lw=2)
+Marchand_circuit.plot_s_db(m=1, n=1, lw=2)
+
+plt.ylim(-50, 10)
+ssaver('./test/test_rf/test61.png')

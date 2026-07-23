@@ -279,12 +279,7 @@ class Qfactor:
 
     def __str__(self) -> str:
         if self.fitted:
-            status = f"fitted: f_L={
-                float(
-                    self.f_L / self.f_multiplier):.3f}{
-                self.f_unit}, Q_L={
-                float(
-                    self.Q_L):.3f}"
+            status = f"fitted: f_L={float(self.f_L / self.f_multiplier):.3f}{self.f_unit}, Q_L={float(self.Q_L):.3f}"
         else:
             status = 'not fitted'
 

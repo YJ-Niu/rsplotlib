@@ -537,6 +537,11 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
         if hasattr(y_max_val, 'tolist'):
             y_max_val = y_max_val.tolist()
         
+        if isinstance(y_min_val, (list, tuple, np.ndarray)):
+            y_min_val = float(y_min_val[0])
+        if isinstance(y_max_val, (list, tuple, np.ndarray)):
+            y_max_val = float(y_max_val[0])
+        
         current_ylim = ax.get_ylim()
         new_ylim_min = min(current_ylim[0], y_min_val)
         new_ylim_max = max(current_ylim[1], y_max_val)
@@ -2015,12 +2020,7 @@ def plot_uncertainty_decomposition(self: NetworkSet, m: int = 0, n: int = 0):
     """
     if self.name is not None:
         plt.title(
-            f"Uncertainty Decomposition: {
-                self.name} $S_{
-                {
-                    self.ntwk_set[0]._fmt.trace_name(
-                        m,
-                        n)}} $")
+            f"Uncertainty Decomposition: {self.name} $S_{{{self.ntwk_set[0]._fmt.trace_name(m, n)}}}$")
     self.std_s.plot_s_mag(label='Distance', m=m, n=n)
     self.std_s_re.plot_s_mag(label='Real', m=m, n=n)
     self.std_s_im.plot_s_mag(label='Imaginary', m=m, n=n)

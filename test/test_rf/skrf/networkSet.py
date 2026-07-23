@@ -844,7 +844,7 @@ class NetworkSet:
         from rsnumpy import frompyfunc
 
         def gimme_norm(x):
-            return scipy.stats.norm(loc=0, scale=x).rvs(1)[0]
+            return np.random.normal(loc=0, scale=x)
         ugimme_norm = frompyfunc(gimme_norm, 1, 1)
 
         s_deg_rv = np.array(map(ugimme_norm, self.std_s_deg.s_re), dtype=float)

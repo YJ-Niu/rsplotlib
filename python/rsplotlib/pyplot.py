@@ -1907,16 +1907,18 @@ def title(label, fontdict=None, loc=None, **kwargs):
     return _rsplotlib.title(_render_mathtext(label), color, size, family, loc, pad)
 
 
-def suptitle(t, **kwargs):
+def suptitle(t, pad=5.0, **kwargs):
     """设置整个图形的总标题（居中显示在所有子图上方）。
 
     Args:
         t: 标题文本
+        pad: 标题与最上面子图之间的间距（默认5.0）
 
     用法:
         plt.suptitle("总标题")
+        plt.suptitle("总标题", pad=10.0)
     """
-    return _rsplotlib.gcf().suptitle(_render_mathtext(str(t)))
+    return _rsplotlib.gcf().suptitle(_render_mathtext(str(t)), pad)
 
 
 def grid(visible=True, **kwargs):
@@ -1962,11 +1964,13 @@ def legend(loc='best', **kwargs):
         framealpha: 图例框背景不透明度 (0-1)，默认 0.85
         edgecolor: 图例框边框色，默认浅灰
         fontsize: 图例文字字号 (point)，默认 11.0
+        ncol: 图例列数，默认根据位置和空间自动判定（上部/下部居中位置自动启用多列）
     """
     if isinstance(loc, int):
         loc = _LOC_MAP.get(loc, 'best')
     facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
-    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize)
+    ncol = kwargs.get('ncol')
+    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize, ncol)
 
 
 def _legend_frame_kwargs(kwargs):

@@ -21,7 +21,6 @@ from numbers import Number
 from pathlib import Path
 
 import rsnumpy as np
-import scipy
 from rsnumpy import any, array, gradient, imag, ones, real
 
 from .. import constants as _const
@@ -675,7 +674,6 @@ class Media(ABC):
         result = self.match(nports=2, s_def='power', **kwargs)
         s = np.zeros(shape=result.s.shape, dtype=complex)
         R = np.array(R)
-        z0 = result.z0[:, 0]
         
         Y = 1.0 / R
         y = np.zeros(shape=result.s.shape, dtype=complex)
@@ -1688,8 +1686,8 @@ class Media(ABC):
             a noise network
         """
         shape = (self.frequency.npoints, n_ports, n_ports)
-        phase_rv = scipy.stats.norm(loc=0, scale=phase_dev).rvs(size=shape)
-        mag_rv = scipy.stats.norm(loc=0, scale=mag_dev).rvs(size=shape)
+        phase_rv = np.random.normal(loc=0, scale=phase_dev, size=shape)
+        mag_rv = np.random.normal(loc=0, scale=mag_dev, size=shape)
 
         result = Network(**kwargs)
         result.frequency = self.frequency

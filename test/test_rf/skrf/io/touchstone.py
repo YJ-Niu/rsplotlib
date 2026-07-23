@@ -754,10 +754,7 @@ class Touchstone:
             format = self.format
         else:
             frequency = "hz"
-        return f"{frequency} {
-            self.parameter} {
-            format.upper()} r {
-            self.resistance}"
+        return f"{frequency} {self.parameter} {format.upper()} r {self.resistance}"
 
     def get_sparameter_names(self, format: SparamFormatT = "ri") -> list[str]:
         """

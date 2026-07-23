@@ -3979,9 +3979,8 @@ class Network:
                 standard deviation of phase [in degrees]
 
         """
-        phase_rv = scipy.stats.norm(
-            loc=0, scale=phase_dev).rvs(size=self.s.shape)
-        mag_rv = scipy.stats.norm(loc=0, scale=mag_dev).rvs(size=self.s.shape)
+        phase_rv = np.random.normal(loc=0, scale=phase_dev, size=self.s.shape)
+        mag_rv = np.random.normal(loc=0, scale=mag_dev, size=self.s.shape)
 
         phase = (self.s_deg + phase_rv)
         mag = self.s_mag + mag_rv
@@ -4004,10 +4003,8 @@ class Network:
                 standard deviation of phase [in degrees]
 
         """
-        phase_rv = scipy.stats.norm(
-            loc=0, scale=phase_dev).rvs(size=self.s[0].shape)
-        mag_rv = scipy.stats.norm(
-            loc=0, scale=mag_dev).rvs(size=self.s[0].shape)
+        phase_rv = np.random.normal(loc=0, scale=phase_dev, size=self.s[0].shape)
+        mag_rv = np.random.normal(loc=0, scale=mag_dev, size=self.s[0].shape)
 
         phase = (self.s_deg + phase_rv)
         mag = self.s_mag + mag_rv
@@ -4032,10 +4029,8 @@ class Network:
 
 
         """
-        phase_rv = scipy.stats.norm(loc=0, scale=phase_dev).rvs(
-            size=self.s.shape)
-        mag_rv = scipy.stats.norm(loc=1, scale=mag_dev).rvs(
-            size=self.s.shape)
+        phase_rv = np.random.normal(loc=0, scale=phase_dev, size=self.s.shape)
+        mag_rv = np.random.normal(loc=1, scale=mag_dev, size=self.s.shape)
         self.s = mag_rv * np.exp(1j * np.pi / 180. * phase_rv) * self.s
 
     def nudge(self, amount: float = 1e-12) -> Network:
@@ -5264,18 +5259,20 @@ class Network:
 
         for m in M:
             for n in N:
-                if 'label' in kwargs.keys():
-                    label_ = kwargs.pop('label')
+                call_kwargs = dict(kwargs)
+                if 'label' in call_kwargs.keys():
+                    label_ = call_kwargs.pop('label')
                 else:
                     label_ = f'S{m+1}{n+1}'
+                call_kwargs['label'] = label_
                 if conversion in ["time_impulse", "time_step"]:
                     current_show_legend = show_legend and (m == M[-1] and n == N[-1])
                     rfplt.plot_rectangular(x=x * 1e9,
                                            y=y[:, m, n],
                                            x_label=xlabel,
                                            y_label=y_label,
-                                           show_legend=current_show_legend, ax=ax, label=label_,
-                                           **kwargs)
+                                           show_legend=current_show_legend, ax=ax,
+                                           **call_kwargs)
 
                 else:
                     # plot the desired attribute vs frequency
@@ -5298,14 +5295,13 @@ class Network:
                         if logx:
                             ax.set_xscale('log')
 
-                    kwargs['label'] = label_
                     current_show_legend = show_legend and (m == M[-1] and n == N[-1])
                     rfplt.plot_rectangular(x=x,
                                            y=y,
                                            x_label=xlabel,
                                            y_label=y_label,
                                            show_legend=current_show_legend, ax=ax,
-                                           **kwargs)
+                                           **call_kwargs)
 
     plot_attribute.__doc__ = _plot_attribute_doc.format(
         attribute="conversion",
@@ -6701,9 +6697,7 @@ def s_error(
     # check that ntwkA and ntwkB have the same frequency grid.
     if ntwkA.frequency != ntwkB.frequency:
         raise ValueError(
-            f"Networks '{
-                ntwkA.name}' and '{
-                ntwkB.name}' must have the same frequency grid.")
+            f"Networks '{ntwkA.name}' and '{ntwkB.name}' must have the same frequency grid.")
 
     nports_square = ntwkA.nports**2
 

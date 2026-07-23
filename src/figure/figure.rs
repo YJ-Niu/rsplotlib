@@ -47,6 +47,7 @@ pub struct Figure {
     pub nrows: usize,
     pub ncols: usize,
     pub suptitle: String,
+    pub suptitle_pad: f64,
     pub width: u32,
     pub height: u32,
     pub dpi: f64,
@@ -94,6 +95,7 @@ impl Figure {
             nrows: 1,
             ncols: 1,
             suptitle: String::new(),
+            suptitle_pad: 5.0,
             width: w,
             height: h,
             dpi: DEFAULT_DPI,
@@ -174,8 +176,10 @@ impl Figure {
         self.dpi = dpi;
     }
 
-    fn suptitle(&mut self, text: String) {
+    #[pyo3(signature = (text, pad=5.0))]
+    fn suptitle(&mut self, text: String, pad: f64) {
         self.suptitle = text;
+        self.suptitle_pad = pad;
     }
 
     #[pyo3(signature = (left=None, right=None, bottom=None, top=None, wspace=None, hspace=None))]
@@ -749,23 +753,28 @@ impl Figure {
         let _nrows = self.nrows;
         let _ncols = self.ncols;
 
+        let total_w = actual_w as f64;
+        let total_h = actual_h as f64;
+
+        let sup_height_ratio = if !self.suptitle.is_empty() {
+            let sup_size = 9.6 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
+            let sup_top_pad = sup_size * 0.3;
+            let sup_bottom_pad = self.suptitle_pad * font_scale;
+            (sup_top_pad + sup_size + sup_bottom_pad) / total_h
+        } else {
+            0.0
+        };
+
         if !self.suptitle.is_empty() {
-            // plotters 的 titled() 无法承载二维排版，把可能含 IR 的文本降级为单行近似。
             let sup_plain = crate::utils::mathtext::to_plain(&self.suptitle);
             let sup_family = font_stack::select_family(&sup_plain);
             let sup_size = 9.6 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
-            // plotters 的 titled() 会把标题带贴着画布顶边（起始 y=0），显得太靠上。
-            // 先给顶部留一段内边距（约半个字号），使总标题下移，接近 matplotlib
-            // suptitle 默认 y≈0.98 的观感。返回的子区域丢弃，子图仍绘制在原 root 上，
-            // 布局不受影响。
             let sup_top_pad = (sup_size * 0.3).round() as i32;
+            let sup_bottom_pad = (self.suptitle_pad * font_scale).round() as i32;
             let _ = root
-                .margin(sup_top_pad, 0, 0, 0)
+                .margin(sup_top_pad, 0, sup_bottom_pad, 0)
                 .titled(&sup_plain, (sup_family.as_str(), sup_size));
         }
-
-        let total_w = actual_w as f64;
-        let total_h = actual_h as f64;
 
         // 规则网格：由 subplot/subplots 创建（格子数 == nrows×ncols 且多于 1 个）。
         // 仅此类网格在渲染阶段按坐标轴标签/刻度值宽度动态调整间距；add_subplot/gridspec
@@ -840,7 +849,7 @@ impl Figure {
                     self.subplot_left,
                     self.subplot_right,
                     self.subplot_bottom,
-                    self.subplot_top,
+                    (self.subplot_top - sup_height_ratio).max(0.0),
                 )
             };
 
@@ -1626,7 +1635,9 @@ impl Figure {
         // 有 suptitle 时，图顶预留其文字带 + pad，避免总标题压到顶行子图。
         if !self.suptitle.is_empty() {
             let sup_size = 12.0 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
-            margin_t_px = margin_t_px.max(sup_size * 1.5 + pad);
+            let sup_top_pad = sup_size * 0.3;
+            let sup_bottom_pad = self.suptitle_pad * font_scale;
+            margin_t_px = margin_t_px.max(sup_top_pad + sup_size + sup_bottom_pad + pad);
         }
         let eff_top = 1.0 - margin_t_px / total_h;
 

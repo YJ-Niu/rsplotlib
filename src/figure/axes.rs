@@ -805,6 +805,7 @@ pub struct Axes {
     pub legend_framealpha: Option<f64>,
     pub legend_edgecolor: Option<String>,
     pub legend_fontsize: Option<f64>,
+    pub legend_ncol: Option<usize>,
     pub xscale: String,
     pub yscale: String,
     pub xticks_val: Option<Vec<f64>>,
@@ -911,6 +912,7 @@ impl Clone for Axes {
             legend_framealpha: self.legend_framealpha,
             legend_edgecolor: self.legend_edgecolor.clone(),
             legend_fontsize: self.legend_fontsize,
+            legend_ncol: self.legend_ncol,
             xscale: self.xscale.clone(),
             yscale: self.yscale.clone(),
             xticks_val: self.xticks_val.clone(),
@@ -1086,6 +1088,7 @@ impl Axes {
             legend_framealpha: None,
             legend_edgecolor: None,
             legend_fontsize: None,
+            legend_ncol: None,
             xscale: "linear".to_string(),
             yscale: "linear".to_string(),
             xticks_val: None,
@@ -2047,7 +2050,7 @@ impl Axes {
         &self.title
     }
 
-    #[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]
+    #[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None, ncol=None))]
     pub fn legend(
         &mut self,
         loc: &str,
@@ -2055,6 +2058,7 @@ impl Axes {
         framealpha: Option<f64>,
         edgecolor: Option<String>,
         fontsize: Option<f64>,
+        ncol: Option<usize>,
     ) {
         self.legend_loc = Some(loc.to_string());
         if facecolor.is_some() {
@@ -2068,6 +2072,9 @@ impl Axes {
         }
         if fontsize.is_some() {
             self.legend_fontsize = fontsize;
+        }
+        if ncol.is_some() {
+            self.legend_ncol = ncol;
         }
     }
 
@@ -3638,6 +3645,7 @@ impl Axes {
                 self.legend_framealpha,
                 legend_edgecolor,
                 self.legend_fontsize,
+                self.legend_ncol,
             )?;
         }
 
@@ -4332,6 +4340,7 @@ impl Axes {
                 self.legend_framealpha,
                 legend_edgecolor,
                 self.legend_fontsize,
+                self.legend_ncol,
             )?;
         }
 

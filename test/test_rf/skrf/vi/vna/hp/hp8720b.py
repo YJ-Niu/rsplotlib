@@ -212,9 +212,7 @@ class HP8720B(VNA):
         valid = (self.min_hz <= hz) & (hz <= self.max_hz)
         if not np.all(valid):
             logger.warning(
-                f"set_frequency called with {
-                    np.sum(valid)}/{
-                    len(valid)} points out of VNA frequency range. " "Dropping them.")
+                f"set_frequency called with {np.sum(valid)}/{len(valid)} points out of VNA frequency range. Dropping them.")
             hz = hz[valid]
 
     def set_frequency_sweep(self, f_start, f_stop, f_npoints, **kwargs):
