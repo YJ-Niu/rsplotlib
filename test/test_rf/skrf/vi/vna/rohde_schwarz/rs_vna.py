@@ -309,13 +309,13 @@ class RSVNA(VNA):
         self.active_channel = self.ch1
 
         self.model = self.id.split(",")[1]
-        if self.model not in self._models:
-            logger.warning(
-                f"This model ({self.model}) has not been tested with "
-                "scikit-rf. By default, all features are turned on but older "
-                "instruments might be missing SCPI support for some commands "
-                "which will cause errors. Consider submitting an issue on GitHub to "
-                "help testing and adding support.")
+        # if self.model not in self._models:
+        #     logger.warning(
+        #         f"This model ({self.model}) has not been tested with "
+        #         "scikit-rf. By default, all features are turned on but older "
+        #         "instruments might be missing SCPI support for some commands "
+        #         "which will cause errors. Consider submitting an issue on GitHub to "
+        #         "help testing and adding support.")
 
     def _supports(self, feature: str) -> bool:
         model_config = self._models.get(self.model, self._models["default"])

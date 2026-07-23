@@ -13,6 +13,6 @@ module.
 
 """
 from . import calibration, calibrationSet, deembedding
-# from .calibration import *
+from .calibration import Calibration
 
-__all__ = ["calibration", "calibrationSet", "deembedding"]
+__all__ = ["calibration", "calibrationSet", "deembedding", "Calibration"]
