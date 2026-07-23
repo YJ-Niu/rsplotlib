@@ -938,10 +938,10 @@ pub fn set_dpi(py: Python, dpi: f64) -> PyResult<()> {
 
 /// 子图水平方向的基础间距（wspace）：相邻列间隔占单个子图宽度的比例。
 /// 当任一子图设置了 Y 轴标签时，渲染阶段会将其翻倍以容纳 y 刻度数字 + y 轴标签。
-pub const BASE_WSPACE: f64 = 0.24;
+pub const BASE_WSPACE: f64 = 0.15;
 /// 子图垂直方向的基础间距（hspace）：相邻行间隔占单个子图高度的比例。
 /// 当任一子图设置了 X 轴标签时，渲染阶段会将其翻倍以容纳 x 刻度数字 + x 轴标签 + 下方 title。
-pub const BASE_HSPACE: f64 = 0.42;
+pub const BASE_HSPACE: f64 = 0.25;
 
 /// 计算第 `row` 行、第 `col` 列子图在 [0,1] 网格坐标系中的位置 (left, right, bottom, top)。
 ///

@@ -1146,9 +1146,9 @@ impl Figure {
             let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
             // 字体高度：x 刻度值竖向占位、坐标轴标签旋转后横向占位的近似值。
             let tick_label_size = tick_font_size.ceil() as u32;
-            // plotters 刻度线长度 tick_px；刻度值离轴距离 label_dist = 2*tick_px（见 draw_impl）。
+            // plotters 刻度线长度 tick_px；刻度值离轴距离 label_dist = tick_px。
             let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
-            let label_dist = tick_px * 2;
+            let label_dist = tick_px;
 
             // 是否真正显示刻度值：由 labelleft/labelbottom 控制（与刻度线 tick_*、spine 可见性
             // 独立，对齐 matplotlib——隐藏 spine/刻度线仍可显示刻度标签）；未被 plt.{x,y}ticks([])
@@ -1675,7 +1675,7 @@ fn subplot_x_label_area(ax: &Axes, font_scale: f64, pad2: u32, pad6: u32) -> u32
     let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
     let tick_label_size = tick_font_size.ceil() as u32;
     let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
-    let label_dist = tick_px * 2;
+    let label_dist = tick_px;
     let x_shown = (ax.tick_bottom || ax.tick_top)
         && (ax.spine_bottom || ax.spine_top)
         && !matches!(ax.xticks_val, Some(ref v) if v.is_empty());
@@ -1752,7 +1752,7 @@ fn subplot_y_label_area(
     let tick_font_size = crate::figure::axes::scale_font(ax.tick_labelsize, font_scale);
     let tick_label_size = tick_font_size.ceil() as u32;
     let tick_px = (3.5 * font_scale).round().max(1.0) as u32;
-    let label_dist = tick_px * 2;
+    let label_dist = tick_px;
     let y_shown = ax.label_left && !matches!(ax.yticks_val, Some(ref v) if v.is_empty());
     let y_tick_area = if y_shown {
         let labels = y_tick_label_strings(py, ax, y_min, y_max);
