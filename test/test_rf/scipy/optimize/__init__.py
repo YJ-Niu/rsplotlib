@@ -6,6 +6,7 @@ import rsnumpy as np
 import warnings
 from scipy._lib._testutils import PytestTester
 
+
 class _MaxFuncCallError(RuntimeError):
     pass
 
@@ -166,6 +167,5 @@ def fmin(func, x0, args=(), xtol=1e-4, ftol=1e-4, maxiter=None, maxfun=None,
 
 
 __all__ = [s for s in dir() if not s.startswith('_')]
-
 test = PytestTester(__name__)
 del PytestTester

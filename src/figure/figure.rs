@@ -765,17 +765,6 @@ impl Figure {
             0.0
         };
 
-        if !self.suptitle.is_empty() {
-            let sup_plain = crate::utils::mathtext::to_plain(&self.suptitle);
-            let sup_family = font_stack::select_family(&sup_plain);
-            let sup_size = 9.6 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
-            let sup_top_pad = (sup_size * 0.3).round() as i32;
-            let sup_bottom_pad = (self.suptitle_pad * font_scale).round() as i32;
-            let _ = root
-                .margin(sup_top_pad, 0, sup_bottom_pad, 0)
-                .titled(&sup_plain, (sup_family.as_str(), sup_size));
-        }
-
         // 规则网格：由 subplot/subplots 创建（格子数 == nrows×ncols 且多于 1 个）。
         // 仅此类网格在渲染阶段按坐标轴标签/刻度值宽度动态调整间距；add_subplot/gridspec
         // 等自定义布局（nrows×ncols 与格子数不符）保持原位置不变。
@@ -1523,6 +1512,28 @@ impl Figure {
                     )?;
                 }
             }
+        }
+
+        if !self.suptitle.is_empty() {
+            let sup_plain = crate::utils::mathtext::to_plain(&self.suptitle);
+            let sup_family = font_stack::select_family(&sup_plain);
+            let sup_size = 9.6 * crate::figure::axes::DEFAULT_FONT_SCALE * font_scale;
+            let sup_bottom_pad = self.suptitle_pad * font_scale;
+
+            let sup_y = eff_top * total_h - sup_bottom_pad;
+            let sup_x = total_w / 2.0;
+
+            crate::utils::mathtext::draw_math_area(
+                &root,
+                sup_x,
+                sup_y,
+                &self.suptitle,
+                sup_size,
+                RGBColor(0, 0, 0),
+                Some(sup_family.as_str()),
+                crate::utils::mathtext::HAlign::Center,
+                crate::utils::mathtext::VAlign::Bottom,
+            )?;
         }
 
         root.present()
