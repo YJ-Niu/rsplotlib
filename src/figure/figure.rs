@@ -1025,6 +1025,7 @@ impl Figure {
             let ax_height = top - bottom;
 
             let is_special_layout = self.axes_list.len() == 3 && self.axes_positions.len() == 3;
+            let mut is_wide_subplot = false;
 
             if is_special_layout {
                 let mut wide_count = 0;
@@ -1045,6 +1046,7 @@ impl Figure {
                     if ax_height < 0.99 {
                         scale_h = 0.9;
                     }
+                    is_wide_subplot = ax_width > 0.9;
                 }
             }
 
@@ -1053,7 +1055,15 @@ impl Figure {
             sub_w *= scale_w;
             sub_h *= scale_h;
             x0 += (sub_w_original - sub_w) / 2.0;
-            y0 += (sub_h_original - sub_h) / 2.0;
+            if is_special_layout && scale_h < 1.0 {
+                if is_wide_subplot {
+                    // 底部宽子图：保持底边固定，仅从顶部减少高度
+                    y0 += sub_h_original - sub_h;
+                }
+                // 顶部子图：保持顶边固定，底部上移
+            } else {
+                y0 += (sub_h_original - sub_h) / 2.0;
+            }
 
             if sub_w <= 0.0 || sub_h <= 0.0 {
                 drop(ax);
