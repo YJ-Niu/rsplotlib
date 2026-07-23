@@ -199,10 +199,14 @@ Low-level routines
 """  # noqa: E501
 
 
+# Import commonly used functions
+from scipy.linalg._decomp_cholesky import cholesky, cho_factor, cho_solve
+from scipy.linalg._misc import LinAlgError, LinAlgWarning
+from rsnumpy.linalg import issymmetric
+
 # Deprecated namespaces, to be removed in v2.0.0
 
 __all__ = [s for s in dir() if not s.startswith('_')]
-
 
 from scipy._lib._testutils import PytestTester
 test = PytestTester(__name__)

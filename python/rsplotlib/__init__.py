@@ -53,6 +53,9 @@ def _patch_rsnumpy_repr():
                 
                 converted_data = convert_to_python(data)
                 
+                if isinstance(converted_data, list) and len(converted_data) == 1:
+                    converted_data = converted_data[0]
+                
                 def format_list(lst):
                     if not lst:
                         return "[]"
@@ -66,7 +69,10 @@ def _patch_rsnumpy_repr():
                     else:
                         return str(lst)
                 
-                return format_list(converted_data)
+                if isinstance(converted_data, list):
+                    return format_list(converted_data)
+                else:
+                    return str(converted_data)
             except Exception:
                 ndarray_cls.__str__ = original_str
                 result = original_repr(self)

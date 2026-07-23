@@ -17,6 +17,7 @@ from skrf.calibration.deembedding import OpenShort
 from skrf.constants import to_meters
 from skrf.media import MLine, RectangularWaveguide
 from skrf.media import Freespace
+from scipy.optimize import fmin
 
 def pprint(n, ss):
     print(f"Network {n}")
@@ -1004,3 +1005,30 @@ def shunt_stub(med, d0, d1):
 
 
 pprint(96, shunt_stub(mlin_meas, 10, 90))
+
+freq = Frequency(75, 110, 101, 'GHz')
+cpw = CPW(freq, w=10e-6, s=5e-6, ep_r=10.6, z0_port=50)
+
+# the load we are trying to match
+load = cpw.load(.2+.2j)
+
+# single stub circuit generator function
+def shunt_stub(med, d0, d1):
+    return med.line(d0, unit='deg') ** med.shunt_delay_open(d1, unit='deg')
+
+
+# define the cost function we want to minimize (this uses sloppy namespace)
+def cost(d):
+    # prevent negative length lines, returning high cost
+    if d[0] < 0 or d[1] < 0:
+        return 1e3
+    return (shunt_stub(cpw, d[0], d[1]) ** load)[100].s_mag.squeeze()
+
+
+# initial guess of optimal delay lengths in degrees
+d0 = 120, 40  # initial guess
+
+# determine the optimal delays
+d_opt = fmin(cost, (120, 40))
+
+pprint(97, d_opt)
