@@ -1239,7 +1239,7 @@ impl Axes {
             y: y_vec,
             label: actual_label.clone(),
             color: color_val,
-            linestyle: linestyle_eff,
+            linestyle: linestyle_eff.clone(),
             marker: actual_marker,
             linewidth,
             color_idx: idx,
@@ -1253,7 +1253,7 @@ impl Axes {
             let c =
                 parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
             self.legend_labels
-                .push((lbl, c, linestyle_val, None, linewidth, 1.0));
+                .push((lbl, c, linestyle_eff, None, linewidth, 1.0));
         }
         let line = Line2D {
             parent: self.self_py.as_ref().map(|p| p.clone_ref(py)),

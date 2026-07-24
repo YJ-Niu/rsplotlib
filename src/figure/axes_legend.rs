@@ -471,8 +471,31 @@ where
 
         let max_legend_height = y_max - y_min - 2.0 * py;
         let legend_height = entry_height * entry_count as f64 + 2.0 * pad_v_px * y_per_px;
+
+        let mut display_entries = legend_labels;
+        let mut needs_ellipsis = false;
+
         if legend_height > max_legend_height {
-            box_y1 = box_y2 - legend_height;
+            let max_entries =
+                ((max_legend_height - 2.0 * pad_v_px * y_per_px) / entry_height).floor() as usize;
+            if max_entries < entry_count {
+                display_entries = &legend_labels[..max_entries.max(1)];
+                needs_ellipsis = true;
+            }
+        }
+
+        let display_count = display_entries.len();
+        let display_rows_per_col = display_count.div_ceil(ncol);
+        let rows_with_ellipsis = if needs_ellipsis {
+            display_rows_per_col + 1
+        } else {
+            display_rows_per_col
+        };
+        let display_legend_height_px = row_px * rows_with_ellipsis as f64 + 2.0 * pad_v_px;
+        let display_legend_height = display_legend_height_px * y_per_px;
+
+        if display_legend_height > max_legend_height {
+            box_y1 = box_y2 - display_legend_height;
         }
 
         // 图例框背景/边框样式：默认沿用半透明白底 + 浅灰边框；
@@ -526,9 +549,9 @@ where
         // 否则固定的数据单位间隔在不同数据范围下会失效（例如整段被一个"虚线"填满而显示为实线）。
         let dash_unit = font_scale * x_per_px;
 
-        for (i, (label, color, ls, marker_opt, lw, alpha)) in legend_labels.iter().enumerate() {
-            let col = i / rows_per_col;
-            let row = i % rows_per_col;
+        for (i, (label, color, ls, marker_opt, lw, alpha)) in display_entries.iter().enumerate() {
+            let col = i / display_rows_per_col;
+            let row = i % display_rows_per_col;
 
             let col_offset_px = col as f64 * (entry_width_px + col_gap_px);
             let x_col_start = box_x1 + col_offset_px * x_per_px;
@@ -672,6 +695,36 @@ where
                 0.0,
                 0.0,
                 text_nudge,
+                None,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+            )?;
+        }
+
+        if needs_ellipsis {
+            let ellipsis_row = display_rows_per_col;
+            let ellipsis_y_pos = box_y2
+                - pad_v_px * y_per_px
+                - entry_height * 0.5
+                - ellipsis_row as f64 * entry_height;
+            let ellipsis_x =
+                box_x1 + pad_h_px * x_per_px + handle_px * x_per_px + gap_px * x_per_px;
+            let ellipsis_text = "...";
+            mathtext::draw_math_chart(
+                chart,
+                ellipsis_x,
+                ellipsis_y_pos,
+                ellipsis_text,
+                label_fs,
+                BLACK,
+                None,
+                HAlign::Left,
+                VAlign::Top,
+                0.0,
+                0.0,
+                -0.2 * label_fs,
                 None,
                 x_min,
                 x_max,
