@@ -3449,7 +3449,7 @@ def _patch_axes():
 
     _orig_text = _rs.Axes.text
 
-    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, rotation=None, horizontalalignment='center', verticalalignment='center', transform=None, bbox=None, clip_on=None, alpha=None, weight=None, dx=None, dy=None, **kwargs):
+    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, rotation=None, horizontalalignment=None, verticalalignment=None, transform=None, bbox=None, clip_on=None, alpha=None, weight=None, dx=None, dy=None, **kwargs):
         if not isinstance(s, str):
             s = str(s)
         if fontsize is None:

@@ -377,7 +377,7 @@ def text(x, y, text, fontsize=None, color=None):
         fontsize: 字体大小 (默认: None)
         color: 颜色 (默认: None)
     """
-    return _rsplotlib.text(x, y, text, fontsize, color)
+    return _rsplotlib.text(x, y, text, fontsize, color, None, None, None, None, None, None, None, None)
 
 
 def axhline(y=None, color=None, linestyle=None, linewidth=None):

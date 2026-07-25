@@ -2354,7 +2354,7 @@ impl Axes {
             fontsize: fontsize.unwrap_or(12.0),
             color: col,
             font_family,
-            ha: ha.unwrap_or_else(|| "center".to_string()),
+            ha: ha.unwrap_or_else(|| "left".to_string()),
             va: va.unwrap_or_else(|| "center".to_string()),
             rotation: rotation.unwrap_or(0.0),
             dx: dx.unwrap_or(0.0),
