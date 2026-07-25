@@ -327,32 +327,68 @@ pub fn compute_bounds(
                     y_max = 1.5;
                 }
             }
-            PlotElement::FillBetween { x, y1, y2, .. } => {
-                for &v in x {
-                    let tv = tx(v);
-                    if tv > f64::NEG_INFINITY && tv < x_min {
-                        x_min = tv;
+            PlotElement::FillBetween {
+                x,
+                y1,
+                y2,
+                horizontal,
+                ..
+            } => {
+                if *horizontal {
+                    for &v in y1 {
+                        let tv = tx(v);
+                        if tv > f64::NEG_INFINITY && tv < x_min {
+                            x_min = tv;
+                        }
+                        if tv > x_max {
+                            x_max = tv;
+                        }
                     }
-                    if tv > x_max {
-                        x_max = tv;
+                    for &v in y2 {
+                        let tv = tx(v);
+                        if tv > f64::NEG_INFINITY && tv < x_min {
+                            x_min = tv;
+                        }
+                        if tv > x_max {
+                            x_max = tv;
+                        }
                     }
-                }
-                for &v in y1 {
-                    let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min {
-                        y_min = tv;
+                    for &v in x {
+                        let tv = ty(v);
+                        if tv > f64::NEG_INFINITY && tv < y_min {
+                            y_min = tv;
+                        }
+                        if tv > y_max {
+                            y_max = tv;
+                        }
                     }
-                    if tv > y_max {
-                        y_max = tv;
+                } else {
+                    for &v in x {
+                        let tv = tx(v);
+                        if tv > f64::NEG_INFINITY && tv < x_min {
+                            x_min = tv;
+                        }
+                        if tv > x_max {
+                            x_max = tv;
+                        }
                     }
-                }
-                for &v in y2 {
-                    let tv = ty(v);
-                    if tv > f64::NEG_INFINITY && tv < y_min {
-                        y_min = tv;
+                    for &v in y1 {
+                        let tv = ty(v);
+                        if tv > f64::NEG_INFINITY && tv < y_min {
+                            y_min = tv;
+                        }
+                        if tv > y_max {
+                            y_max = tv;
+                        }
                     }
-                    if tv > y_max {
-                        y_max = tv;
+                    for &v in y2 {
+                        let tv = ty(v);
+                        if tv > f64::NEG_INFINITY && tv < y_min {
+                            y_min = tv;
+                        }
+                        if tv > y_max {
+                            y_max = tv;
+                        }
                     }
                 }
             }

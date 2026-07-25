@@ -403,6 +403,22 @@ pub fn fill_between<'a>(
 }
 
 #[pyfunction]
+#[pyo3(signature = (y, x1, x2=None, color=None, alpha=0.3, label=None))]
+pub fn fill_betweenx<'a>(
+    py: Python<'a>,
+    y: Bound<'a, PyAny>,
+    x1: Bound<'a, PyAny>,
+    x2: Option<Bound<'a, PyAny>>,
+    color: Option<String>,
+    alpha: f64,
+    label: Option<String>,
+) -> PyResult<Bound<'a, PyTuple>> {
+    make_fig_ax!(py, |ax| {
+        ax.fill_betweenx(py, y, x1, x2, color, alpha, label)?;
+    })
+}
+
+#[pyfunction]
 #[pyo3(signature = (x, *args, labels=None, colors=None, alpha=1.0))]
 pub fn stackplot<'a>(
     py: Python<'a>,

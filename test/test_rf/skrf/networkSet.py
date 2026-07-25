@@ -1108,7 +1108,7 @@ class NetworkSet:
             self,
             freq_or_n: Frequency | NumberLike,
             basis: str = 's',
-            coords: str = 'cart',
+            coords: str = 'polar',
             f_kwargs: dict = None,
             **kwargs) -> NetworkSet:
         """Interpolates each network in the set by frequency by calling :meth:`Network.interpolate`.

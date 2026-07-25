@@ -2516,6 +2516,52 @@ impl Axes {
             color: color_val.clone(),
             alpha,
             label: label.clone(),
+            horizontal: false,
+        });
+        if let Some(lbl) = label {
+            let col =
+                parse_color(&color.unwrap_or_default(), idx).unwrap_or_else(|_| default_color(idx));
+            self.legend_labels
+                .push((lbl, col, "-".to_string(), None, 1.5, 1.0));
+        }
+        Ok(())
+    }
+
+    #[pyo3(signature = (y, x1, x2=None, color=None, alpha=0.3, label=None))]
+    pub fn fill_betweenx(
+        &mut self,
+        _py: Python<'_>,
+        y: Bound<'_, PyAny>,
+        x1: Bound<'_, PyAny>,
+        x2: Option<Bound<'_, PyAny>>,
+        color: Option<String>,
+        alpha: f64,
+        label: Option<String>,
+    ) -> PyResult<()> {
+        let y_vec = py_to_vec_f64(&y)?;
+        let x1_vec = py_to_vec_f64(&x1)?;
+        let idx = self.element_count;
+        self.element_count += 1;
+        let x2_vec: Vec<f64> = if let Some(x2_val) = x2 {
+            if let Ok(scalar) = x2_val.extract::<f64>() {
+                vec![scalar; y_vec.len()]
+            } else if let Ok(vec) = py_to_vec_f64(&x2_val) {
+                vec
+            } else {
+                vec![0.0; y_vec.len()]
+            }
+        } else {
+            vec![0.0; y_vec.len()]
+        };
+        let color_val = color.clone().unwrap_or_default();
+        self.elements.push(PlotElement::FillBetween {
+            x: y_vec,
+            y1: x1_vec,
+            y2: x2_vec,
+            color: color_val.clone(),
+            alpha,
+            label: label.clone(),
+            horizontal: true,
         });
         if let Some(lbl) = label {
             let col =

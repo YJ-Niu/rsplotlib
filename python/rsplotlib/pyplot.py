@@ -1437,6 +1437,26 @@ def fill_between(x, y1, y2=0.0, color=None, alpha=0.3, label=None, **kwargs):
     return _route_to_ax('fill_between', _rsplotlib.fill_between, x, y1, y2, color, alpha, label)
 
 
+def fill_betweenx(y, x1, x2=0.0, color=None, alpha=0.3, label=None, **kwargs):
+    """填充两条曲线之间的区域（以 y 为基准）。
+
+    用法:
+        plt.fill_betweenx(y, x1, x2, color='red', alpha=0.3)
+
+    Args:
+        y: y 坐标数据
+        x1: 第一条曲线的 x 坐标
+        x2: 第二条曲线的 x 坐标 (默认 0.0)
+        color: 填充颜色
+        alpha: 透明度 (0.0-1.0, 默认 0.3)
+        label: 图例标签
+    """
+    y = _to_seq(y)
+    x1 = _to_seq(x1)
+    x2 = _to_seq(x2)
+    return _route_to_ax('fill_betweenx', _rsplotlib.fill_betweenx, y, x1, x2, color, alpha, label)
+
+
 def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0, **kwargs):
     """绘制带误差棒的图。
 

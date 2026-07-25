@@ -529,7 +529,7 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
     if axis is not None:
         ax.autoscale(True, 'x', True)
         ax.autoscale(True, 'y', True)
-        
+                
         y_min_val = np.min(y)
         y_max_val = np.max(y)
         if hasattr(y_min_val, 'tolist'):
@@ -547,9 +547,8 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
         new_ylim_max = max(current_ylim[1], y_max_val)
         
         y_range = new_ylim_max - new_ylim_min
-        padding = y_range * 0.1
+        padding = y_range * 0.05
         ax.set_ylim(new_ylim_min - padding, new_ylim_max + padding)
-
     if plt.isinteractive():
         plt.draw()
 
@@ -1933,11 +1932,11 @@ def plot_violin(
 
     freq = self.ntwk_set[0].frequency.f_scaled
 
-    # default widths to 3/4 distance between frequencies
+    # default widths to 3/4 * 0.7 = 0.525 distance between frequencies (reduced by 30%)
     if not widths and len(freq) > 1:
-        widths = (freq[1]-freq[0])*0.75
+        widths = (freq[1]-freq[0])*0.3
     elif not widths:
-        widths = 0.5
+        widths = 0.3
 
     data = np.array([getattr(p, attribute)[:, m, n] for p in self.ntwk_set])
 

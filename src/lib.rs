@@ -352,6 +352,7 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(utils::pyfuncs::bar, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::hist, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::fill_between, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::pyfuncs::fill_betweenx, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::stackplot, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::errorbar, m)?)?;
     m.add_function(wrap_pyfunction!(utils::pyfuncs::stem, m)?)?;

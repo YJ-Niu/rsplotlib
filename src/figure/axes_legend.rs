@@ -181,18 +181,55 @@ fn best_box(
     let yb2 = yb1 + legend_height;
     let yc1 = (y_min + y_max) / 2.0 - legend_height / 2.0;
     let yc2 = yc1 + legend_height;
-    // 偏好顺序：四角优先，其次边中，最后正中。
-    let candidates = [
-        (xr1, yt1, xr2, yt2), // upper right
-        (xl1, yt1, xl2, yt2), // upper left
-        (xr1, yb1, xr2, yb2), // lower right
-        (xl1, yb1, xl2, yb2), // lower left
-        (xr1, yc1, xr2, yc2), // center right
-        (xl1, yc1, xl2, yc2), // center left
-        (xc1, yt1, xc2, yt2), // upper center
-        (xc1, yb1, xc2, yb2), // lower center
-        (xc1, yc1, xc2, yc2), // center
-    ];
+
+    let mut candidates: Vec<(f64, f64, f64, f64)> = Vec::new();
+
+    let mut add_candidate = |bx1: f64, by1: f64, bx2: f64, by2: f64| {
+        let bx1_clamped = bx1.max(x_min + px);
+        let bx2_clamped = bx2.min(x_max - px);
+        let by1_clamped = by1.max(y_min + py);
+        let by2_clamped = by2.min(y_max - py);
+        if bx2_clamped > bx1_clamped && by2_clamped > by1_clamped {
+            candidates.push((bx1_clamped, by1_clamped, bx2_clamped, by2_clamped));
+        }
+    };
+
+    // 优先考虑底部位置（用户建议图例放在下面最好）
+    // 底部居中
+    add_candidate(xc1, yb1, xc2, yb2); // lower center
+
+    // 底部偏左/偏右（增加更多候选位置）
+    let xq1 = x_min + px + (x_range - legend_width) * 0.25;
+    let xq2 = x_min + px + (x_range - legend_width) * 0.75;
+    add_candidate(xq1, yb1, xq1 + legend_width, yb2); // lower quarter 1
+    add_candidate(xq2, yb1, xq2 + legend_width, yb2); // lower quarter 3
+
+    // 底部角落
+    add_candidate(xl1, yb1, xl2, yb2); // lower left
+    add_candidate(xr1, yb1, xr2, yb2); // lower right
+
+    // 上部位置
+    add_candidate(xc1, yt1, xc2, yt2); // upper center
+    add_candidate(xq1, yt1, xq1 + legend_width, yt2); // upper quarter 1
+    add_candidate(xq2, yt1, xq2 + legend_width, yt2); // upper quarter 3
+    add_candidate(xl1, yt1, xl2, yt2); // upper left
+    add_candidate(xr1, yt1, xr2, yt2); // upper right
+
+    // 中部位置（右侧/左侧）
+    add_candidate(xr1, yc1, xr2, yc2); // center right
+    add_candidate(xl1, yc1, xl2, yc2); // center left
+
+    // 中部偏上/偏下
+    let yq1 = y_min + py + (y_range - legend_height) * 0.25;
+    let yq2 = y_min + py + (y_range - legend_height) * 0.75;
+    add_candidate(xr1, yq1, xr2, yq1 + legend_height); // right quarter 1
+    add_candidate(xr1, yq2, xr2, yq2 + legend_height); // right quarter 3
+    add_candidate(xl1, yq1, xl2, yq1 + legend_height); // left quarter 1
+    add_candidate(xl1, yq2, xl2, yq2 + legend_height); // left quarter 3
+
+    // 正中心（最后考虑）
+    add_candidate(xc1, yc1, xc2, yc2); // center
+
     let mut best = candidates[0];
     let mut best_score = usize::MAX;
     for &(bx1, by1, bx2, by2) in &candidates {
