@@ -2351,7 +2351,7 @@ impl Axes {
             x,
             y,
             text: text_str,
-            fontsize: fontsize.unwrap_or(12.0),
+            fontsize: fontsize.unwrap_or(12.0) * 1.1,
             color: col,
             font_family,
             ha: ha.unwrap_or_else(|| "left".to_string()),
