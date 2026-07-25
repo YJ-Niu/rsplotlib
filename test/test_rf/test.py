@@ -429,7 +429,7 @@ try:
 except Exception:
     mpl_style = "seaborn-v0_8-ticks"
 with style.context(mpl_style):
-    # ring_slot.plot_s_smith()
+    ring_slot.plot_s_smith()
     plt.xlabel('Real Part')
     plt.ylabel('Imaginary Part')
     plt.title('Smith Chart With Legend Room')

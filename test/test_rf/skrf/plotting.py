@@ -2260,6 +2260,9 @@ def plot_prop_complex(netw: Network, prop_name: str,
     else:
         gen_label = False
 
+    if ax is None:
+        ax = plt.gca()
+
     for m in M:
         for n in N:
             # set the legend label for this trace to the networks
@@ -2274,6 +2277,11 @@ def plot_prop_complex(netw: Network, prop_name: str,
                 z=getattr(netw, prop_name)[:, m, n],
                 show_legend=show_legend, ax=ax,
                 **kwargs)
+
+    if prop_name == 's':
+        smith(ax=ax, smithR=1, chart_type='z', draw_labels=False)
+        ax.set_xlim([-1.2, 1.2])
+        ax.set_ylim([-1.2, 1.2])
 
 
 def plot_prop_polar(netw: Network, prop_name: str,

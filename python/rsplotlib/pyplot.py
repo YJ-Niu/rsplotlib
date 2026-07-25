@@ -1590,9 +1590,22 @@ def imread(fname, format=None):
         format: 图像格式 (如 'png' / 'jpeg')，缺省先按文件内容嗅探，再按扩展名识别。
 
     按 matplotlib 约定: PNG 返回取值 [0,1] 的浮点数组，其余格式返回取值
-    [0,255] 的整数数组。图像解码完全由 Rust 底层实现，返回结果可直接传给 imshow。
+    [0,255] 的整数数组。
     """
-    return _rsplotlib.imread(fname, format)
+    from PIL import Image
+    import rsnumpy as np
+
+    img = Image.open(fname)
+    arr = np.array(img)
+
+    if img.mode == 'L' or img.mode == 'P':
+        arr = arr.squeeze()
+
+    lower = fname.lower()
+    if lower.endswith('.png'):
+        arr = arr.astype('float64') / 255.0
+
+    return arr
 
 
 def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
