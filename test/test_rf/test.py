@@ -370,7 +370,9 @@ ring_slot.plot_s_smith(ax=ax, draw_chart=False)
 ssaver("./test/test_rf/test16.png")
 
 
-ring_slot.plot_s_complex()
+ax = plt.gca()
+rf.plotting.smith(ax=ax, draw_labels=True, ref_imm=1.0, chart_type='z')
+ring_slot.plot_s_complex(ax=ax)
 
 rf.stylely()
 plt.axis('equal')  # otherwise circles won't be circles

@@ -673,7 +673,7 @@ pub fn compute_bounds(
     let y_pad = if y_range.abs() < 1e-10 {
         1.0
     } else {
-        y_range * 0.05
+        y_range * 0.1
     };
 
     if let Some((l, r)) = xlim {
