@@ -88,24 +88,28 @@ fn install_named_font(family: &str, candidates: &[&str]) -> bool {
     false
 }
 
+/// 返回虚拟环境根目录列表（优先 VIRTUAL_ENV 环境变量，其次当前目录下的 .venv）。
+fn venv_prefixes() -> Vec<String> {
+    let mut out = Vec::with_capacity(2);
+    if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+        out.push(venv);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let dot_venv = cwd.join(".venv").to_string_lossy().to_string();
+        if !out.contains(&dot_venv) {
+            out.push(dot_venv);
+        }
+    }
+    out
+}
+
 /// 返回虚拟环境中 matplotlib 自带字体的候选路径（用于与 matplotlib 外观一致的
 /// monospace/serif 回退）。`file` 形如 "DejaVuSansMono.ttf"。
 fn mpl_font_paths(file: &str) -> Vec<String> {
     let mut out = Vec::new();
-    for prefix in [
-        std::env::var("VIRTUAL_ENV").ok(),
-        Some(
-            std::env::current_dir()
-                .map(|p| p.join(".venv").to_string_lossy().to_string())
-                .unwrap_or_default(),
-        )
-        .filter(|p| !p.is_empty()),
-    ]
-    .iter()
-    .flatten()
-    {
+    for prefix in venv_prefixes() {
         out.push(
-            std::path::Path::new(prefix)
+            std::path::Path::new(&prefix)
                 .join("lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf")
                 .join(file)
                 .to_string_lossy()
@@ -113,6 +117,17 @@ fn mpl_font_paths(file: &str) -> Vec<String> {
         );
     }
     out
+}
+
+/// 在虚拟环境目录下查找 matplotlib 自带字体路径，返回第一个可读的路径（用于 fallback 注册）。
+fn mpl_font_fallback(suffix: &str) -> Option<String> {
+    for prefix in venv_prefixes() {
+        let p = std::path::Path::new(&prefix).join(suffix);
+        if p.is_file() {
+            return Some(p.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 /// 注册 matplotlib 通用族 monospace / serif。
@@ -175,25 +190,11 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         }
         if !registered {
             // 退回 matplotlib 自带 DejaVu Sans（仅英文可用）
-            for prefix in [
-                std::env::var("VIRTUAL_ENV").ok(),
-                Some(
-                    std::env::current_dir()
-                        .map(|p| p.join(".venv").to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                )
-                .filter(|p| !p.is_empty()),
-            ]
-            .iter()
-            .flatten()
+            if let Some(path) = mpl_font_fallback(
+                "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
+            ) && let Ok(font_data) = std::fs::read(&path)
             {
-                let p = std::path::Path::new(&prefix).join(
-                    "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
-                );
-                if let Ok(font_data) = std::fs::read(&p) {
-                    install_default_sans(font_data);
-                    break;
-                }
+                install_default_sans(font_data);
             }
         }
         // 数学字母回退：Arial Unicode MS 只覆盖 BMP，缺 SMP 数学字母块；挂 STIX 让
@@ -239,26 +240,12 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             }
         }
         if !registered {
-            // 退回 DejaVu Sans (可能来自虚拟环境中的 matplotlib 数据)
-            for prefix in [
-                std::env::var("VIRTUAL_ENV").ok(),
-                Some(
-                    std::env::current_dir()
-                        .map(|p| p.join(".venv").to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                )
-                .filter(|p| !p.is_empty()),
-            ]
-            .iter()
-            .flatten()
+            // 退回 DejaVu Sans（可能来自虚拟环境中的 matplotlib 数据）
+            if let Some(path) = mpl_font_fallback(
+                "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
+            ) && let Ok(font_data) = std::fs::read(&path)
             {
-                let p = std::path::Path::new(&prefix).join(
-                    "lib/python3.13/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
-                );
-                if let Ok(font_data) = std::fs::read(&p) {
-                    install_default_sans(font_data);
-                    break;
-                }
+                install_default_sans(font_data);
             }
         }
         // 数学字母回退：STIX（多数发行版随 matplotlib/texlive 提供）覆盖 SMP 数学字母块。

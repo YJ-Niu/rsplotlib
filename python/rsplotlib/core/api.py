@@ -55,7 +55,7 @@ def _to_list_recursive(obj):
 
 def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None,
          c=None, lw=None, ls=None, markersize=None, markeredgewidth=None,
-         solid_capstyle=None):
+         solid_capstyle=None, markerfacecolor=None, markeredgecolor=None):
     """绘制折线图
 
     Args:
@@ -72,6 +72,8 @@ def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=No
         markersize: 标记大小
         markeredgewidth: 标记边缘宽度
         solid_capstyle: 端点形状 ('butt' | 'round' | 'projecting')
+        markerfacecolor: 标记填充色
+        markeredgecolor: 标记边缘色
     """
     # 别名兜底：如果只传了 c/lw/ls 而主参数为 None，使用别名
     if color is None and c is not None:
@@ -85,10 +87,12 @@ def plot(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=No
         label=label, color=color, linestyle=linestyle, marker=marker,
         linewidth=linewidth, lw=lw, c=c, ls=ls, markersize=markersize,
         markeredgewidth=markeredgewidth, solid_capstyle=solid_capstyle,
+        markerfacecolor=markerfacecolor, markeredgecolor=markeredgecolor,
     )
 
 
-def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, color=None):
+def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, color=None,
+            edgecolors=None, linewidths=None):
     """绘制散点图
 
     Args:
@@ -100,11 +104,16 @@ def scatter(x, y, s=20.0, c=None, marker='o', label=None, alpha=1.0, color=None)
         label: 图例标签 (默认: None)
         alpha: 透明度 (默认: 1.0)
         color: 颜色别名 (默认: None)
+        edgecolors: 标记边缘色 (默认: None)
+        linewidths: 标记边缘宽度 (默认: None)
     """
     # 支持 color 作为 c 的别名
     if c is None and color is not None:
         c = color
-    return _rsplotlib.scatter(_to_list(x), _to_list(y), s, c, marker, label, alpha)
+    return _rsplotlib.scatter(
+        _to_list(x), _to_list(y), s, c, marker, label, alpha,
+        edgecolor=edgecolors, linewidths=linewidths,
+    )
 
 
 def bar(x, height, width=0.8, color=None, label=None):
@@ -174,7 +183,7 @@ def hist(x, bins=10, range=None, density=False, weights=None,
     )
 
 
-def pie(x, labels=None, colors=None, autopct=False):
+def pie(x, labels=None, colors=None, autopct=False, startangle=0.0, explode=None):
     """绘制饼图
 
     Args:
@@ -182,6 +191,8 @@ def pie(x, labels=None, colors=None, autopct=False):
         labels: 标签列表 (默认: None)
         colors: 颜色列表 (默认: None)
         autopct: 是否显示百分比 (默认: False)
+        startangle: 起始角度 (默认: 0.0)
+        explode: 分离距离列表 (默认: None)
     """
     # 将 bool 类型的 autopct 转换为字符串格式
     if autopct is True:
@@ -190,7 +201,8 @@ def pie(x, labels=None, colors=None, autopct=False):
         autopct_str = autopct
     else:
         autopct_str = None
-    return _rsplotlib.pie(_to_list(x), labels, colors, autopct_str)
+    explode_list = _to_list(explode) if explode is not None else None
+    return _rsplotlib.pie(_to_list(x), labels, colors, autopct_str, startangle, explode_list)
 
 
 def boxplot(x, labels=None, vert=True):
@@ -278,7 +290,8 @@ def imshow(x, cmap='gray', aspect='auto', vmin=None, vmax=None,
                              vmin, vmax, alpha, origin)
 
 
-def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians=True):
+def violinplot(dataset, positions=None, widths=0.5, showmeans=False,
+               showmedians=True, showextrema=True, vert=True):
     """绘制小提琴图
 
     Args:
@@ -287,9 +300,12 @@ def violinplot(dataset, positions=None, widths=0.5, showmeans=False, showmedians
         widths: 小提琴宽度 (默认: 0.5)
         showmeans: 是否显示均值 (默认: False)
         showmedians: 是否显示中位数 (默认: True)
+        showextrema: 是否显示极值 (默认: True)
+        vert: 是否垂直显示 (默认: True)
     """
     try:
-        return _rsplotlib.violinplot(dataset, positions, widths, showmeans, showmedians)
+        return _rsplotlib.violinplot(
+            dataset, positions, widths, showmeans, showmedians, showextrema, vert)
     except AttributeError:
         _warnings.warn("violinplot is not yet implemented in rsplotlib, using boxplot instead")
         return boxplot(dataset)
@@ -367,7 +383,8 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
 
 # ==================== 辅助元素 ====================
 
-def text(x, y, text, fontsize=None, color=None):
+def text(x, y, text, fontsize=None, color=None, c=None, family=None,
+         ha=None, va=None, rotation=None, dx=None, dy=None, bbox=None):
     """添加文本
 
     Args:
@@ -376,8 +393,19 @@ def text(x, y, text, fontsize=None, color=None):
         text: 文本内容
         fontsize: 字体大小 (默认: None)
         color: 颜色 (默认: None)
+        c: 颜色别名
+        family: 字体族 (默认: None)
+        ha: 水平对齐 (默认: None)
+        va: 垂直对齐 (默认: None)
+        rotation: 旋转角度 (默认: None)
+        dx: 水平像素偏移 (默认: None)
+        dy: 垂直像素偏移 (默认: None)
+        bbox: 文本背景框 (默认: None)
     """
-    return _rsplotlib.text(x, y, text, fontsize, color, None, None, None, None, None, None, None, None)
+    return _rsplotlib.text(
+        x, y, text, fontsize=fontsize, color=color, c=c, family=family,
+        ha=ha, va=va, rotation=rotation, dx=dx, dy=dy, bbox=bbox,
+    )
 
 
 def axhline(y=None, color=None, linestyle=None, linewidth=None):
@@ -470,15 +498,22 @@ def grid(visible=True):
     return _rsplotlib.grid(visible)
 
 
-def legend(loc='best', ncol=None):
+def legend(loc='best', ncol=None, facecolor=None, framealpha=None, edgecolor=None, fontsize=None):
     """显示图例
 
     Args:
         loc: 位置 (默认: 'best', 可选: 'upper right', 'upper left',
               'lower right', 'lower left', 'upper center')
         ncol: 图例列数，默认根据位置和空间自动判定
+        facecolor: 背景色 (默认: None)
+        framealpha: 背景透明度 (默认: None)
+        edgecolor: 边框色 (默认: None)
+        fontsize: 字体大小 (默认: None)
     """
-    return _rsplotlib.legend(loc, None, None, None, None, ncol)
+    return _rsplotlib.legend(
+        loc, facecolor=facecolor, framealpha=framealpha,
+        edgecolor=edgecolor, fontsize=fontsize, ncol=ncol,
+    )
 
 
 def xlim(left, right):

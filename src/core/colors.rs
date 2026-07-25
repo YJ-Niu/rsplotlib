@@ -202,10 +202,17 @@ pub fn parse_color(name: &str, color_idx: usize) -> PyResult<RgbColor> {
         return Ok(default_color(n));
     }
     // 精确匹配命名颜色（所有命名颜色都是小写）
-    named_color(trimmed)
-        .or_else(|| named_color(&trimmed.to_lowercase()))
-        .map(Ok)
-        .unwrap_or_else(|| Ok(default_color(color_idx)))
+    // 先尝试直接匹配避免不必要的 lowercase 分配
+    if let Some(c) = named_color(trimmed) {
+        return Ok(c);
+    }
+    // 确实有大写字母时再生成小写字符串查找
+    if trimmed.bytes().any(|b| b.is_ascii_uppercase())
+        && let Some(c) = named_color(&trimmed.to_lowercase())
+    {
+        return Ok(c);
+    }
+    Ok(default_color(color_idx))
 }
 
 /// 预计算默认颜色，0 分配

@@ -1995,34 +1995,34 @@ where
                     let y_range = y_max_plot - y_min_plot;
                     let dy = y_range / (num_points - 1) as f64;
 
+                    // 预计算所有 KDE 值，避免 O(N²) 的重复计算
+                    let norm_factor =
+                        dataset.len() as f64 * std_val * (2.0 * std::f64::consts::PI).sqrt();
+                    let mut kde_vals: Vec<f64> = Vec::with_capacity(num_points);
+                    let mut max_kde_raw = 0.0_f64;
+                    for i in 0..num_points {
+                        let y_val = y_min_plot + i as f64 * dy;
+                        let raw = dataset
+                            .iter()
+                            .map(|&x| (-0.5 * ((x - y_val) / std_val).powi(2)).exp())
+                            .sum::<f64>();
+                        kde_vals.push(raw);
+                        if raw > max_kde_raw {
+                            max_kde_raw = raw;
+                        }
+                    }
+                    let max_kde = if max_kde_raw > 0.0 {
+                        max_kde_raw / norm_factor
+                    } else {
+                        1.0
+                    };
+
                     let mut left_pts: Vec<(f64, f64)> = Vec::with_capacity(num_points);
                     let mut right_pts: Vec<(f64, f64)> = Vec::with_capacity(num_points);
 
-                    for i in 0..num_points {
+                    for (i, &raw) in kde_vals.iter().enumerate() {
                         let y_val = y_min_plot + i as f64 * dy;
-                        let kde_val: f64 = dataset
-                            .iter()
-                            .map(|&x| (-0.5 * ((x - y_val) / std_val).powi(2)).exp())
-                            .sum::<f64>()
-                            / (dataset.len() as f64
-                                * std_val
-                                * (2.0 * std::f64::consts::PI).sqrt());
-
-                        let max_kde: f64 = (0..num_points)
-                            .map(|j| {
-                                let y = y_min_plot + j as f64 * dy;
-                                dataset
-                                    .iter()
-                                    .map(|&x| (-0.5 * ((x - y) / std_val).powi(2)).exp())
-                                    .sum::<f64>()
-                            })
-                            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                            .unwrap_or(1.0);
-                        let max_kde = max_kde
-                            / (dataset.len() as f64
-                                * std_val
-                                * (2.0 * std::f64::consts::PI).sqrt());
-
+                        let kde_val = raw / norm_factor;
                         let scaled_width = if max_kde > 0.0 {
                             (kde_val / max_kde) * width
                         } else {
