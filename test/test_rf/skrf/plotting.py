@@ -1915,9 +1915,9 @@ def plot_violin(
 
     # default widths to 3/4 distance between frequencies
     if not widths and len(freq) > 1:
-        widths = (freq[1]-freq[0])*0.75
+        widths = (freq[1]-freq[0])*0.4
     elif not widths:
-        widths = 0.5
+        widths = 0.45
 
     data = np.array([getattr(p, attribute)[:, m, n] for p in self.ntwk_set])
 
