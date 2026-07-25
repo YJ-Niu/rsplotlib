@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyTuple};
+use pyo3::types::{PyAny, PyBytes, PyList, PyTuple};
 
 use plotters::style::{FontStyle, register_font};
 
@@ -403,6 +403,22 @@ pub fn fill_between<'a>(
 }
 
 #[pyfunction]
+#[pyo3(signature = (y, x1, x2=None, color=None, alpha=0.3, label=None))]
+pub fn fill_betweenx<'a>(
+    py: Python<'a>,
+    y: Bound<'a, PyAny>,
+    x1: Bound<'a, PyAny>,
+    x2: Option<Bound<'a, PyAny>>,
+    color: Option<String>,
+    alpha: f64,
+    label: Option<String>,
+) -> PyResult<Bound<'a, PyTuple>> {
+    make_fig_ax!(py, |ax| {
+        ax.fill_betweenx(py, y, x1, x2, color, alpha, label)?;
+    })
+}
+
+#[pyfunction]
 #[pyo3(signature = (x, *args, labels=None, colors=None, alpha=1.0))]
 pub fn stackplot<'a>(
     py: Python<'a>,
@@ -724,17 +740,13 @@ fn ndarray_from_bytes<'py>(
     py: Python<'py>,
     np: &Bound<'py, PyModule>,
     data: &[u8],
-    typestr: &str,
+    _typestr: &str,
     dtype: &str,
     shape: Vec<usize>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let core = np.getattr("_core")?;
     let bytes = PyBytes::new(py, data);
-    let raw = core.call_method1("from_buffer_typed", (bytes, typestr, shape))?;
-    let ndarray_cls = np.getattr("ndarray")?;
-    let kwargs = PyDict::new(py);
-    kwargs.set_item("_dtype", dtype)?;
-    ndarray_cls.call_method("_wrap", (raw,), Some(&kwargs))
+    let arr = np.call_method1("frombuffer", (bytes, dtype))?;
+    arr.call_method1("reshape", (shape,))
 }
 
 #[pyfunction]

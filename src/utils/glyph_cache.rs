@@ -261,7 +261,9 @@ impl<B: DrawingBackend> DrawingBackend for GlyphCacheBackend<B> {
                     }
                 }
             }
-            x_shift += scaled.h_advance(gid);
+            let advance = scaled.h_advance(gid);
+            let advance = if c == ' ' { advance * 1.2 } else { advance };
+            x_shift += advance;
         }
         Ok(())
     }

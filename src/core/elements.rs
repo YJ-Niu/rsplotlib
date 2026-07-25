@@ -177,6 +177,7 @@ pub enum PlotElement {
         color: String,
         alpha: f64,
         label: Option<String>,
+        horizontal: bool,
     },
     ErrorBar {
         x: Vec<f64>,

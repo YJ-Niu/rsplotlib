@@ -1437,6 +1437,26 @@ def fill_between(x, y1, y2=0.0, color=None, alpha=0.3, label=None, **kwargs):
     return _route_to_ax('fill_between', _rsplotlib.fill_between, x, y1, y2, color, alpha, label)
 
 
+def fill_betweenx(y, x1, x2=0.0, color=None, alpha=0.3, label=None, **kwargs):
+    """填充两条曲线之间的区域（以 y 为基准）。
+
+    用法:
+        plt.fill_betweenx(y, x1, x2, color='red', alpha=0.3)
+
+    Args:
+        y: y 坐标数据
+        x1: 第一条曲线的 x 坐标
+        x2: 第二条曲线的 x 坐标 (默认 0.0)
+        color: 填充颜色
+        alpha: 透明度 (0.0-1.0, 默认 0.3)
+        label: 图例标签
+    """
+    y = _to_seq(y)
+    x1 = _to_seq(x1)
+    x2 = _to_seq(x2)
+    return _route_to_ax('fill_betweenx', _rsplotlib.fill_betweenx, y, x1, x2, color, alpha, label)
+
+
 def errorbar(x, y, yerr=None, xerr=None, fmt='o', color=None, label=None, capsize=3.0, **kwargs):
     """绘制带误差棒的图。
 
@@ -1590,9 +1610,22 @@ def imread(fname, format=None):
         format: 图像格式 (如 'png' / 'jpeg')，缺省先按文件内容嗅探，再按扩展名识别。
 
     按 matplotlib 约定: PNG 返回取值 [0,1] 的浮点数组，其余格式返回取值
-    [0,255] 的整数数组。图像解码完全由 Rust 底层实现，返回结果可直接传给 imshow。
+    [0,255] 的整数数组。
     """
-    return _rsplotlib.imread(fname, format)
+    from PIL import Image
+    import rsnumpy as np
+
+    img = Image.open(fname)
+    arr = np.array(img)
+
+    if img.mode == 'L' or img.mode == 'P':
+        arr = arr.squeeze()
+
+    lower = fname.lower()
+    if lower.endswith('.png'):
+        arr = arr.astype('float64') / 255.0
+
+    return arr
 
 
 def semilogx(x, y, label=None, color=None, linestyle=None, marker=None, linewidth=None, **kwargs):
@@ -2620,7 +2653,7 @@ def gca(*args, **kwargs):
         pass
     fig = _get_figure()
     if fig is None:
-        fig = figure(args)
+        fig = figure()
     return fig.add_subplot()
 
 
@@ -3416,7 +3449,7 @@ def _patch_axes():
 
     _orig_text = _rs.Axes.text
 
-    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, rotation=None, horizontalalignment='center', verticalalignment='center', transform=None, bbox=None, clip_on=None, alpha=None, weight=None, dx=None, dy=None, **kwargs):
+    def _text(self, x, y, s, fontsize=None, color=None, c=None, family=None, rotation=None, horizontalalignment=None, verticalalignment=None, transform=None, bbox=None, clip_on=None, alpha=None, weight=None, dx=None, dy=None, **kwargs):
         if not isinstance(s, str):
             s = str(s)
         if fontsize is None:

@@ -2374,6 +2374,7 @@ where
                 y2,
                 color,
                 alpha,
+                horizontal,
                 ..
             } => {
                 let col = parse_color(color, 0).unwrap_or(RgbColor(0, 128, 0));
@@ -2382,19 +2383,38 @@ where
                     continue;
                 }
                 let mut points: Vec<(f64, f64)> = Vec::with_capacity(x.len() * 2);
-                for (&xv, &yv) in x.iter().zip(y1.iter()) {
-                    let txv = tx(xv);
-                    let tyv = ty(yv);
-                    if txv.is_finite() && tyv.is_finite() {
-                        points.push((txv, tyv));
+                if *horizontal {
+                    for (&yv, &xv) in x.iter().zip(y1.iter()) {
+                        let txv = tx(xv);
+                        let tyv = ty(yv);
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                     }
-                }
-                for i in (0..x.len()).rev() {
-                    let y2v = if i < y2.len() { y2[i] } else { 0.0 };
-                    let txv = tx(x[i]);
-                    let tyv = ty(y2v);
-                    if txv.is_finite() && tyv.is_finite() {
-                        points.push((txv, tyv));
+                    for i in (0..x.len()).rev() {
+                        let yv = x[i];
+                        let xv = if i < y2.len() { y2[i] } else { 0.0 };
+                        let txv = tx(xv);
+                        let tyv = ty(yv);
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
+                    }
+                } else {
+                    for (&xv, &yv) in x.iter().zip(y1.iter()) {
+                        let txv = tx(xv);
+                        let tyv = ty(yv);
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
+                    }
+                    for i in (0..x.len()).rev() {
+                        let y2v = if i < y2.len() { y2[i] } else { 0.0 };
+                        let txv = tx(x[i]);
+                        let tyv = ty(y2v);
+                        if txv.is_finite() && tyv.is_finite() {
+                            points.push((txv, tyv));
+                        }
                     }
                 }
                 if points.len() < 3 {

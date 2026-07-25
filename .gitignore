@@ -38,6 +38,9 @@ test_data/
 wheelhouse/
 N237S NB.csv
 plots.py
+analyze_*.py
+test_*.py
+*.csv
 # Environment
 .venv
 .env
