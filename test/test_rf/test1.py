@@ -17,7 +17,7 @@ def pprint(n, ss):
     print(ss, "\n")
 
 
-rf.stylely()
+plt.figure()
 MSL100_raw = rf.Network('./test/test_rf/skrf/data/MSL100.s2p')
 MSL200_raw = rf.Network('./test/test_rf/skrf/data/MSL200.s2p')
 
@@ -25,10 +25,11 @@ MSL200_raw = rf.Network('./test/test_rf/skrf/data/MSL200.s2p')
 MSL100 = MSL100_raw['1-5000mhz']
 MSL200 = MSL200_raw['1-5000mhz']
 
-plt.figure()
+
 plt.title('Measured data')
 MSL100.plot_s_db()
 MSL200.plot_s_db()
+# rf.stylely()
 ssaver('./test/test_rf/test_data/test1.png')
 
 c0 = 3e8
@@ -71,9 +72,9 @@ def model(x, freq, Er_eff, L, W, H, T, f_epr_tand, Loss_mea):
     return sum((real(m.ep_reff_f) - Er_eff)**2) + 0.01*sum((Loss_mod - Loss_mea)**2)
 
 
-res = minimize(model, x0, args=(MSL100.frequency, Er_eff, L, W, H, T, f_epr_tand, Loss_mea),
-               bounds=[(4.2, 4.7), (0.001, 0.1)])
-Er = res.x[0]
-tand = res.x[1]
+# res = minimize(model, x0, args=(MSL100.frequency, Er_eff, L, W, H, T, f_epr_tand, Loss_mea),
+#                bounds=[(4.2, 4.7), (0.001, 0.1)])
+# Er = res.x[0]
+# tand = res.x[1]
 
-pprint(1, f'Er={Er:.3f}, tand={tand:.4f} at {f_epr_tand * 1e-9:.1f} GHz.')
+# pprint(1, f'Er={Er:.3f}, tand={tand:.4f} at {f_epr_tand * 1e-9:.1f} GHz.')

@@ -2620,7 +2620,7 @@ def gca(*args, **kwargs):
         pass
     fig = _get_figure()
     if fig is None:
-        fig = figure(args)
+        fig = figure()
     return fig.add_subplot()
 
 
