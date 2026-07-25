@@ -8,6 +8,98 @@ based on [Keep a Changelog](https://keepachangelog.com/), and the project follow
 
 ---
 
+## v0.3.5 — 2026-07-25
+
+Font rendering and text layout improvements.
+
+### Fixed
+
+- **Default font size**: Increased default text font size by 10% for better readability.
+- **Text alignment defaults**: Fixed mismatch between text alignment default values and Python interface parameters.
+
+### Maintenance
+
+- Code cleanup and dependency optimization.
+
+---
+
+## v0.3.4 — 2026-07-24
+
+Legend and build improvements.
+
+### Fixed
+
+- **Legend ellipsis**: Fixed legend text ellipsis handling for long labels.
+- **Legend layout**: Optimized legend positioning and spacing.
+
+### Maintenance
+
+- Optimized build configuration for better compilation performance.
+
+---
+
+## v0.3.3 — 2026-07-23
+
+Core fixes and refactoring.
+
+### Fixed
+
+- **Subplot layout**: Fixed vertical alignment issues for special layout subplots.
+- **Suptitle rendering**: Fixed figure `suptitle` rendering logic and position calculation.
+- **Touchstone parsing**: Fixed touchstone file parsing issues.
+
+### Changed
+
+- **Dependency refactoring**: Removed `rsnumpy` dependency, unified array object handling.
+- **Code cleanup**: Removed redundant test files and deprecated code.
+
+---
+
+## v0.3.2 — 2026-07-22
+
+Testing and interpolation improvements.
+
+### Added
+
+- **Scipy interpolation simulation**: Added scipy-compatible interpolation functions.
+
+### Fixed
+
+- **Test file fixes**: Fixed various test file issues and refactored test plotting subplot layout logic.
+
+---
+
+## v0.3.1 — 2026-07-21
+
+Layout and CI improvements.
+
+### Changed
+
+- **Subplot spacing**: Adjusted subplot base spacing values for better visual layout.
+- **CI workflow**: Adjusted installation step order in CI workflows.
+
+---
+
+## v0.3.0 — 2026-07-20
+
+Major API and architecture improvements with significant refactoring.
+
+### Added
+
+- **Extended test coverage**: Added comprehensive test files and completed library structure.
+- **Float rounding handling**: Added float rounding handling for better display precision.
+
+### Changed
+
+- **Core refactoring**: Major refactoring of core modules including colors and pyplot.
+- **Code formatting**: Batch optimization of code formatting and dependency replacement.
+
+### Fixed
+
+- **Chart-related issues**: Fixed multiple chart rendering issues and refactored dependencies.
+
+---
+
 ## v0.2.9 — 2026-07-12
 
 Rendering performance and CI maintenance. No API changes.
