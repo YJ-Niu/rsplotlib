@@ -5,6 +5,7 @@ A high-performance Python plotting library powered by Rust, with a Matplotlib-co
 ## Key Features
 
 - **Matplotlib-Compatible API**: Low migration cost for existing Matplotlib users
+- **scikit-rf Integration**: Full support for Network objects with frequency band slicing (e.g., `ring_slot['82-90ghz']`)
 - **Rust-Powered Performance**: Offload rendering and batch operations to Rust for significant speed improvements
 - **Rich Chart Types**: Line plots, scatter plots, bar charts, histograms, box plots, pie charts, heatmaps, and more
 - **Per-Point Scatter Colors & Sizes**: Rust-level batch processing, zero Python loop overhead
@@ -38,14 +39,33 @@ ax.legend()
 fig.savefig('plot.png', dpi=300)
 ```
 
+### scikit-rf Integration
+
+```python
+import skrf as rf
+from skrf.data import ring_slot
+import rsplotlib.pyplot as plt
+
+rf.stylely()
+ring_slot.s11.plot_s_db(label='Full Band Response')
+# Frequency band slicing: select 82-90 GHz range
+ring_slot.s11['82-90ghz'].plot_s_db(lw=3, label='Band of Interest')
+plt.legend()
+plt.savefig('s_parameters.png')
+```
+
+Frequency band slicing supports human-readable strings like `'80-90ghz'`, `'1-2ghz'`, or `'500mhz'`. The sliced Network object retains all plotting capabilities (`plot_s_db`, `plot_s_mag`, `plot_s_smith`, etc.) with full matplotlib-compatible keyword arguments (`lw`, `ls`, `color`, `marker`, etc.).
+
 ## Version v0.3.5
 
 ### Improvements
+
 - Increased default text font size by 10% for better readability
 - Fixed text alignment default values and Python interface parameter mismatch
 - Code cleanup and dependency optimization
 
 ### Previous Versions
+
 - v0.3.4: Legend ellipsis and layout improvements
 - v0.3.3: Subplot layout fixes, dependency refactoring (removed rsnumpy)
 - v0.3.2: Scipy interpolation simulation

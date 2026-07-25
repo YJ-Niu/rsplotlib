@@ -3235,14 +3235,7 @@ class Network:
         x: np.ndarray = getattr(self, basis)
         x_cropped = x[l_idx:r_idx]
         if coords == 'cart':
-            if np.iscomplexobj(x_cropped):
-                x_real = np.real(x_cropped)
-                x_imag = np.imag(x_cropped)
-                interp_real = f_interp(f_cropped, x_real, axis=0, **kwargs)
-                interp_imag = f_interp(f_cropped, x_imag, axis=0, **kwargs)
-                x_new = interp_real(f_new) + 1j * interp_imag(f_new)
-            else:
-                x_new = f_interp(f_cropped, x_cropped, axis=0, **kwargs)(f_new)
+            x_new = f_interp(f_cropped, x_cropped, axis=0, **kwargs)(f_new)
         elif coords == 'polar':
             rad = np.unwrap(np.angle(x_cropped), axis=0)
             mag = np.abs(x_cropped)

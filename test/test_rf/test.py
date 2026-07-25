@@ -369,7 +369,9 @@ rf.plotting.smith(ax=ax, draw_labels=True, ref_imm=1.0, chart_type='z')
 ring_slot.plot_s_smith(ax=ax, draw_chart=False)
 ssaver("./test/test_rf/test16.png")
 
+
 ring_slot.plot_s_complex()
+
 rf.stylely()
 plt.axis('equal')  # otherwise circles won't be circles
 ssaver("./test/test_rf/test17.png")
@@ -393,7 +395,9 @@ ssaver("./test/test_rf/test20.png")
 ring_slot.plot_s_deg_unwrap()
 ssaver("./test/test_rf/test21.png")
 
+
 gd = abs(ring_slot.s21.group_delay) * 1e9  # in ns
+
 ring_slot.plot(gd)
 plt.ylabel('Group Delay (ns)')
 plt.title('Group Delay of Ring Slot S21')
