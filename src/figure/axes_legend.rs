@@ -155,7 +155,7 @@ fn box_from_anchor(
 }
 
 /// 在候选位置中挑选与数据遮挡最少的图例框（matplotlib `loc='best'` 语义）。
-/// 候选按偏好顺序排列，遮挡点数相同时取靠前者。
+/// 沿绘图区域四周以一定步长扫描，生成大量候选位置，取遮挡点数最少者。
 fn best_box(
     pts: &[(f64, f64)],
     x_min: f64,
@@ -169,18 +169,6 @@ fn best_box(
     let y_range = (y_max - y_min).abs();
     let px = x_range * 0.02;
     let py = y_range * 0.02;
-    let xr2 = x_max - px;
-    let xr1 = xr2 - legend_width;
-    let xl1 = x_min + px;
-    let xl2 = xl1 + legend_width;
-    let xc1 = (x_min + x_max) / 2.0 - legend_width / 2.0;
-    let xc2 = xc1 + legend_width;
-    let yt2 = y_max - py;
-    let yt1 = yt2 - legend_height;
-    let yb1 = y_min + py;
-    let yb2 = yb1 + legend_height;
-    let yc1 = (y_min + y_max) / 2.0 - legend_height / 2.0;
-    let yc2 = yc1 + legend_height;
 
     let mut candidates: Vec<(f64, f64, f64, f64)> = Vec::new();
 
@@ -194,41 +182,100 @@ fn best_box(
         }
     };
 
-    // 优先考虑底部位置（用户建议图例放在下面最好）
-    // 底部居中
-    add_candidate(xc1, yb1, xc2, yb2); // lower center
+    // 沿四周扫描，步长为图例框尺寸或数据范围的一定比例
+    let x_step = (x_range * 0.08).max(legend_width * 0.5);
+    let y_step = (y_range * 0.08).max(legend_height * 0.5);
 
-    // 底部偏左/偏右（增加更多候选位置）
-    let xq1 = x_min + px + (x_range - legend_width) * 0.25;
-    let xq2 = x_min + px + (x_range - legend_width) * 0.75;
-    add_candidate(xq1, yb1, xq1 + legend_width, yb2); // lower quarter 1
-    add_candidate(xq2, yb1, xq2 + legend_width, yb2); // lower quarter 3
+    // 底部边缘：从左到右
+    let mut x_pos = x_min + px;
+    while x_pos + legend_width <= x_max - px {
+        add_candidate(
+            x_pos,
+            y_min + py,
+            x_pos + legend_width,
+            y_min + py + legend_height,
+        );
+        x_pos += x_step;
+    }
+    // 底部最右端
+    if x_max - px - legend_width > x_min + px {
+        add_candidate(
+            x_max - px - legend_width,
+            y_min + py,
+            x_max - px,
+            y_min + py + legend_height,
+        );
+    }
 
-    // 底部角落
-    add_candidate(xl1, yb1, xl2, yb2); // lower left
-    add_candidate(xr1, yb1, xr2, yb2); // lower right
+    // 顶部边缘：从左到右
+    x_pos = x_min + px;
+    while x_pos + legend_width <= x_max - px {
+        add_candidate(
+            x_pos,
+            y_max - py - legend_height,
+            x_pos + legend_width,
+            y_max - py,
+        );
+        x_pos += x_step;
+    }
+    if x_max - px - legend_width > x_min + px {
+        add_candidate(
+            x_max - px - legend_width,
+            y_max - py - legend_height,
+            x_max - px,
+            y_max - py,
+        );
+    }
 
-    // 上部位置
-    add_candidate(xc1, yt1, xc2, yt2); // upper center
-    add_candidate(xq1, yt1, xq1 + legend_width, yt2); // upper quarter 1
-    add_candidate(xq2, yt1, xq2 + legend_width, yt2); // upper quarter 3
-    add_candidate(xl1, yt1, xl2, yt2); // upper left
-    add_candidate(xr1, yt1, xr2, yt2); // upper right
+    // 左侧边缘：从上到下
+    let mut y_pos = y_min + py;
+    while y_pos + legend_height <= y_max - py {
+        add_candidate(
+            x_min + px,
+            y_pos,
+            x_min + px + legend_width,
+            y_pos + legend_height,
+        );
+        y_pos += y_step;
+    }
+    if y_max - py - legend_height > y_min + py {
+        add_candidate(
+            x_min + px,
+            y_max - py - legend_height,
+            x_min + px + legend_width,
+            y_max - py,
+        );
+    }
 
-    // 中部位置（右侧/左侧）
-    add_candidate(xr1, yc1, xr2, yc2); // center right
-    add_candidate(xl1, yc1, xl2, yc2); // center left
+    // 右侧边缘：从上到下
+    y_pos = y_min + py;
+    while y_pos + legend_height <= y_max - py {
+        add_candidate(
+            x_max - px - legend_width,
+            y_pos,
+            x_max - px,
+            y_pos + legend_height,
+        );
+        y_pos += y_step;
+    }
+    if y_max - py - legend_height > y_min + py {
+        add_candidate(
+            x_max - px - legend_width,
+            y_max - py - legend_height,
+            x_max - px,
+            y_max - py,
+        );
+    }
 
-    // 中部偏上/偏下
-    let yq1 = y_min + py + (y_range - legend_height) * 0.25;
-    let yq2 = y_min + py + (y_range - legend_height) * 0.75;
-    add_candidate(xr1, yq1, xr2, yq1 + legend_height); // right quarter 1
-    add_candidate(xr1, yq2, xr2, yq2 + legend_height); // right quarter 3
-    add_candidate(xl1, yq1, xl2, yq1 + legend_height); // left quarter 1
-    add_candidate(xl1, yq2, xl2, yq2 + legend_height); // left quarter 3
-
-    // 正中心（最后考虑）
-    add_candidate(xc1, yc1, xc2, yc2); // center
+    // 如果没有有效候选位置，使用右下角
+    if candidates.is_empty() {
+        return (
+            x_max - px - legend_width,
+            y_min + py,
+            x_max - px,
+            y_min + py + legend_height,
+        );
+    }
 
     let mut best = candidates[0];
     let mut best_score = usize::MAX;
@@ -347,10 +394,10 @@ where
         let base_fs = fontsize.unwrap_or(11.0);
         let label_fs = scale_font(base_fs * DEFAULT_FONT_SCALE, font_scale);
 
-        let pad_h_px = 8.0 * font_scale;
-        let handle_px = label_fs * 1.6;
-        let gap_px = 3.5 * font_scale;
-        let col_gap_px = 12.0 * font_scale;
+        let pad_h_px = 5.0 * font_scale;
+        let handle_px = label_fs * 1.4;
+        let gap_px = 3.0 * font_scale;
+        let col_gap_px = 7.0 * font_scale;
         let max_text_px = legend_labels
             .iter()
             .map(|(label, ..)| mathtext::measure_plain(label.as_str(), None, label_fs).0)
@@ -360,8 +407,8 @@ where
         // 这样列与列之间间距 = col_gap_px（而非 col_gap_px + 2*pad_h_px），避免多列时图例右侧出现大片空白。
         let entry_width_px = pad_h_px + handle_px + gap_px + max_text_px;
 
-        let row_px = label_fs * 1.6;
-        let pad_v_px = label_fs * 0.55;
+        let row_px = label_fs * 1.35;
+        let pad_v_px = label_fs * 0.35;
         let entry_height = row_px * y_per_px;
 
         let ncol = if let Some(n) = ncol {
@@ -412,19 +459,17 @@ where
         }
 
         let display_count = display_entries.len();
-        let display_rows_per_col = display_count.div_ceil(ncol);
-        // 实际使用的列数：当 ncol 不能被 entry_count 整除时，最后一列可能未使用。
-        // 例如 entry_count=8, ncol=5 → rows_per_col=2, 实际只用 4 列（前 4 列各 2 行 = 8）。
-        // 用 actual_ncol 计算 legend_width，避免图例右侧出现大片空白。
-        let actual_ncol = display_count.div_ceil(display_rows_per_col).max(1);
+        let display_rows = display_count.div_ceil(ncol);
+        // 行主序布局：实际使用的列数就是 ncol（每行都用 ncol 列，最后一行可能不满）
+        let actual_ncol = ncol;
         // 总图例宽度 = N 列内容（每列含左 pad_h） + (N-1) 列间距 + 最右列右 pad_h
         let legend_width_px =
             entry_width_px * actual_ncol as f64 + col_gap_px * (actual_ncol - 1) as f64 + pad_h_px;
         let legend_width = legend_width_px * x_per_px;
         let rows_with_ellipsis = if needs_ellipsis {
-            display_rows_per_col + 1
+            display_rows + 1
         } else {
-            display_rows_per_col
+            display_rows
         };
         let display_legend_height_px = row_px * rows_with_ellipsis as f64 + 2.0 * pad_v_px;
         let display_legend_height = display_legend_height_px * y_per_px;
@@ -589,8 +634,8 @@ where
         let dash_unit = font_scale * x_per_px;
 
         for (i, (label, color, ls, marker_opt, lw, alpha)) in display_entries.iter().enumerate() {
-            let col = i / display_rows_per_col;
-            let row = i % display_rows_per_col;
+            let col = i % ncol;
+            let row = i / ncol;
 
             let col_offset_px = col as f64 * (entry_width_px + col_gap_px);
             let x_col_start = box_x1 + col_offset_px * x_per_px;
@@ -743,7 +788,7 @@ where
         }
 
         if needs_ellipsis {
-            let ellipsis_row = display_rows_per_col;
+            let ellipsis_row = display_rows;
             let ellipsis_y_pos = box_y2
                 - pad_v_px * y_per_px
                 - entry_height * 0.5
