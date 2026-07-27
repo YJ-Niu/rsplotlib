@@ -850,6 +850,14 @@ pub struct Axes {
     /// tick_params(labelcolor=...) 设置的刻度标签颜色（None = 默认黑）。
     pub x_tick_labelcolor: Option<String>,
     pub y_tick_labelcolor: Option<String>,
+    /// xticks(rotation=...) 设置的 x 轴刻度标签旋转角度（None = 默认 0.0）。
+    pub x_tick_rotation: Option<f64>,
+    /// yticks(rotation=...) 设置的 y 轴刻度标签旋转角度（None = 默认 0.0）。
+    pub y_tick_rotation: Option<f64>,
+    /// xticks(labelpad=...) 设置的 x 轴刻度标签与轴的距离（None = 默认自动计算）。
+    pub x_tick_labelpad: Option<f64>,
+    /// yticks(labelpad=...) 设置的 y 轴刻度标签与轴的距离（None = 默认自动计算）。
+    pub y_tick_labelpad: Option<f64>,
     pub axis_off: bool,
     pub self_py: Option<Py<PyAny>>,
     pub xaxis_major_locator: Option<Py<PyAny>>,
@@ -952,6 +960,10 @@ impl Clone for Axes {
             y_tick_color: self.y_tick_color.clone(),
             x_tick_labelcolor: self.x_tick_labelcolor.clone(),
             y_tick_labelcolor: self.y_tick_labelcolor.clone(),
+            x_tick_rotation: self.x_tick_rotation,
+            y_tick_rotation: self.y_tick_rotation,
+            x_tick_labelpad: self.x_tick_labelpad,
+            y_tick_labelpad: self.y_tick_labelpad,
             axis_off: self.axis_off,
             self_py: None,
             xaxis_major_locator: None,
@@ -1128,6 +1140,10 @@ impl Axes {
             y_tick_color: None,
             x_tick_labelcolor: None,
             y_tick_labelcolor: None,
+            x_tick_rotation: None,
+            y_tick_rotation: None,
+            x_tick_labelpad: None,
+            y_tick_labelpad: None,
             axis_off: false,
             self_py: None,
             xaxis_major_locator: None,
@@ -2983,28 +2999,76 @@ impl Axes {
         self.yscale = scale.to_string();
     }
 
-    #[pyo3(signature = (ticks=None, labels=None))]
-    pub fn xticks(&mut self, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) {
+    #[pyo3(signature = (ticks=None, labels=None, rotation=None, labelpad=None))]
+    pub fn xticks(
+        &mut self,
+        ticks: Option<Vec<f64>>,
+        labels: Option<Vec<String>>,
+        rotation: Option<f64>,
+        labelpad: Option<f64>,
+    ) {
         self.xticks_val = ticks;
         self.xtick_labels = labels;
+        if rotation.is_some() {
+            self.x_tick_rotation = rotation;
+        }
+        if labelpad.is_some() {
+            self.x_tick_labelpad = labelpad;
+        }
     }
 
-    #[pyo3(signature = (ticks=None, labels=None))]
-    pub fn set_xticks(&mut self, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) {
+    #[pyo3(signature = (ticks=None, labels=None, rotation=None, labelpad=None))]
+    pub fn set_xticks(
+        &mut self,
+        ticks: Option<Vec<f64>>,
+        labels: Option<Vec<String>>,
+        rotation: Option<f64>,
+        labelpad: Option<f64>,
+    ) {
         self.xticks_val = ticks;
         self.xtick_labels = labels;
+        if rotation.is_some() {
+            self.x_tick_rotation = rotation;
+        }
+        if labelpad.is_some() {
+            self.x_tick_labelpad = labelpad;
+        }
     }
 
-    #[pyo3(signature = (ticks=None, labels=None))]
-    pub fn yticks(&mut self, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) {
+    #[pyo3(signature = (ticks=None, labels=None, rotation=None, labelpad=None))]
+    pub fn yticks(
+        &mut self,
+        ticks: Option<Vec<f64>>,
+        labels: Option<Vec<String>>,
+        rotation: Option<f64>,
+        labelpad: Option<f64>,
+    ) {
         self.yticks_val = ticks;
         self.ytick_labels = labels;
+        if rotation.is_some() {
+            self.y_tick_rotation = rotation;
+        }
+        if labelpad.is_some() {
+            self.y_tick_labelpad = labelpad;
+        }
     }
 
-    #[pyo3(signature = (ticks=None, labels=None))]
-    pub fn set_yticks(&mut self, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) {
+    #[pyo3(signature = (ticks=None, labels=None, rotation=None, labelpad=None))]
+    pub fn set_yticks(
+        &mut self,
+        ticks: Option<Vec<f64>>,
+        labels: Option<Vec<String>>,
+        rotation: Option<f64>,
+        labelpad: Option<f64>,
+    ) {
         self.yticks_val = ticks;
         self.ytick_labels = labels;
+        if rotation.is_some() {
+            self.y_tick_rotation = rotation;
+        }
+        if labelpad.is_some() {
+            self.y_tick_labelpad = labelpad;
+        }
     }
 
     #[doc = "设置 x 轴刻度标签文本（须先经 set_xticks 固定刻度位置）。\n\n仅更新标签文本，不改动刻度位置；标签按位置与 xticks_val 对应（类别型 x 轴）。"]
@@ -3085,7 +3149,7 @@ impl Axes {
         self.element_count = 0;
     }
 
-    #[pyo3(signature = (axis="both", labelsize=None, rotation=None, color=None, labelcolor=None, bottom=None, top=None, left=None, right=None, labelbottom=None, labeltop=None, labelleft=None, labelright=None))]
+    #[pyo3(signature = (axis="both", labelsize=None, rotation=None, labelpad=None, color=None, labelcolor=None, bottom=None, top=None, left=None, right=None, labelbottom=None, labeltop=None, labelleft=None, labelright=None, which="major"))]
     #[allow(unused_variables)]
     #[allow(clippy::too_many_arguments)]
     pub fn tick_params(
@@ -3093,6 +3157,7 @@ impl Axes {
         axis: &str,
         labelsize: Option<f64>,
         rotation: Option<f64>,
+        labelpad: Option<f64>,
         color: Option<String>,
         labelcolor: Option<String>,
         bottom: Option<bool>,
@@ -3103,14 +3168,32 @@ impl Axes {
         labeltop: Option<bool>,
         labelleft: Option<bool>,
         labelright: Option<bool>,
+        which: &str,
     ) {
         // axis 决定作用于哪条轴：'x' 仅 x、'y' 仅 y、'both'（默认）两者。
         // 对齐 matplotlib：bottom/top/labelbottom/labeltop 属 x 轴，left/right/labelleft/
         // labelright 属 y 轴；当 axis 与之不符时忽略（matplotlib 在内部 pop 掉）。
+        // which 指定操作主刻度 ('major'，默认) 还是次刻度 ('minor')，当前只支持主刻度。
         let apply_x = axis == "x" || axis == "both";
         let apply_y = axis == "y" || axis == "both";
         if let Some(v) = labelsize {
             self.tick_labelsize = v;
+        }
+        if let Some(r) = rotation {
+            if apply_x {
+                self.x_tick_rotation = Some(r);
+            }
+            if apply_y {
+                self.y_tick_rotation = Some(r);
+            }
+        }
+        if let Some(p) = labelpad {
+            if apply_x {
+                self.x_tick_labelpad = Some(p);
+            }
+            if apply_y {
+                self.y_tick_labelpad = Some(p);
+            }
         }
         if let Some(c) = &color {
             if apply_x {
@@ -4064,6 +4147,7 @@ impl Axes {
                 // 手动绘制底部 x 刻度标签：相对 plotters 默认位置（label_dist = 2*tick_px）
                 // 再向下偏移 2 个最终像素（渲染像素 = round(2*ss)）。锚点 (t, y_min) 映射到
                 // 绘图区底边，Text 的像素偏移 (0, offset_y) 使文字顶端下移，与刻度线对齐。
+                // 支持 rotation（旋转角度）和 labelpad（标签与轴的距离）。
                 if do_manual_x {
                     let (x_lo, x_hi) = (x_min.min(x_max), x_min.max(x_max));
                     // 若设置了主刻度 formatter（如 ConciseDateFormatter），一次性对落在数据区内
@@ -4082,7 +4166,13 @@ impl Axes {
                                 .extract::<Vec<String>>()
                                 .ok()
                         });
-                    let offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
+                    let base_offset_y = tick_px * 2 + (2.0 * ss).round() as i32;
+                    let labelpad_offset = self
+                        .x_tick_labelpad
+                        .map(|p| (p * ss).round() as i32)
+                        .unwrap_or(0);
+                    let offset_y = base_offset_y + labelpad_offset;
+                    let rotation = self.x_tick_rotation.unwrap_or(0.0);
                     let text_style: TextStyle = ("sans-serif", label_size)
                         .into_font()
                         .color(&x_label_rgb)
@@ -4105,6 +4195,7 @@ impl Axes {
                             crate::figure::axes_mesh::format_linear_tick(t)
                         };
                         vis_i += 1;
+                        crate::utils::glyph_cache::set_current_rotation(rotation);
                         chart
                             .draw_series(std::iter::once(
                                 plotters::element::EmptyElement::at((t, y_min))
@@ -4115,11 +4206,13 @@ impl Axes {
                                     ),
                             ))
                             .map_err(|e| {
+                                crate::utils::glyph_cache::set_current_rotation(0.0);
                                 PyRuntimeError::new_err(format!(
                                     "Failed to draw x tick label: {}",
                                     e
                                 ))
                             })?;
+                        crate::utils::glyph_cache::set_current_rotation(0.0);
                         // tick_params(color=...): 在 plotters 黑刻度线上叠画同几何的彩色短线覆盖之
                         // （向外 tick_px 像素，锚点为绘图区底边）。保留 plotters 刻度尺寸不动，
                         // 避免改变标签间距。
@@ -4173,6 +4266,7 @@ impl Axes {
                 // tick_params(left=False)+spines 全隐藏但保留 yticklabels），需镜像 do_manual_x
                 // 手动补画。锚点 (x_min, t) 映射到绘图区左边，右对齐 + 垂直居中，向左偏移
                 // label_dist=2*tick_px，使标签落在预留的左边距内。
+                // 支持 rotation（旋转角度）和 labelpad（标签与轴的距离）。
                 let do_manual_y_labels = !self.is_twin_x
                     && !self.is_twin_y
                     && !y_axis_on
@@ -4180,7 +4274,13 @@ impl Axes {
                     && !y_ticks_empty;
                 if do_manual_y_labels {
                     let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
-                    let offset_x = tick_px * 2;
+                    let base_offset_x = tick_px * 2;
+                    let labelpad_offset = self
+                        .y_tick_labelpad
+                        .map(|p| (p * ss).round() as i32)
+                        .unwrap_or(0);
+                    let offset_x = base_offset_x + labelpad_offset;
+                    let rotation = self.y_tick_rotation.unwrap_or(0.0);
                     let text_style: TextStyle = ("sans-serif", label_size)
                         .into_font()
                         .color(&y_label_rgb)
@@ -4196,6 +4296,7 @@ impl Axes {
                         } else {
                             crate::figure::axes_mesh::format_linear_tick(t)
                         };
+                        crate::utils::glyph_cache::set_current_rotation(rotation);
                         chart
                             .draw_series(std::iter::once(
                                 plotters::element::EmptyElement::at((x_min, t))
@@ -4206,11 +4307,13 @@ impl Axes {
                                     ),
                             ))
                             .map_err(|e| {
+                                crate::utils::glyph_cache::set_current_rotation(0.0);
                                 PyRuntimeError::new_err(format!(
                                     "Failed to draw y tick label: {}",
                                     e
                                 ))
                             })?;
+                        crate::utils::glyph_cache::set_current_rotation(0.0);
                     }
                 }
             }

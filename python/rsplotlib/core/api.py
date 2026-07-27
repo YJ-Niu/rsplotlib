@@ -384,7 +384,7 @@ def stackplot(x, *args, labels=None, colors=None, alpha=1.0):
 # ==================== 辅助元素 ====================
 
 def text(x, y, text, fontsize=None, color=None, c=None, family=None,
-         ha=None, va=None, rotation=None, dx=None, dy=None, bbox=None):
+         ha='left', va='center', rotation=None, dx=None, dy=None, bbox=None):
     """添加文本
 
     Args:
@@ -395,12 +395,17 @@ def text(x, y, text, fontsize=None, color=None, c=None, family=None,
         color: 颜色 (默认: None)
         c: 颜色别名
         family: 字体族 (默认: None)
-        ha: 水平对齐 (默认: None)
-        va: 垂直对齐 (默认: None)
+        ha: 水平对齐方式 ('left' 左对齐, 'center' 居中, 'right' 右对齐)，默认 'left'
+        va: 垂直对齐方式 ('top' 顶部, 'center' 居中, 'bottom' 底部)，默认 'center'
         rotation: 旋转角度 (默认: None)
         dx: 水平像素偏移 (默认: None)
         dy: 垂直像素偏移 (默认: None)
         bbox: 文本背景框 (默认: None)
+
+    中文用法示例：
+        >>> text(0.5, 0.5, "Hello")  # 在 (0.5, 0.5) 添加文本，默认左对齐、垂直居中
+        >>> text(0.5, 0.5, "Hello", ha='center')  # 水平居中对齐
+        >>> text(0.5, 0.5, "Hello", va='top')  # 垂直顶部对齐
     """
     return _rsplotlib.text(
         x, y, text, fontsize=fontsize, color=color, c=c, family=family,
@@ -536,24 +541,38 @@ def ylim(bottom, top):
     return _rsplotlib.ylim(bottom, top)
 
 
-def xticks(ticks=None, labels=None):
+def xticks(ticks=None, labels=None, rotation=None, labelpad=None):
     """设置 x 轴刻度
 
     Args:
         ticks: 刻度位置列表 (默认: None)
         labels: 刻度标签列表 (默认: None)
+        rotation: 刻度标签旋转角度 (默认: None)
+        labelpad: 刻度标签与坐标轴的距离 (默认: None)
+
+    中文用法示例：
+        >>> xticks([0, 1, 2], ["一月", "二月", "三月"])  # 设置刻度位置和标签
+        >>> xticks(rotation=45)  # 旋转 x 轴刻度标签 45 度
+        >>> xticks(labelpad=10)  # 设置刻度标签与轴的距离为 10 像素
     """
-    return _rsplotlib.xticks(ticks, labels)
+    return _rsplotlib.xticks(ticks, labels, rotation, labelpad)
 
 
-def yticks(ticks=None, labels=None):
+def yticks(ticks=None, labels=None, rotation=None, labelpad=None):
     """设置 y 轴刻度
 
     Args:
         ticks: 刻度位置列表 (默认: None)
         labels: 刻度标签列表 (默认: None)
+        rotation: 刻度标签旋转角度 (默认: None)
+        labelpad: 刻度标签与坐标轴的距离 (默认: None)
+
+    中文用法示例：
+        >>> yticks([0, 1, 2], ["低", "中", "高"])  # 设置刻度位置和标签
+        >>> yticks(rotation=45)  # 旋转 y 轴刻度标签 45 度
+        >>> yticks(labelpad=10)  # 设置刻度标签与轴的距离为 10 像素
     """
-    return _rsplotlib.yticks(ticks, labels)
+    return _rsplotlib.yticks(ticks, labels, rotation, labelpad)
 
 
 # ==================== 子图与布局 ====================

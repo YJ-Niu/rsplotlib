@@ -887,16 +887,32 @@ pub fn vlines(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ticks=None, labels=None))]
-pub fn xticks(py: Python, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).xticks(ticks, labels);
+#[pyo3(signature = (ticks=None, labels=None, rotation=None, labelpad=None))]
+pub fn xticks(
+    py: Python,
+    ticks: Option<Vec<f64>>,
+    labels: Option<Vec<String>>,
+    rotation: Option<f64>,
+    labelpad: Option<f64>,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .xticks(ticks, labels, rotation, labelpad);
     Ok(())
 }
 
 #[pyfunction]
-#[pyo3(signature = (ticks=None, labels=None))]
-pub fn yticks(py: Python, ticks: Option<Vec<f64>>, labels: Option<Vec<String>>) -> PyResult<()> {
-    get_current_axes(py)?.borrow_mut(py).yticks(ticks, labels);
+#[pyo3(signature = (ticks=None, labels=None, rotation=None, labelpad=None))]
+pub fn yticks(
+    py: Python,
+    ticks: Option<Vec<f64>>,
+    labels: Option<Vec<String>>,
+    rotation: Option<f64>,
+    labelpad: Option<f64>,
+) -> PyResult<()> {
+    get_current_axes(py)?
+        .borrow_mut(py)
+        .yticks(ticks, labels, rotation, labelpad);
     Ok(())
 }
 

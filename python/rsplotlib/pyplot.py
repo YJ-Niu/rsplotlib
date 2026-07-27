@@ -1658,14 +1658,27 @@ def text(x, y, s, fontdict=None, **kwargs):
         x, y: 文本位置 (数据坐标)
         s: 文本内容
         fontdict: 字体属性字典 (可选)
-        **kwargs: 支持 fontsize, color/c, family, ha, va, rotation, dx, dy 等参数
+        ha: 水平对齐方式 ('left' 左对齐, 'center' 居中, 'right' 右对齐)，默认 'left'
+        va: 垂直对齐方式 ('top' 顶部, 'center' 居中, 'bottom' 底部)，默认 'center'
+        fontsize: 字体大小，默认 12
+        color: 文本颜色，默认 'black'
+        rotation: 旋转角度，默认 0
+        **kwargs: 支持 family, dx, dy, bbox 等参数
+
+    中文用法示例：
+        >>> plt.text(0.5, 0.5, "Hello")  # 在 (0.5, 0.5) 添加文本，默认左对齐、垂直居中
+        >>> plt.text(0.5, 0.5, "Hello", ha='center')  # 水平居中对齐
+        >>> plt.text(0.5, 0.5, "Hello", ha='right')  # 水平右对齐
+        >>> plt.text(0.5, 0.5, "Hello", va='top')  # 垂直顶部对齐
+        >>> plt.text(0.5, 0.5, "Hello", va='bottom')  # 垂直底部对齐
+        >>> plt.text(0.5, 0.5, "Hello", ha='center', va='center', fontsize=14, color='red')  # 组合设置
     """
     fontsize = kwargs.get('fontsize', fontdict.get('fontsize', 12) if fontdict else 12)
     color = kwargs.get('color', fontdict.get('color', 'black') if fontdict else 'black')
     c = kwargs.get('c', None)
     family = kwargs.get('family', None)
-    ha = kwargs.get('ha', kwargs.get('horizontalalignment', None))
-    va = kwargs.get('va', kwargs.get('verticalalignment', None))
+    ha = kwargs.get('ha', kwargs.get('horizontalalignment', 'left'))
+    va = kwargs.get('va', kwargs.get('verticalalignment', 'center'))
     rotation = kwargs.get('rotation', None)
     dx = kwargs.get('dx', None)
     dy = kwargs.get('dy', None)
@@ -2050,26 +2063,79 @@ def ylim(bottom=None, top=None, **kwargs):
     return _rsplotlib.ylim(bottom, top)
 
 
-def xticks(ticks=None, labels=None, **kwargs):
+def xticks(ticks=None, labels=None, rotation=None, labelpad=None, **kwargs):
     """设置 x 轴刻度。
 
     Args:
-        ticks: 刻度位置列表
-        labels: 刻度标签列表
+        ticks: 刻度位置列表（可选）
+        labels: 刻度标签列表（可选）
+        rotation: 刻度标签旋转角度（默认：0，不旋转）
+        labelpad: 刻度标签与坐标轴的距离（默认：None，自动计算）
+
+    中文用法示例：
+        >>> plt.xticks([0, 1, 2], ["一月", "二月", "三月"])  # 设置刻度位置和标签
+        >>> plt.xticks(rotation=45)  # 旋转 x 轴刻度标签 45 度
+        >>> plt.xticks(labelpad=10)  # 设置刻度标签与轴的距离为 10 像素
+        >>> plt.xticks([0, 1, 2], ["一月", "二月", "三月"], rotation=45, labelpad=10)  # 同时设置所有参数
     """
     ticks = _to_list(ticks)
-    return _rsplotlib.xticks(ticks, labels)
+    return _rsplotlib.xticks(ticks, labels, rotation, labelpad)
 
 
-def yticks(ticks=None, labels=None, **kwargs):
+def yticks(ticks=None, labels=None, rotation=None, labelpad=None, **kwargs):
     """设置 y 轴刻度。
 
     Args:
-        ticks: 刻度位置列表
-        labels: 刻度标签列表
+        ticks: 刻度位置列表（可选）
+        labels: 刻度标签列表（可选）
+        rotation: 刻度标签旋转角度（默认：0，不旋转）
+        labelpad: 刻度标签与坐标轴的距离（默认：None，自动计算）
+
+    中文用法示例：
+        >>> plt.yticks([0, 1, 2], ["低", "中", "高"])  # 设置刻度位置和标签
+        >>> plt.yticks(rotation=45)  # 旋转 y 轴刻度标签 45 度
+        >>> plt.yticks(labelpad=10)  # 设置刻度标签与轴的距离为 10 像素
+        >>> plt.yticks([0, 1, 2], ["低", "中", "高"], rotation=45, labelpad=10)  # 同时设置所有参数
     """
     ticks = _to_list(ticks)
-    return _rsplotlib.yticks(ticks, labels)
+    return _rsplotlib.yticks(ticks, labels, rotation, labelpad)
+
+
+def tick_params(axis='both', which='major', labelsize=None, rotation=None, labelpad=None,
+                color=None, labelcolor=None, bottom=None, top=None, left=None, right=None,
+                labelbottom=None, labeltop=None, labelleft=None, labelright=None, **kwargs):
+    """精细控制刻度线与刻度标签的显示（当前子图）。
+
+    与 `xticks`/`yticks` 相比，`tick_params` 专注于"刻度线/刻度标签"的样式与可见性，
+    不会改变刻度位置或标签文本，适合单独调整字号、颜色、是否显示等场景。
+
+    Args:
+        axis: 作用的轴，可选 'x'、'y' 或 'both'（默认 'both'）。
+        which: 操作主刻度 ('major'，默认) 还是次刻度 ('minor')。
+        labelsize: 刻度标签字体大小（覆盖全局默认）。
+        rotation: 刻度标签旋转角度（度）。
+        labelpad: 刻度标签与坐标轴的距离（像素）。
+        color: 刻度线颜色。
+        labelcolor: 刻度标签颜色。
+        bottom, top, left, right: 刻度线是否显示 (True/False)。
+        labelbottom, labeltop, labelleft, labelright: 刻度标签是否显示 (True/False)。
+
+    中文用法示例：
+        >>> plt.plot([1, 2, 3, 4], [1, 4, 9, 16])
+        >>> plt.tick_params(axis='both', which='major', labelsize=14)  # 同时设置 x/y 主刻度标签字号
+        >>> plt.tick_params(axis='x', labelsize=12, rotation=45)  # 仅调整 x 轴：字号 12、旋转 45°
+        >>> plt.tick_params(axis='y', which='major', color='red', labelcolor='blue')  # y 轴刻度线红、标签蓝
+        >>> plt.tick_params(bottom=False, labelbottom=False)  # 隐藏 x 轴刻度线和标签
+    """
+    ax = _get_axes()
+    if ax is None:
+        return None
+    return ax.tick_params(
+        axis=axis, which=which, labelsize=labelsize, rotation=rotation, labelpad=labelpad,
+        color=color, labelcolor=labelcolor,
+        bottom=bottom, top=top, left=left, right=right,
+        labelbottom=labelbottom, labeltop=labeltop, labelleft=labelleft, labelright=labelright,
+    )
 
 
 def xscale(scale, **kwargs):
@@ -3235,7 +3301,6 @@ def _patch_axes():
     _orig_tick_params = _rs.Axes.tick_params
 
     def _tick_params(self, **kwargs):
-        kwargs.pop('which', None)
         return _orig_tick_params(self, **kwargs)
     _rs.Axes.tick_params = _tick_params
 

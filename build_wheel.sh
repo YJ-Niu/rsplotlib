@@ -120,15 +120,25 @@ fi
 echo "  -> clippy checks passed."
 
 BUILD_ARGS=()
-if $RELEASE; then BUILD_ARGS+=(--release); else BUILD_ARGS+=(--debug); fi
+# maturin build 默认就是 debug profile，只有 release 时才传 --release
+if $RELEASE; then BUILD_ARGS+=(--release); fi
 
 mkdir -p "$OUT_DIR"
 echo "Building wheel into $OUT_DIR using $PYTHON_EXEC (release=$RELEASE)"
 if [[ "$MATURIN_MODE" == "path" ]]; then
-  maturin build "${BUILD_ARGS[@]}" -o "$OUT_DIR" -i "$PYTHON_EXEC"
+  # set -u 下空数组展开会触发 unbound variable；用 +"${arr[@]}" 语法兼容空数组
+  if [[ ${#BUILD_ARGS[@]} -gt 0 ]]; then
+    maturin build "${BUILD_ARGS[@]}" -o "$OUT_DIR" -i "$PYTHON_EXEC"
+  else
+    maturin build -o "$OUT_DIR" -i "$PYTHON_EXEC"
+  fi
 else
   # run maturin as a module under the chosen Python
-  "$PYTHON_EXEC" -m maturin build "${BUILD_ARGS[@]}" -o "$OUT_DIR" -i "$PYTHON_EXEC"
+  if [[ ${#BUILD_ARGS[@]} -gt 0 ]]; then
+    "$PYTHON_EXEC" -m maturin build "${BUILD_ARGS[@]}" -o "$OUT_DIR" -i "$PYTHON_EXEC"
+  else
+    "$PYTHON_EXEC" -m maturin build -o "$OUT_DIR" -i "$PYTHON_EXEC"
+  fi
 fi
 
 # Locate the built wheel and install it into the local venv

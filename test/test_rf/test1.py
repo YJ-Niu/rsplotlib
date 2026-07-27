@@ -2,7 +2,6 @@ import rsplotlib.pyplot as plt
 import rsnumpy as np
 from rsnumpy import absolute, log10, real, sum
 from scipy.optimize import minimize
-
 from skrf.calibration.deembedding import IEEEP370_SE_NZC_2xThru
 from skrf.media import CPW
 
