@@ -26,6 +26,174 @@ fn push_rect(pts: &mut Vec<(f64, f64)>, x0: f64, x1: f64, y0: f64, y1: f64) {
     }
 }
 
+/// 计算矩形区域内的数据点密度（用于评估空白区域）
+fn region_density(
+    pts: &[(f64, f64)],
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    rect_x1: f64,
+    rect_y1: f64,
+    rect_x2: f64,
+    rect_y2: f64,
+) -> f64 {
+    let rect_area = (rect_x2 - rect_x1).abs() * (rect_y2 - rect_y1).abs();
+    if rect_area <= 0.0 {
+        return 1.0;
+    }
+
+    let data_range_area = (x_max - x_min).abs() * (y_max - y_min).abs();
+    let relative_area = rect_area / data_range_area;
+
+    let count = pts
+        .iter()
+        .filter(|&&(x, y)| x >= rect_x1 && x <= rect_x2 && y >= rect_y1 && y <= rect_y2)
+        .count();
+
+    if count == 0 {
+        0.0
+    } else {
+        (count as f64 / relative_area).min(1.0)
+    }
+}
+
+/// 智能查找最佳图例位置
+/// 策略：密集扫描整个绘图区域，找到真正的空白位置，优先选择零密度区域
+fn find_best_blank_region(
+    pts: &[(f64, f64)],
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    legend_width: f64,
+    legend_height: f64,
+    target_hpos: HPos,
+    target_vpos: VPos,
+) -> (f64, f64, f64, f64) {
+    let px = (x_max - x_min).abs() * 0.02;
+    let py = (y_max - y_min).abs() * 0.02;
+
+    let x_range = (x_max - x_min).abs();
+    let y_range = (y_max - y_min).abs();
+
+    // 使用更密集的网格扫描整个绘图区域
+    let steps_x = 12;
+    let steps_y = 12;
+
+    let scan_x_start = x_min + px;
+    let scan_x_end = x_max - px - legend_width;
+    let scan_y_start = y_min + py;
+    let scan_y_end = y_max - py - legend_height;
+
+    let mut zero_density_candidates: Vec<(f64, f64, f64, f64)> = Vec::new();
+    let mut all_candidates: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
+
+    if scan_x_end > scan_x_start && scan_y_end > scan_y_start {
+        let step_x = (scan_x_end - scan_x_start) / (steps_x - 1) as f64;
+        let step_y = (scan_y_end - scan_y_start) / (steps_y - 1) as f64;
+
+        for i in 0..steps_x {
+            for j in 0..steps_y {
+                let x1 = scan_x_start + step_x * i as f64;
+                let y1 = scan_y_start + step_y * j as f64;
+                let x2 = x1 + legend_width;
+                let y2 = y1 + legend_height;
+
+                // 计算该区域内的数据点数量（直接计数，比密度更直观）
+                let count = pts
+                    .iter()
+                    .filter(|&&(x, y)| x >= x1 && x <= x2 && y >= y1 && y <= y2)
+                    .count();
+
+                // 转换为密度（0-1范围）
+                let density = if count == 0 {
+                    0.0
+                } else {
+                    let rect_area = (x2 - x1) * (y2 - y1);
+                    let data_area = x_range * y_range;
+                    let relative_area = rect_area / data_area;
+                    (count as f64 / relative_area).min(1.0)
+                };
+
+                all_candidates.push((x1, y1, x2, y2, density));
+
+                // 如果密度为0，加入零密度候选列表
+                if count == 0 {
+                    zero_density_candidates.push((x1, y1, x2, y2));
+                }
+            }
+        }
+    }
+
+    // 确定目标位置（用户期望的位置）
+    let target_center_x = match target_hpos {
+        HPos::Left => x_min + x_range * 0.15,
+        HPos::Center => (x_min + x_max) / 2.0,
+        HPos::Right => x_max - x_range * 0.15,
+    };
+
+    let target_center_y = match target_vpos {
+        VPos::Bottom => y_min + y_range * 0.15,
+        VPos::Center => (y_min + y_max) / 2.0,
+        VPos::Top => y_max - y_range * 0.15,
+    };
+
+    // 如果有零密度的位置，从中选择最接近目标位置的
+    if !zero_density_candidates.is_empty() {
+        let best = zero_density_candidates
+            .iter()
+            .min_by(|a, b| {
+                let dist_a = ((a.0 + a.2) / 2.0 - target_center_x).powi(2)
+                    + ((a.1 + a.3) / 2.0 - target_center_y).powi(2);
+                let dist_b = ((b.0 + b.2) / 2.0 - target_center_x).powi(2)
+                    + ((b.1 + b.3) / 2.0 - target_center_y).powi(2);
+                dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap();
+        return *best;
+    }
+
+    // 如果没有零密度位置，从所有候选中选择密度最低的
+    if all_candidates.is_empty() {
+        return (
+            x_min + px,
+            y_min + py,
+            x_min + px + legend_width,
+            y_min + py + legend_height,
+        );
+    }
+
+    // 按密度升序排序，选择密度最低的位置
+    all_candidates.sort_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
+
+    // 找到所有与最低密度相近的位置（容差范围内）
+    let min_density = all_candidates[0].4;
+    let tolerance = 0.05;
+    let low_density_candidates: Vec<_> = all_candidates
+        .iter()
+        .filter(|c| c.4 <= min_density + tolerance)
+        .collect();
+
+    // 从低密度位置中选择最接近目标位置的
+    let best = low_density_candidates
+        .iter()
+        .min_by(|a, b| {
+            let dist_a = ((a.0 + a.2) / 2.0 - target_center_x).powi(2)
+                + ((a.1 + a.3) / 2.0 - target_center_y).powi(2);
+            let dist_b = ((b.0 + b.2) / 2.0 - target_center_x).powi(2)
+                + ((b.1 + b.3) / 2.0 - target_center_y).powi(2);
+            dist_a
+                .partial_cmp(&dist_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap();
+
+    (best.0, best.1, best.2, best.3)
+}
+
 /// 从所有绘图元素中收集代表性数据点（数据坐标），供图例自动避让使用。
 /// 对填充类元素（柱状/直方/填充区）采样其覆盖区域，对线/点类采样其顶点。
 fn collect_data_points(elements: &[PlotElement]) -> Vec<(f64, f64)> {
@@ -156,6 +324,7 @@ fn box_from_anchor(
 
 /// 在候选位置中挑选与数据遮挡最少的图例框（matplotlib `loc='best'` 语义）。
 /// 沿绘图区域四周以一定步长扫描，生成大量候选位置，取遮挡点数最少者。
+/// 支持尝试多种图例尺寸（如水平布局和垂直布局），选择最佳的位置和尺寸组合。
 fn best_box(
     pts: &[(f64, f64)],
     x_min: f64,
@@ -164,6 +333,8 @@ fn best_box(
     y_max: f64,
     legend_width: f64,
     legend_height: f64,
+    alt_width: Option<f64>,
+    alt_height: Option<f64>,
 ) -> (f64, f64, f64, f64) {
     let x_range = (x_max - x_min).abs();
     let y_range = (y_max - y_min).abs();
@@ -182,92 +353,53 @@ fn best_box(
         }
     };
 
-    // 沿四周扫描，步长为图例框尺寸或数据范围的一定比例
-    let x_step = (x_range * 0.08).max(legend_width * 0.5);
-    let y_step = (y_range * 0.08).max(legend_height * 0.5);
+    let sizes = if let (Some(aw), Some(ah)) = (alt_width, alt_height) {
+        vec![(legend_width, legend_height), (aw, ah)]
+    } else {
+        vec![(legend_width, legend_height)]
+    };
 
-    // 底部边缘：从左到右
-    let mut x_pos = x_min + px;
-    while x_pos + legend_width <= x_max - px {
-        add_candidate(
-            x_pos,
-            y_min + py,
-            x_pos + legend_width,
-            y_min + py + legend_height,
-        );
-        x_pos += x_step;
-    }
-    // 底部最右端
-    if x_max - px - legend_width > x_min + px {
-        add_candidate(
-            x_max - px - legend_width,
-            y_min + py,
-            x_max - px,
-            y_min + py + legend_height,
-        );
-    }
+    for &(lw, lh) in &sizes {
+        let x_step = (x_range * 0.08).max(lw * 0.5);
+        let y_step = (y_range * 0.08).max(lh * 0.5);
 
-    // 顶部边缘：从左到右
-    x_pos = x_min + px;
-    while x_pos + legend_width <= x_max - px {
-        add_candidate(
-            x_pos,
-            y_max - py - legend_height,
-            x_pos + legend_width,
-            y_max - py,
-        );
-        x_pos += x_step;
-    }
-    if x_max - px - legend_width > x_min + px {
-        add_candidate(
-            x_max - px - legend_width,
-            y_max - py - legend_height,
-            x_max - px,
-            y_max - py,
-        );
-    }
+        let mut x_pos = x_min + px;
+        while x_pos + lw <= x_max - px {
+            add_candidate(x_pos, y_min + py, x_pos + lw, y_min + py + lh);
+            x_pos += x_step;
+        }
+        if x_max - px - lw > x_min + px {
+            add_candidate(x_max - px - lw, y_min + py, x_max - px, y_min + py + lh);
+        }
 
-    // 左侧边缘：从上到下
-    let mut y_pos = y_min + py;
-    while y_pos + legend_height <= y_max - py {
-        add_candidate(
-            x_min + px,
-            y_pos,
-            x_min + px + legend_width,
-            y_pos + legend_height,
-        );
-        y_pos += y_step;
-    }
-    if y_max - py - legend_height > y_min + py {
-        add_candidate(
-            x_min + px,
-            y_max - py - legend_height,
-            x_min + px + legend_width,
-            y_max - py,
-        );
+        x_pos = x_min + px;
+        while x_pos + lw <= x_max - px {
+            add_candidate(x_pos, y_max - py - lh, x_pos + lw, y_max - py);
+            x_pos += x_step;
+        }
+        if x_max - px - lw > x_min + px {
+            add_candidate(x_max - px - lw, y_max - py - lh, x_max - px, y_max - py);
+        }
+
+        let mut y_pos = y_min + py;
+        while y_pos + lh <= y_max - py {
+            add_candidate(x_min + px, y_pos, x_min + px + lw, y_pos + lh);
+            y_pos += y_step;
+        }
+        if y_max - py - lh > y_min + py {
+            add_candidate(x_min + px, y_max - py - lh, x_min + px + lw, y_max - py);
+        }
+
+        y_pos = y_min + py;
+        while y_pos + lh <= y_max - py {
+            add_candidate(x_max - px - lw, y_pos, x_max - px, y_pos + lh);
+            y_pos += y_step;
+        }
+        if y_max - py - lh > y_min + py {
+            add_candidate(x_max - px - lw, y_max - py - lh, x_max - px, y_max - py);
+        }
     }
 
-    // 右侧边缘：从上到下
-    y_pos = y_min + py;
-    while y_pos + legend_height <= y_max - py {
-        add_candidate(
-            x_max - px - legend_width,
-            y_pos,
-            x_max - px,
-            y_pos + legend_height,
-        );
-        y_pos += y_step;
-    }
-    if y_max - py - legend_height > y_min + py {
-        add_candidate(
-            x_max - px - legend_width,
-            y_max - py - legend_height,
-            x_max - px,
-            y_max - py,
-        );
-    }
-
-    // 如果没有有效候选位置，使用右下角
     if candidates.is_empty() {
         return (
             x_max - px - legend_width,
@@ -430,7 +562,77 @@ where
             );
 
             if is_top_bottom_loc && max_possible_ncol >= 2 && entry_count >= 2 {
-                max_possible_ncol.min(entry_count)
+                let pts = collect_data_points(elements);
+
+                let px = x_range * 0.02;
+                let py = y_range * 0.02;
+
+                let mut best_ncol = 1;
+                let mut best_density = 1.0;
+
+                for try_ncol in 1..=max_possible_ncol.min(entry_count) {
+                    let rows_per_col_try = entry_count.div_ceil(try_ncol);
+                    let legend_height_try_px = row_px * rows_per_col_try as f64 + 2.0 * pad_v_px;
+                    let legend_height_try = legend_height_try_px * y_per_px;
+                    let legend_width_try_px = entry_width_px * try_ncol as f64
+                        + col_gap_px * (try_ncol - 1) as f64
+                        + pad_h_px;
+                    let legend_width_try = legend_width_try_px * x_per_px;
+
+                    let mut current_density: f64 = 1.0;
+                    let candidate_positions = match loc.as_str() {
+                        "upper right" => vec![(HPos::Right, VPos::Top)],
+                        "upper left" => vec![(HPos::Left, VPos::Top)],
+                        "lower right" => vec![(HPos::Right, VPos::Bottom)],
+                        "lower left" => vec![(HPos::Left, VPos::Bottom)],
+                        "upper center" => vec![(HPos::Center, VPos::Top)],
+                        "lower center" => vec![(HPos::Center, VPos::Bottom)],
+                        "best" => vec![
+                            (HPos::Right, VPos::Top),
+                            (HPos::Left, VPos::Top),
+                            (HPos::Right, VPos::Bottom),
+                            (HPos::Left, VPos::Bottom),
+                        ],
+                        _ => vec![
+                            (HPos::Right, VPos::Top),
+                            (HPos::Left, VPos::Top),
+                            (HPos::Right, VPos::Bottom),
+                            (HPos::Left, VPos::Bottom),
+                        ],
+                    };
+
+                    for &(h_pos, v_pos) in &candidate_positions {
+                        let (x_anchor, y_anchor) = match (h_pos, v_pos) {
+                            (HPos::Left, VPos::Top) => (x_min + px, y_max - py),
+                            (HPos::Right, VPos::Top) => (x_max - px, y_max - py),
+                            (HPos::Left, VPos::Bottom) => (x_min + px, y_min + py),
+                            (HPos::Right, VPos::Bottom) => (x_max - px, y_min + py),
+                            (HPos::Center, VPos::Top) => ((x_min + x_max) / 2.0, y_max - py),
+                            (HPos::Center, VPos::Bottom) => ((x_min + x_max) / 2.0, y_min + py),
+                            _ => ((x_min + x_max) / 2.0, (y_min + y_max) / 2.0),
+                        };
+                        let (bx1, by1, bx2, by2) = box_from_anchor(
+                            h_pos,
+                            v_pos,
+                            x_anchor,
+                            y_anchor,
+                            legend_width_try,
+                            legend_height_try,
+                        );
+                        let density =
+                            region_density(&pts, x_min, x_max, y_min, y_max, bx1, by1, bx2, by2);
+                        current_density = current_density.min(density);
+                    }
+
+                    if current_density < best_density {
+                        best_density = current_density;
+                        best_ncol = try_ncol;
+                        if best_density == 0.0 {
+                            break;
+                        }
+                    }
+                }
+                best_ncol
             } else {
                 1
             }
@@ -442,7 +644,7 @@ where
         let legend_height = legend_height_px * y_per_px;
 
         // 计算最大可用图例高度，以及需要省略的条目数
-        let px = x_range * 0.02;
+        let _px = x_range * 0.02;
         let py = y_range * 0.02;
         let max_legend_height = y_max - y_min - 2.0 * py;
 
@@ -474,110 +676,144 @@ where
         let display_legend_height_px = row_px * rows_with_ellipsis as f64 + 2.0 * pad_v_px;
         let display_legend_height = display_legend_height_px * y_per_px;
 
-        // 已知固定位置直接定位；其余（含 "best" 与未识别值）自动避让数据。
-        // 内边距：取数据范围的 2%，避免图例紧贴坐标轴边界
-        // 使用 display_legend_height 确保框大小与显示条目一致
+        // 收集数据点，用于空白区域检测
+        let mut data_pts = collect_data_points(elements);
+        if xlog || ylog {
+            for p in data_pts.iter_mut() {
+                if xlog {
+                    p.0 = if p.0 > 0.0 {
+                        p.0.log10()
+                    } else {
+                        x_min.min(x_max)
+                    };
+                }
+                if ylog {
+                    p.1 = if p.1 > 0.0 {
+                        p.1.log10()
+                    } else {
+                        y_min.min(y_max)
+                    };
+                }
+            }
+        }
+
+        // 已知固定位置：先尝试目标位置，然后在附近搜索空白区域
+        // 其余（含 "best" 与未识别值）自动避让数据
         let (box_x1, box_y1, box_x2, box_y2) = match loc.as_str() {
-            "upper right" => box_from_anchor(
+            "upper right" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                display_legend_height,
                 HPos::Right,
                 VPos::Top,
-                x_max - px,
-                y_max - py,
+            ),
+            "upper left" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "upper left" => box_from_anchor(
                 HPos::Left,
                 VPos::Top,
-                x_min + px,
-                y_max - py,
+            ),
+            "lower right" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "lower right" => box_from_anchor(
                 HPos::Right,
                 VPos::Bottom,
-                x_max - px,
-                y_min + py,
+            ),
+            "lower left" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "lower left" => box_from_anchor(
                 HPos::Left,
                 VPos::Bottom,
-                x_min + px,
-                y_min + py,
+            ),
+            "center" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "center" => box_from_anchor(
                 HPos::Center,
                 VPos::Center,
-                (x_min + x_max) / 2.0,
-                (y_min + y_max) / 2.0,
+            ),
+            "right" | "center right" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "right" | "center right" => box_from_anchor(
                 HPos::Right,
                 VPos::Center,
-                x_max - px,
-                (y_min + y_max) / 2.0,
+            ),
+            "center left" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "center left" => box_from_anchor(
                 HPos::Left,
                 VPos::Center,
-                x_min + px,
-                (y_min + y_max) / 2.0,
+            ),
+            "lower center" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "lower center" => box_from_anchor(
                 HPos::Center,
                 VPos::Bottom,
-                (x_min + x_max) / 2.0,
-                y_min + py,
+            ),
+            "upper center" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 legend_width,
                 display_legend_height,
-            ),
-            "upper center" => box_from_anchor(
                 HPos::Center,
                 VPos::Top,
-                (x_min + x_max) / 2.0,
-                y_max - py,
-                legend_width,
-                display_legend_height,
             ),
             _ => {
-                let mut pts = collect_data_points(elements);
-                if xlog || ylog {
-                    for p in pts.iter_mut() {
-                        if xlog {
-                            p.0 = if p.0 > 0.0 {
-                                p.0.log10()
-                            } else {
-                                x_min.min(x_max)
-                            };
-                        }
-                        if ylog {
-                            p.1 = if p.1 > 0.0 {
-                                p.1.log10()
-                            } else {
-                                y_min.min(y_max)
-                            };
-                        }
-                    }
-                }
+                let vertical_width = entry_width_px * x_per_px;
+                let vertical_rows = display_count;
+                let vertical_height_px = row_px * vertical_rows as f64 + 2.0 * pad_v_px;
+                let vertical_height = vertical_height_px * y_per_px;
                 best_box(
-                    &pts,
+                    &data_pts,
                     x_min,
                     x_max,
                     y_min,
                     y_max,
                     legend_width,
                     display_legend_height,
+                    Some(vertical_width),
+                    Some(vertical_height),
                 )
             }
         };

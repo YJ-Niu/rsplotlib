@@ -14,7 +14,7 @@ MaxNLocator = ticker.MaxNLocator
 MultipleLocator = ticker.MultipleLocator
 AutoMinorLocator = ticker.AutoMinorLocator
 
-__version__ = "0.3.5"
+__version__ = "0.3.6"
 
 
 def _round_float_for_display(value):
