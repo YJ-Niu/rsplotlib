@@ -14,7 +14,7 @@ MaxNLocator = ticker.MaxNLocator
 MultipleLocator = ticker.MultipleLocator
 AutoMinorLocator = ticker.AutoMinorLocator
 
-__version__ = "0.3.5"
+__version__ = "0.3.6"
 
 
 def _round_float_for_display(value):
@@ -28,6 +28,7 @@ def _round_float_for_display(value):
 
 
 def _patch_rsnumpy_repr():
+    """优化 rsnumpy.ndarray 的显示格式，使其输出更简洁易读。"""
     try:
         import rsnumpy as np
         ndarray_cls = np.ndarray
@@ -35,44 +36,38 @@ def _patch_rsnumpy_repr():
         original_repr = ndarray_cls.__repr__
         original_str = ndarray_cls.__str__
         
+        def _convert_value(obj):
+            """递归转换并四舍五入值。"""
+            if hasattr(obj, 'tolist'):
+                return _convert_value(obj.tolist())
+            if isinstance(obj, list):
+                return [_convert_value(item) for item in obj]
+            if isinstance(obj, complex):
+                return complex(
+                    _round_float_for_display(obj.real),
+                    _round_float_for_display(obj.imag),
+                )
+            return _round_float_for_display(obj)
+        
+        def _format_list(lst):
+            """格式化嵌套列表为紧凑字符串表示。"""
+            if not lst:
+                return "[]"
+            first = lst[0]
+            if isinstance(first, list):
+                inner = ", ".join(_format_list(item) for item in lst)
+                return f"[{inner}]"
+            if isinstance(first, complex):
+                parts = [f"({x.real}+{x.imag}j)" for x in lst]
+                return f"[{', '.join(parts)}]"
+            return str(lst)
+        
         def patched_repr(self):
             try:
-                data = self.tolist()
-                
-                def convert_to_python(obj):
-                    if hasattr(obj, 'tolist'):
-                        return convert_to_python(obj.tolist())
-                    elif isinstance(obj, list):
-                        return [convert_to_python(item) for item in obj]
-                    elif isinstance(obj, complex):
-                        real_part = _round_float_for_display(obj.real)
-                        imag_part = _round_float_for_display(obj.imag)
-                        return complex(real_part, imag_part)
-                    else:
-                        return _round_float_for_display(obj)
-                
-                converted_data = convert_to_python(data)
-                
-                if isinstance(converted_data, list) and len(converted_data) == 1:
-                    converted_data = converted_data[0]
-                
-                def format_list(lst):
-                    if not lst:
-                        return "[]"
-                    first = lst[0]
-                    if isinstance(first, list):
-                        inner = ", ".join(format_list(item) for item in lst)
-                        return f"[{inner}]"
-                    elif isinstance(first, complex):
-                        formatted = [f"({x.real}+{x.imag}j)" for x in lst]
-                        return f"[{', '.join(formatted)}]"
-                    else:
-                        return str(lst)
-                
-                if isinstance(converted_data, list):
-                    return format_list(converted_data)
-                else:
-                    return str(converted_data)
+                data = _convert_value(self.tolist())
+                if isinstance(data, list) and len(data) == 1:
+                    data = data[0]
+                return _format_list(data) if isinstance(data, list) else str(data)
             except Exception:
                 ndarray_cls.__str__ = original_str
                 result = original_repr(self)

@@ -1658,14 +1658,27 @@ def text(x, y, s, fontdict=None, **kwargs):
         x, y: 文本位置 (数据坐标)
         s: 文本内容
         fontdict: 字体属性字典 (可选)
-        **kwargs: 支持 fontsize, color/c, family, ha, va, rotation, dx, dy 等参数
+        ha: 水平对齐方式 ('left' 左对齐, 'center' 居中, 'right' 右对齐)，默认 'left'
+        va: 垂直对齐方式 ('top' 顶部, 'center' 居中, 'bottom' 底部)，默认 'center'
+        fontsize: 字体大小，默认 12
+        color: 文本颜色，默认 'black'
+        rotation: 旋转角度，默认 0
+        **kwargs: 支持 family, dx, dy, bbox 等参数
+
+    中文用法示例：
+        >>> plt.text(0.5, 0.5, "Hello")  # 在 (0.5, 0.5) 添加文本，默认左对齐、垂直居中
+        >>> plt.text(0.5, 0.5, "Hello", ha='center')  # 水平居中对齐
+        >>> plt.text(0.5, 0.5, "Hello", ha='right')  # 水平右对齐
+        >>> plt.text(0.5, 0.5, "Hello", va='top')  # 垂直顶部对齐
+        >>> plt.text(0.5, 0.5, "Hello", va='bottom')  # 垂直底部对齐
+        >>> plt.text(0.5, 0.5, "Hello", ha='center', va='center', fontsize=14, color='red')  # 组合设置
     """
     fontsize = kwargs.get('fontsize', fontdict.get('fontsize', 12) if fontdict else 12)
     color = kwargs.get('color', fontdict.get('color', 'black') if fontdict else 'black')
     c = kwargs.get('c', None)
     family = kwargs.get('family', None)
-    ha = kwargs.get('ha', kwargs.get('horizontalalignment', None))
-    va = kwargs.get('va', kwargs.get('verticalalignment', None))
+    ha = kwargs.get('ha', kwargs.get('horizontalalignment', 'left'))
+    va = kwargs.get('va', kwargs.get('verticalalignment', 'center'))
     rotation = kwargs.get('rotation', None)
     dx = kwargs.get('dx', None)
     dy = kwargs.get('dy', None)
@@ -1994,16 +2007,50 @@ def legend(loc='best', **kwargs):
               'lower right', 'upper center', 'lower center',
               'center left', 'center right', 'center')，也支持整数 0-10
         facecolor: 图例框背景色 (颜色名或 '#RRGGBB')，默认沿用半透明白底
-        framealpha: 图例框背景不透明度 (0-1)，默认 0.85
+        framealpha: 图例框背景不透明度 (0-1)，默认 0.8
         edgecolor: 图例框边框色，默认浅灰
         fontsize: 图例文字字号 (point)，默认 11.0
         ncol: 图例列数，默认根据位置和空间自动判定（上部/下部居中位置自动启用多列）
+        frameon: 是否绘制图例框（背景 + 边框），默认 True
+        shadow: 是否绘制图例阴影，默认 False
+        title: 图例标题文本，默认 None
+        title_fontsize: 图例标题字号 (point)
+        labelcolor: 图例标签文字颜色（如 'white'、'#RRGGBB'），默认黑色
+        borderpad: 图例框内边距（字号单位），默认 0.4
+        labelspacing: 标签行间距（字号单位），默认 0.5
+        handlelength: 句柄长度（字号单位），默认 2.0
+        handletextpad: 句柄与文本间距（字号单位），默认 0.8
+        columnspacing: 列间距（字号单位），默认 2.0
+
+    中文用法示例：
+        >>> plt.plot([1, 2, 3], label="线条A")
+        >>> plt.plot([3, 2, 1], label="线条B")
+        >>> plt.legend()  # 默认 best 位置
+        >>> plt.legend(loc='upper right')  # 右上角
+        >>> plt.legend(loc='upper right', frameon=False)  # 无边框
+        >>> plt.legend(shadow=True)  # 带阴影
+        >>> plt.legend(title="图例标题", title_fontsize=13)  # 带标题
+        >>> plt.legend(labelcolor='white', facecolor='black')  # 暗色主题
+        >>> plt.legend(ncol=2, columnspacing=1.5)  # 两列，缩小列间距
     """
     if isinstance(loc, int):
         loc = _LOC_MAP.get(loc, 'best')
     facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
     ncol = kwargs.get('ncol')
-    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize, ncol)
+    frameon = kwargs.get('frameon')
+    shadow = kwargs.get('shadow')
+    title = kwargs.get('title')
+    title_fontsize = kwargs.get('title_fontsize')
+    labelcolor = kwargs.get('labelcolor')
+    borderpad = kwargs.get('borderpad')
+    labelspacing = kwargs.get('labelspacing')
+    handlelength = kwargs.get('handlelength')
+    handletextpad = kwargs.get('handletextpad')
+    columnspacing = kwargs.get('columnspacing')
+    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize, ncol,
+                             frameon, shadow, title, title_fontsize, labelcolor,
+                             borderpad, labelspacing, handlelength, handletextpad,
+                             columnspacing)
 
 
 def _legend_frame_kwargs(kwargs):
@@ -2050,26 +2097,79 @@ def ylim(bottom=None, top=None, **kwargs):
     return _rsplotlib.ylim(bottom, top)
 
 
-def xticks(ticks=None, labels=None, **kwargs):
+def xticks(ticks=None, labels=None, rotation=None, labelpad=None, **kwargs):
     """设置 x 轴刻度。
 
     Args:
-        ticks: 刻度位置列表
-        labels: 刻度标签列表
+        ticks: 刻度位置列表（可选）
+        labels: 刻度标签列表（可选）
+        rotation: 刻度标签旋转角度（默认：0，不旋转）
+        labelpad: 刻度标签与坐标轴的距离（默认：None，自动计算）
+
+    中文用法示例：
+        >>> plt.xticks([0, 1, 2], ["一月", "二月", "三月"])  # 设置刻度位置和标签
+        >>> plt.xticks(rotation=45)  # 旋转 x 轴刻度标签 45 度
+        >>> plt.xticks(labelpad=10)  # 设置刻度标签与轴的距离为 10 像素
+        >>> plt.xticks([0, 1, 2], ["一月", "二月", "三月"], rotation=45, labelpad=10)  # 同时设置所有参数
     """
     ticks = _to_list(ticks)
-    return _rsplotlib.xticks(ticks, labels)
+    return _rsplotlib.xticks(ticks, labels, rotation, labelpad)
 
 
-def yticks(ticks=None, labels=None, **kwargs):
+def yticks(ticks=None, labels=None, rotation=None, labelpad=None, **kwargs):
     """设置 y 轴刻度。
 
     Args:
-        ticks: 刻度位置列表
-        labels: 刻度标签列表
+        ticks: 刻度位置列表（可选）
+        labels: 刻度标签列表（可选）
+        rotation: 刻度标签旋转角度（默认：0，不旋转）
+        labelpad: 刻度标签与坐标轴的距离（默认：None，自动计算）
+
+    中文用法示例：
+        >>> plt.yticks([0, 1, 2], ["低", "中", "高"])  # 设置刻度位置和标签
+        >>> plt.yticks(rotation=45)  # 旋转 y 轴刻度标签 45 度
+        >>> plt.yticks(labelpad=10)  # 设置刻度标签与轴的距离为 10 像素
+        >>> plt.yticks([0, 1, 2], ["低", "中", "高"], rotation=45, labelpad=10)  # 同时设置所有参数
     """
     ticks = _to_list(ticks)
-    return _rsplotlib.yticks(ticks, labels)
+    return _rsplotlib.yticks(ticks, labels, rotation, labelpad)
+
+
+def tick_params(axis='both', which='major', labelsize=None, rotation=None, labelpad=None,
+                color=None, labelcolor=None, bottom=None, top=None, left=None, right=None,
+                labelbottom=None, labeltop=None, labelleft=None, labelright=None, **kwargs):
+    """精细控制刻度线与刻度标签的显示（当前子图）。
+
+    与 `xticks`/`yticks` 相比，`tick_params` 专注于"刻度线/刻度标签"的样式与可见性，
+    不会改变刻度位置或标签文本，适合单独调整字号、颜色、是否显示等场景。
+
+    Args:
+        axis: 作用的轴，可选 'x'、'y' 或 'both'（默认 'both'）。
+        which: 操作主刻度 ('major'，默认) 还是次刻度 ('minor')。
+        labelsize: 刻度标签字体大小（覆盖全局默认）。
+        rotation: 刻度标签旋转角度（度）。
+        labelpad: 刻度标签与坐标轴的距离（像素）。
+        color: 刻度线颜色。
+        labelcolor: 刻度标签颜色。
+        bottom, top, left, right: 刻度线是否显示 (True/False)。
+        labelbottom, labeltop, labelleft, labelright: 刻度标签是否显示 (True/False)。
+
+    中文用法示例：
+        >>> plt.plot([1, 2, 3, 4], [1, 4, 9, 16])
+        >>> plt.tick_params(axis='both', which='major', labelsize=14)  # 同时设置 x/y 主刻度标签字号
+        >>> plt.tick_params(axis='x', labelsize=12, rotation=45)  # 仅调整 x 轴：字号 12、旋转 45°
+        >>> plt.tick_params(axis='y', which='major', color='red', labelcolor='blue')  # y 轴刻度线红、标签蓝
+        >>> plt.tick_params(bottom=False, labelbottom=False)  # 隐藏 x 轴刻度线和标签
+    """
+    ax = _get_axes()
+    if ax is None:
+        return None
+    return ax.tick_params(
+        axis=axis, which=which, labelsize=labelsize, rotation=rotation, labelpad=labelpad,
+        color=color, labelcolor=labelcolor,
+        bottom=bottom, top=top, left=left, right=right,
+        labelbottom=labelbottom, labeltop=labeltop, labelleft=labelleft, labelright=labelright,
+    )
 
 
 def xscale(scale, **kwargs):
@@ -3235,7 +3335,6 @@ def _patch_axes():
     _orig_tick_params = _rs.Axes.tick_params
 
     def _tick_params(self, **kwargs):
-        kwargs.pop('which', None)
         return _orig_tick_params(self, **kwargs)
     _rs.Axes.tick_params = _tick_params
 
@@ -3314,6 +3413,18 @@ def _patch_axes():
         handles = kwargs.pop('handles', None)
         labels = kwargs.pop('labels', None)
         facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
+        # 新增图例参数
+        ncol = kwargs.pop('ncol', None)
+        frameon = kwargs.pop('frameon', None)
+        shadow = kwargs.pop('shadow', None)
+        title = kwargs.pop('title', None)
+        title_fontsize = kwargs.pop('title_fontsize', None)
+        labelcolor = kwargs.pop('labelcolor', None)
+        borderpad = kwargs.pop('borderpad', None)
+        labelspacing = kwargs.pop('labelspacing', None)
+        handlelength = kwargs.pop('handlelength', None)
+        handletextpad = kwargs.pop('handletextpad', None)
+        columnspacing = kwargs.pop('columnspacing', None)
         if len(args) == 2:
             handles, labels = args[0], args[1]
         elif len(args) == 1:
@@ -3341,8 +3452,13 @@ def _patch_axes():
                     marker = None
                 entries.append((_render_mathtext(str(lbl)), color, ls, marker, lw, 1.0))
             return self.set_legend_entries(
-                entries, loc, facecolor, framealpha, edgecolor, fontsize)
-        return _orig_legend(self, loc, facecolor, framealpha, edgecolor, fontsize)
+                entries, loc, facecolor, framealpha, edgecolor, fontsize,
+                ncol, frameon, shadow, title, title_fontsize, labelcolor,
+                borderpad, labelspacing, handlelength, handletextpad, columnspacing)
+        return _orig_legend(self, loc, facecolor, framealpha, edgecolor, fontsize, ncol,
+                           frameon, shadow, title, title_fontsize, labelcolor,
+                           borderpad, labelspacing, handlelength, handletextpad,
+                           columnspacing)
 
     _rs.Axes.legend = _legend
 

@@ -9,7 +9,7 @@ use plotters::style::text_anchor::{HPos, VPos};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
-use crate::core::colors::{RgbColor, to_plotters_color};
+use crate::core::colors::{RgbColor, parse_color, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
 use crate::figure::axes::{DEFAULT_FONT_SCALE, scale_font};
@@ -24,6 +24,174 @@ fn push_rect(pts: &mut Vec<(f64, f64)>, x0: f64, x1: f64, y0: f64, y1: f64) {
             pts.push((xl + (xr - xl) * fx, yb + (yt - yb) * fy));
         }
     }
+}
+
+/// 计算矩形区域内的数据点密度（用于评估空白区域）
+fn region_density(
+    pts: &[(f64, f64)],
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    rect_x1: f64,
+    rect_y1: f64,
+    rect_x2: f64,
+    rect_y2: f64,
+) -> f64 {
+    let rect_area = (rect_x2 - rect_x1).abs() * (rect_y2 - rect_y1).abs();
+    if rect_area <= 0.0 {
+        return 1.0;
+    }
+
+    let data_range_area = (x_max - x_min).abs() * (y_max - y_min).abs();
+    let relative_area = rect_area / data_range_area;
+
+    let count = pts
+        .iter()
+        .filter(|&&(x, y)| x >= rect_x1 && x <= rect_x2 && y >= rect_y1 && y <= rect_y2)
+        .count();
+
+    if count == 0 {
+        0.0
+    } else {
+        (count as f64 / relative_area).min(1.0)
+    }
+}
+
+/// 智能查找最佳图例位置
+/// 策略：密集扫描整个绘图区域，找到真正的空白位置，优先选择零密度区域
+fn find_best_blank_region(
+    pts: &[(f64, f64)],
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    legend_width: f64,
+    legend_height: f64,
+    target_hpos: HPos,
+    target_vpos: VPos,
+) -> (f64, f64, f64, f64) {
+    let px = (x_max - x_min).abs() * 0.02;
+    let py = (y_max - y_min).abs() * 0.02;
+
+    let x_range = (x_max - x_min).abs();
+    let y_range = (y_max - y_min).abs();
+
+    // 使用更密集的网格扫描整个绘图区域
+    let steps_x = 12;
+    let steps_y = 12;
+
+    let scan_x_start = x_min + px;
+    let scan_x_end = x_max - px - legend_width;
+    let scan_y_start = y_min + py;
+    let scan_y_end = y_max - py - legend_height;
+
+    let mut zero_density_candidates: Vec<(f64, f64, f64, f64)> = Vec::new();
+    let mut all_candidates: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
+
+    if scan_x_end > scan_x_start && scan_y_end > scan_y_start {
+        let step_x = (scan_x_end - scan_x_start) / (steps_x - 1) as f64;
+        let step_y = (scan_y_end - scan_y_start) / (steps_y - 1) as f64;
+
+        for i in 0..steps_x {
+            for j in 0..steps_y {
+                let x1 = scan_x_start + step_x * i as f64;
+                let y1 = scan_y_start + step_y * j as f64;
+                let x2 = x1 + legend_width;
+                let y2 = y1 + legend_height;
+
+                // 计算该区域内的数据点数量（直接计数，比密度更直观）
+                let count = pts
+                    .iter()
+                    .filter(|&&(x, y)| x >= x1 && x <= x2 && y >= y1 && y <= y2)
+                    .count();
+
+                // 转换为密度（0-1范围）
+                let density = if count == 0 {
+                    0.0
+                } else {
+                    let rect_area = (x2 - x1) * (y2 - y1);
+                    let data_area = x_range * y_range;
+                    let relative_area = rect_area / data_area;
+                    (count as f64 / relative_area).min(1.0)
+                };
+
+                all_candidates.push((x1, y1, x2, y2, density));
+
+                // 如果密度为0，加入零密度候选列表
+                if count == 0 {
+                    zero_density_candidates.push((x1, y1, x2, y2));
+                }
+            }
+        }
+    }
+
+    // 确定目标位置（用户期望的位置）
+    let target_center_x = match target_hpos {
+        HPos::Left => x_min + x_range * 0.15,
+        HPos::Center => (x_min + x_max) / 2.0,
+        HPos::Right => x_max - x_range * 0.15,
+    };
+
+    let target_center_y = match target_vpos {
+        VPos::Bottom => y_min + y_range * 0.15,
+        VPos::Center => (y_min + y_max) / 2.0,
+        VPos::Top => y_max - y_range * 0.15,
+    };
+
+    // 如果有零密度的位置，从中选择最接近目标位置的
+    if !zero_density_candidates.is_empty() {
+        let best = zero_density_candidates
+            .iter()
+            .min_by(|a, b| {
+                let dist_a = ((a.0 + a.2) / 2.0 - target_center_x).powi(2)
+                    + ((a.1 + a.3) / 2.0 - target_center_y).powi(2);
+                let dist_b = ((b.0 + b.2) / 2.0 - target_center_x).powi(2)
+                    + ((b.1 + b.3) / 2.0 - target_center_y).powi(2);
+                dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap();
+        return *best;
+    }
+
+    // 如果没有零密度位置，从所有候选中选择密度最低的
+    if all_candidates.is_empty() {
+        return (
+            x_min + px,
+            y_min + py,
+            x_min + px + legend_width,
+            y_min + py + legend_height,
+        );
+    }
+
+    // 按密度升序排序，选择密度最低的位置
+    all_candidates.sort_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
+
+    // 找到所有与最低密度相近的位置（容差范围内）
+    let min_density = all_candidates[0].4;
+    let tolerance = 0.05;
+    let low_density_candidates: Vec<_> = all_candidates
+        .iter()
+        .filter(|c| c.4 <= min_density + tolerance)
+        .collect();
+
+    // 从低密度位置中选择最接近目标位置的
+    let best = low_density_candidates
+        .iter()
+        .min_by(|a, b| {
+            let dist_a = ((a.0 + a.2) / 2.0 - target_center_x).powi(2)
+                + ((a.1 + a.3) / 2.0 - target_center_y).powi(2);
+            let dist_b = ((b.0 + b.2) / 2.0 - target_center_x).powi(2)
+                + ((b.1 + b.3) / 2.0 - target_center_y).powi(2);
+            dist_a
+                .partial_cmp(&dist_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap();
+
+    (best.0, best.1, best.2, best.3)
 }
 
 /// 从所有绘图元素中收集代表性数据点（数据坐标），供图例自动避让使用。
@@ -156,6 +324,7 @@ fn box_from_anchor(
 
 /// 在候选位置中挑选与数据遮挡最少的图例框（matplotlib `loc='best'` 语义）。
 /// 沿绘图区域四周以一定步长扫描，生成大量候选位置，取遮挡点数最少者。
+/// 支持尝试多种图例尺寸（如水平布局和垂直布局），选择最佳的位置和尺寸组合。
 fn best_box(
     pts: &[(f64, f64)],
     x_min: f64,
@@ -164,6 +333,8 @@ fn best_box(
     y_max: f64,
     legend_width: f64,
     legend_height: f64,
+    alt_width: Option<f64>,
+    alt_height: Option<f64>,
 ) -> (f64, f64, f64, f64) {
     let x_range = (x_max - x_min).abs();
     let y_range = (y_max - y_min).abs();
@@ -182,92 +353,53 @@ fn best_box(
         }
     };
 
-    // 沿四周扫描，步长为图例框尺寸或数据范围的一定比例
-    let x_step = (x_range * 0.08).max(legend_width * 0.5);
-    let y_step = (y_range * 0.08).max(legend_height * 0.5);
+    let sizes = if let (Some(aw), Some(ah)) = (alt_width, alt_height) {
+        vec![(legend_width, legend_height), (aw, ah)]
+    } else {
+        vec![(legend_width, legend_height)]
+    };
 
-    // 底部边缘：从左到右
-    let mut x_pos = x_min + px;
-    while x_pos + legend_width <= x_max - px {
-        add_candidate(
-            x_pos,
-            y_min + py,
-            x_pos + legend_width,
-            y_min + py + legend_height,
-        );
-        x_pos += x_step;
-    }
-    // 底部最右端
-    if x_max - px - legend_width > x_min + px {
-        add_candidate(
-            x_max - px - legend_width,
-            y_min + py,
-            x_max - px,
-            y_min + py + legend_height,
-        );
-    }
+    for &(lw, lh) in &sizes {
+        let x_step = (x_range * 0.08).max(lw * 0.5);
+        let y_step = (y_range * 0.08).max(lh * 0.5);
 
-    // 顶部边缘：从左到右
-    x_pos = x_min + px;
-    while x_pos + legend_width <= x_max - px {
-        add_candidate(
-            x_pos,
-            y_max - py - legend_height,
-            x_pos + legend_width,
-            y_max - py,
-        );
-        x_pos += x_step;
-    }
-    if x_max - px - legend_width > x_min + px {
-        add_candidate(
-            x_max - px - legend_width,
-            y_max - py - legend_height,
-            x_max - px,
-            y_max - py,
-        );
-    }
+        let mut x_pos = x_min + px;
+        while x_pos + lw <= x_max - px {
+            add_candidate(x_pos, y_min + py, x_pos + lw, y_min + py + lh);
+            x_pos += x_step;
+        }
+        if x_max - px - lw > x_min + px {
+            add_candidate(x_max - px - lw, y_min + py, x_max - px, y_min + py + lh);
+        }
 
-    // 左侧边缘：从上到下
-    let mut y_pos = y_min + py;
-    while y_pos + legend_height <= y_max - py {
-        add_candidate(
-            x_min + px,
-            y_pos,
-            x_min + px + legend_width,
-            y_pos + legend_height,
-        );
-        y_pos += y_step;
-    }
-    if y_max - py - legend_height > y_min + py {
-        add_candidate(
-            x_min + px,
-            y_max - py - legend_height,
-            x_min + px + legend_width,
-            y_max - py,
-        );
+        x_pos = x_min + px;
+        while x_pos + lw <= x_max - px {
+            add_candidate(x_pos, y_max - py - lh, x_pos + lw, y_max - py);
+            x_pos += x_step;
+        }
+        if x_max - px - lw > x_min + px {
+            add_candidate(x_max - px - lw, y_max - py - lh, x_max - px, y_max - py);
+        }
+
+        let mut y_pos = y_min + py;
+        while y_pos + lh <= y_max - py {
+            add_candidate(x_min + px, y_pos, x_min + px + lw, y_pos + lh);
+            y_pos += y_step;
+        }
+        if y_max - py - lh > y_min + py {
+            add_candidate(x_min + px, y_max - py - lh, x_min + px + lw, y_max - py);
+        }
+
+        y_pos = y_min + py;
+        while y_pos + lh <= y_max - py {
+            add_candidate(x_max - px - lw, y_pos, x_max - px, y_pos + lh);
+            y_pos += y_step;
+        }
+        if y_max - py - lh > y_min + py {
+            add_candidate(x_max - px - lw, y_max - py - lh, x_max - px, y_max - py);
+        }
     }
 
-    // 右侧边缘：从上到下
-    y_pos = y_min + py;
-    while y_pos + legend_height <= y_max - py {
-        add_candidate(
-            x_max - px - legend_width,
-            y_pos,
-            x_max - px,
-            y_pos + legend_height,
-        );
-        y_pos += y_step;
-    }
-    if y_max - py - legend_height > y_min + py {
-        add_candidate(
-            x_max - px - legend_width,
-            y_max - py - legend_height,
-            x_max - px,
-            y_max - py,
-        );
-    }
-
-    // 如果没有有效候选位置，使用右下角
     if candidates.is_empty() {
         return (
             x_max - px - legend_width,
@@ -344,7 +476,18 @@ fn rounded_rect_points(x1: f64, y1: f64, x2: f64, y2: f64, rx: f64, ry: f64) -> 
 /// - `edgecolor`: 图例框边框色，`None` 时用默认浅灰
 /// - `fontsize`: 图例文字基础字号（point），`None` 时用默认 11.0
 /// - `ncol`: 图例列数，`None` 时根据位置和空间自动判定
+/// - `frameon`: 是否绘制图例框，`None` 时默认绘制
+/// - `shadow`: 是否绘制图例阴影，`None` 时默认不绘制
+/// - `title`: 图例标题文本
+/// - `title_fontsize`: 图例标题字号
+/// - `labelcolor`: 图例标签颜色
+/// - `borderpad`: 图例框内边距
+/// - `labelspacing`: 标签间距
+/// - `handlelength`: 图例句柄长度
+/// - `handletextpad`: 句柄与文本间距
+/// - `columnspacing`: 列间距
 #[allow(clippy::too_many_arguments)]
+#[allow(unused_variables)]
 pub fn draw_legend<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     legend_loc: Option<&String>,
@@ -362,6 +505,16 @@ pub fn draw_legend<DB: DrawingBackend>(
     edgecolor: Option<RgbColor>,
     fontsize: Option<f64>,
     ncol: Option<usize>,
+    frameon: Option<bool>,
+    shadow: Option<bool>,
+    title: Option<&str>,
+    title_fontsize: Option<f64>,
+    labelcolor: Option<&str>,
+    borderpad: Option<f64>,
+    labelspacing: Option<f64>,
+    handlelength: Option<f64>,
+    handletextpad: Option<f64>,
+    columnspacing: Option<f64>,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
@@ -394,22 +547,32 @@ where
         let base_fs = fontsize.unwrap_or(11.0);
         let label_fs = scale_font(base_fs * DEFAULT_FONT_SCALE, font_scale);
 
-        let pad_h_px = 5.0 * font_scale;
-        let handle_px = label_fs * 1.4;
-        let gap_px = 3.0 * font_scale;
-        let col_gap_px = 7.0 * font_scale;
+        // 间距/尺寸参数：matplotlib 以 fontsize 为单位，乘以 label_fs 得到像素值。
+        // borderpad: 图例框内边距（默认 0.4 字号单位）
+        // labelspacing: 标签行间距（默认 0.5 字号单位）
+        // handlelength: 句柄长度（默认 2.0 字号单位）
+        // handletextpad: 句柄与文本间距（默认 0.8 字号单位）
+        // columnspacing: 列间距（默认 2.0 字号单位）
+        // 注意：matplotlib 默认值更紧凑，这里使用略小的默认值以匹配其视觉效果
+        let borderpad_px = borderpad.unwrap_or(0.4) * label_fs;
+        let labelspacing_px = labelspacing.unwrap_or(0.4) * label_fs; // 减小：0.5 -> 0.4
+        let handle_px = handlelength.unwrap_or(2.0) * label_fs;
+        let gap_px = handletextpad.unwrap_or(0.8) * label_fs;
+        let col_gap_px = columnspacing.unwrap_or(2.0) * label_fs;
+
         let max_text_px = legend_labels
             .iter()
             .map(|(label, ..)| mathtext::measure_plain(label.as_str(), None, label_fs).0)
             .fold(0.0_f64, f64::max);
-        // 每列内容宽度（含左侧 padding，不含右 padding）。
-        // 总图例宽度 = N * entry_width_px + (N-1) * col_gap_px + pad_h_px（最右列右 padding）
-        // 这样列与列之间间距 = col_gap_px（而非 col_gap_px + 2*pad_h_px），避免多列时图例右侧出现大片空白。
-        let entry_width_px = pad_h_px + handle_px + gap_px + max_text_px;
 
-        let row_px = label_fs * 1.35;
-        let pad_v_px = label_fs * 0.35;
-        let entry_height = row_px * y_per_px;
+        // 每列内容宽度（不含左右 borderpad）= handlelength + handletextpad + 最大文本宽度
+        let entry_width_px = handle_px + gap_px + max_text_px;
+
+        // 行高：以字体高度为基准
+        // matplotlib 的行高约为 fontsize（不包含额外的 leading）
+        // labelspacing 是行与行之间的额外间距（默认 0.4 fontsize）
+        let row_px = label_fs; // 使用 fontsize 而非 1.2 * fontsize
+        let entry_height = (row_px + labelspacing_px) * y_per_px;
 
         let ncol = if let Some(n) = ncol {
             n.max(1).min(entry_count)
@@ -430,19 +593,93 @@ where
             );
 
             if is_top_bottom_loc && max_possible_ncol >= 2 && entry_count >= 2 {
-                max_possible_ncol.min(entry_count)
+                let pts = collect_data_points(elements);
+
+                let px = x_range * 0.02;
+                let py = y_range * 0.02;
+
+                let mut best_ncol = 1;
+                let mut best_density = 1.0;
+
+                for try_ncol in 1..=max_possible_ncol.min(entry_count) {
+                    let rows_per_col_try = entry_count.div_ceil(try_ncol);
+                    let content_height_try_px =
+                        (row_px + labelspacing_px) * rows_per_col_try as f64;
+                    let legend_height_try_px = content_height_try_px + 2.0 * borderpad_px;
+                    let legend_height_try = legend_height_try_px * y_per_px;
+                    let legend_width_try_px = borderpad_px
+                        + entry_width_px * try_ncol as f64
+                        + col_gap_px * (try_ncol - 1) as f64
+                        + borderpad_px;
+                    let legend_width_try = legend_width_try_px * x_per_px;
+
+                    let mut current_density: f64 = 1.0;
+                    let candidate_positions = match loc.as_str() {
+                        "upper right" => vec![(HPos::Right, VPos::Top)],
+                        "upper left" => vec![(HPos::Left, VPos::Top)],
+                        "lower right" => vec![(HPos::Right, VPos::Bottom)],
+                        "lower left" => vec![(HPos::Left, VPos::Bottom)],
+                        "upper center" => vec![(HPos::Center, VPos::Top)],
+                        "lower center" => vec![(HPos::Center, VPos::Bottom)],
+                        "best" => vec![
+                            (HPos::Right, VPos::Top),
+                            (HPos::Left, VPos::Top),
+                            (HPos::Right, VPos::Bottom),
+                            (HPos::Left, VPos::Bottom),
+                        ],
+                        _ => vec![
+                            (HPos::Right, VPos::Top),
+                            (HPos::Left, VPos::Top),
+                            (HPos::Right, VPos::Bottom),
+                            (HPos::Left, VPos::Bottom),
+                        ],
+                    };
+
+                    for &(h_pos, v_pos) in &candidate_positions {
+                        let (x_anchor, y_anchor) = match (h_pos, v_pos) {
+                            (HPos::Left, VPos::Top) => (x_min + px, y_max - py),
+                            (HPos::Right, VPos::Top) => (x_max - px, y_max - py),
+                            (HPos::Left, VPos::Bottom) => (x_min + px, y_min + py),
+                            (HPos::Right, VPos::Bottom) => (x_max - px, y_min + py),
+                            (HPos::Center, VPos::Top) => ((x_min + x_max) / 2.0, y_max - py),
+                            (HPos::Center, VPos::Bottom) => ((x_min + x_max) / 2.0, y_min + py),
+                            _ => ((x_min + x_max) / 2.0, (y_min + y_max) / 2.0),
+                        };
+                        let (bx1, by1, bx2, by2) = box_from_anchor(
+                            h_pos,
+                            v_pos,
+                            x_anchor,
+                            y_anchor,
+                            legend_width_try,
+                            legend_height_try,
+                        );
+                        let density =
+                            region_density(&pts, x_min, x_max, y_min, y_max, bx1, by1, bx2, by2);
+                        current_density = current_density.min(density);
+                    }
+
+                    if current_density < best_density {
+                        best_density = current_density;
+                        best_ncol = try_ncol;
+                        if best_density == 0.0 {
+                            break;
+                        }
+                    }
+                }
+                best_ncol
             } else {
                 1
             }
         };
 
         let rows_per_col = entry_count.div_ceil(ncol);
-        let legend_height_px = row_px * rows_per_col as f64 + 2.0 * pad_v_px;
+        let content_height_px = (row_px + labelspacing_px) * rows_per_col as f64;
+        let legend_height_px = content_height_px + 2.0 * borderpad_px;
 
         let legend_height = legend_height_px * y_per_px;
 
         // 计算最大可用图例高度，以及需要省略的条目数
-        let px = x_range * 0.02;
+        let _px = x_range * 0.02;
         let py = y_range * 0.02;
         let max_legend_height = y_max - y_min - 2.0 * py;
 
@@ -450,8 +687,8 @@ where
         let mut needs_ellipsis = false;
 
         if legend_height > max_legend_height {
-            let max_entries =
-                ((max_legend_height - 2.0 * pad_v_px * y_per_px) / entry_height).floor() as usize;
+            let max_entries = ((max_legend_height - 2.0 * borderpad_px * y_per_px) / entry_height)
+                .floor() as usize;
             if max_entries < entry_count {
                 display_entries = &legend_labels[..max_entries.max(1)];
                 needs_ellipsis = true;
@@ -462,122 +699,177 @@ where
         let display_rows = display_count.div_ceil(ncol);
         // 行主序布局：实际使用的列数就是 ncol（每行都用 ncol 列，最后一行可能不满）
         let actual_ncol = ncol;
-        // 总图例宽度 = N 列内容（每列含左 pad_h） + (N-1) 列间距 + 最右列右 pad_h
-        let legend_width_px =
-            entry_width_px * actual_ncol as f64 + col_gap_px * (actual_ncol - 1) as f64 + pad_h_px;
+        // 总图例宽度 = 左 borderpad + N 列内容 + (N-1) 列间距 + 右 borderpad
+        let legend_width_px = borderpad_px
+            + entry_width_px * actual_ncol as f64
+            + col_gap_px * (actual_ncol - 1) as f64
+            + borderpad_px;
         let legend_width = legend_width_px * x_per_px;
         let rows_with_ellipsis = if needs_ellipsis {
             display_rows + 1
         } else {
             display_rows
         };
-        let display_legend_height_px = row_px * rows_with_ellipsis as f64 + 2.0 * pad_v_px;
+        // 内容高度 = 行数 * 行高（含 labelspacing）
+        let content_height_px = (row_px + labelspacing_px) * rows_with_ellipsis as f64;
+        let display_legend_height_px = content_height_px + 2.0 * borderpad_px;
         let display_legend_height = display_legend_height_px * y_per_px;
 
-        // 已知固定位置直接定位；其余（含 "best" 与未识别值）自动避让数据。
-        // 内边距：取数据范围的 2%，避免图例紧贴坐标轴边界
-        // 使用 display_legend_height 确保框大小与显示条目一致
+        // 图例标题高度预计算（用于框位置计算）
+        let title_text = title;
+        let title_fs = if let Some(tfs) = title_fontsize {
+            scale_font(tfs * DEFAULT_FONT_SCALE, font_scale)
+        } else {
+            label_fs * 1.1
+        };
+        // 标题高度 = fontsize + 底部间距
+        let title_height_px = if title_text.is_some() {
+            title_fs + label_fs * 0.3 // 标题到底部内容的间距
+        } else {
+            0.0
+        };
+        let total_legend_height_px = display_legend_height_px + title_height_px;
+        let total_legend_height = total_legend_height_px * y_per_px;
+
+        // 收集数据点，用于空白区域检测
+        let mut data_pts = collect_data_points(elements);
+        if xlog || ylog {
+            for p in data_pts.iter_mut() {
+                if xlog {
+                    p.0 = if p.0 > 0.0 {
+                        p.0.log10()
+                    } else {
+                        x_min.min(x_max)
+                    };
+                }
+                if ylog {
+                    p.1 = if p.1 > 0.0 {
+                        p.1.log10()
+                    } else {
+                        y_min.min(y_max)
+                    };
+                }
+            }
+        }
+
+        // 已知固定位置：先尝试目标位置，然后在附近搜索空白区域
+        // 其余（含 "best" 与未识别值）自动避让数据
         let (box_x1, box_y1, box_x2, box_y2) = match loc.as_str() {
-            "upper right" => box_from_anchor(
+            "upper right" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Right,
                 VPos::Top,
-                x_max - px,
-                y_max - py,
-                legend_width,
-                display_legend_height,
             ),
-            "upper left" => box_from_anchor(
+            "upper left" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Left,
                 VPos::Top,
-                x_min + px,
-                y_max - py,
-                legend_width,
-                display_legend_height,
             ),
-            "lower right" => box_from_anchor(
+            "lower right" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Right,
                 VPos::Bottom,
-                x_max - px,
-                y_min + py,
-                legend_width,
-                display_legend_height,
             ),
-            "lower left" => box_from_anchor(
+            "lower left" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Left,
                 VPos::Bottom,
-                x_min + px,
-                y_min + py,
-                legend_width,
-                display_legend_height,
             ),
-            "center" => box_from_anchor(
+            "center" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Center,
                 VPos::Center,
-                (x_min + x_max) / 2.0,
-                (y_min + y_max) / 2.0,
-                legend_width,
-                display_legend_height,
             ),
-            "right" | "center right" => box_from_anchor(
+            "right" | "center right" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Right,
                 VPos::Center,
-                x_max - px,
-                (y_min + y_max) / 2.0,
-                legend_width,
-                display_legend_height,
             ),
-            "center left" => box_from_anchor(
+            "center left" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Left,
                 VPos::Center,
-                x_min + px,
-                (y_min + y_max) / 2.0,
-                legend_width,
-                display_legend_height,
             ),
-            "lower center" => box_from_anchor(
+            "lower center" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Center,
                 VPos::Bottom,
-                (x_min + x_max) / 2.0,
-                y_min + py,
-                legend_width,
-                display_legend_height,
             ),
-            "upper center" => box_from_anchor(
+            "upper center" => find_best_blank_region(
+                &data_pts,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                legend_width,
+                total_legend_height,
                 HPos::Center,
                 VPos::Top,
-                (x_min + x_max) / 2.0,
-                y_max - py,
-                legend_width,
-                display_legend_height,
             ),
             _ => {
-                let mut pts = collect_data_points(elements);
-                if xlog || ylog {
-                    for p in pts.iter_mut() {
-                        if xlog {
-                            p.0 = if p.0 > 0.0 {
-                                p.0.log10()
-                            } else {
-                                x_min.min(x_max)
-                            };
-                        }
-                        if ylog {
-                            p.1 = if p.1 > 0.0 {
-                                p.1.log10()
-                            } else {
-                                y_min.min(y_max)
-                            };
-                        }
-                    }
-                }
+                let vertical_width = entry_width_px * x_per_px;
+                let vertical_rows = display_count;
+                let vertical_height_px =
+                    (row_px + labelspacing_px) * vertical_rows as f64 + 2.0 * borderpad_px;
+                let vertical_height = vertical_height_px * y_per_px;
                 best_box(
-                    &pts,
+                    &data_pts,
                     x_min,
                     x_max,
                     y_min,
                     y_max,
                     legend_width,
-                    display_legend_height,
+                    total_legend_height,
+                    Some(vertical_width),
+                    Some(vertical_height),
                 )
             }
         };
@@ -586,7 +878,7 @@ where
         // 调用方（如 stylely 捕获的样式）可覆盖为任意颜色与不透明度。
         // 当背景色接近白色且未指定边框色时，自动使用稍深的灰色以确保可见性。
         let fc = facecolor.unwrap_or(RgbColor(255, 255, 255));
-        let alpha = framealpha.unwrap_or(0.85).clamp(0.0, 1.0);
+        let alpha = framealpha.unwrap_or(0.8).clamp(0.0, 1.0);
         let ec = if let Some(c) = edgecolor {
             c
         } else {
@@ -598,8 +890,17 @@ where
                 RgbColor(180, 180, 180)
             }
         };
-        let _bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
+        let bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
         let bg_border: ShapeStyle = to_plotters_color(ec).stroke_width(1);
+        // frameon：是否绘制图例框（背景 + 边框）。默认绘制。
+        let draw_frame = frameon.unwrap_or(true);
+
+        // 阴影偏移（像素），换算到数据坐标
+        let draw_shadow = shadow.unwrap_or(false);
+        // matplotlib 默认阴影偏移较小，约 2px
+        let shadow_offset_px = 2.0 * font_scale;
+        let shadow_dx = shadow_offset_px * x_per_px;
+        let shadow_dy = -shadow_offset_px * y_per_px;
 
         // 圆角半径：以像素为基准，再按数据/像素比例换算到数据坐标，
         // 使 x、y 两个方向的圆角在视觉上一致（圆弧而非椭圆弧）。
@@ -616,18 +917,80 @@ where
         };
         let corner_pts = rounded_rect_points(box_x1, box_y1, box_x2, box_y2, rx, ry);
 
-        // 半透明白色圆角填充
-        chart
-            .draw_series(std::iter::once(Polygon::new(corner_pts.clone(), _bg_fill)))
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend bg: {}", e)))?;
-        // 圆角边框（闭合路径）
-        let mut border_pts = corner_pts;
-        if let Some(&first) = border_pts.first() {
-            border_pts.push(first);
+        // 阴影：在图例框右下方偏移处绘制一个灰黑色半透明圆角矩形
+        if draw_shadow && draw_frame {
+            let shadow_pts = rounded_rect_points(
+                box_x1 + shadow_dx,
+                box_y1 + shadow_dy,
+                box_x2 + shadow_dx,
+                box_y2 + shadow_dy,
+                rx,
+                ry,
+            );
+            // matplotlib 阴影较淡，使用浅灰色和较低不透明度
+            let shadow_fill: ShapeStyle = RGBColor(150, 150, 150).mix(0.2).filled();
+            chart
+                .draw_series(std::iter::once(Polygon::new(shadow_pts, shadow_fill)))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw legend shadow: {}", e))
+                })?;
         }
-        chart
-            .draw_series(std::iter::once(PathElement::new(border_pts, bg_border)))
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend border: {}", e)))?;
+
+        // 图例框背景 + 边框（frameon=True 时绘制）
+        if draw_frame {
+            // 半透明白色圆角填充
+            chart
+                .draw_series(std::iter::once(Polygon::new(corner_pts.clone(), bg_fill)))
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend bg: {}", e)))?;
+            // 圆角边框（闭合路径）
+            let mut border_pts = corner_pts;
+            if let Some(&first) = border_pts.first() {
+                border_pts.push(first);
+            }
+            chart
+                .draw_series(std::iter::once(PathElement::new(border_pts, bg_border)))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw legend border: {}", e))
+                })?;
+        }
+
+        // 图例标题：在图例框内部顶部居中绘制
+        if let Some(title_str) = title_text {
+            let title_x = (box_x1 + box_x2) / 2.0;
+            // 标题 y 位置：框顶部向下 borderpad + 标题基线位置
+            let title_y = box_y2 - borderpad_px * y_per_px - title_fs * 0.8 * y_per_px;
+            let text_nudge = if mathtext::contains_ir(title_str) {
+                -0.45 * title_fs
+            } else {
+                -0.2 * title_fs
+            };
+            mathtext::draw_math_chart(
+                chart,
+                title_x,
+                title_y,
+                title_str,
+                title_fs,
+                BLACK,
+                None,
+                HAlign::Center,
+                VAlign::Top,
+                0.0,
+                0.0,
+                text_nudge,
+                None,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+            )?;
+        }
+
+        // 标签颜色：用户可统一指定图例标签颜色（如 'white'），
+        // None 时默认黑色。
+        let lbl_color_rgb = labelcolor
+            .and_then(|c| parse_color(c, 0).ok())
+            .map(to_plotters_color)
+            .unwrap_or(BLACK);
 
         // 图例线段的虚线/点线间隔需以像素为基准，再换算到数据坐标，
         // 否则固定的数据单位间隔在不同数据范围下会失效（例如整段被一个"虚线"填满而显示为实线）。
@@ -638,12 +1001,15 @@ where
             let row = i / ncol;
 
             let col_offset_px = col as f64 * (entry_width_px + col_gap_px);
-            let x_col_start = box_x1 + col_offset_px * x_per_px;
+            let x_col_start = box_x1 + borderpad_px * x_per_px + col_offset_px * x_per_px;
 
-            let y_pos =
-                box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - row as f64 * entry_height;
+            // 有标题时，内容行需要向下偏移标题占据的高度
+            // y 位置：从框顶部（box_y2）向下：borderpad + 标题高度 + 第N行的偏移
+            let base_y = box_y2 - borderpad_px * y_per_px - title_height_px * y_per_px;
+            // 每行向下偏移 entry_height（含 labelspacing）
+            let y_pos = base_y - row as f64 * entry_height - entry_height * 0.5;
 
-            let x_line_start = x_col_start + pad_h_px * x_per_px;
+            let x_line_start = x_col_start;
             let x_line_end = x_line_start + handle_px * x_per_px;
             let x_text = x_line_end + gap_px * x_per_px;
 
@@ -789,12 +1155,10 @@ where
 
         if needs_ellipsis {
             let ellipsis_row = display_rows;
-            let ellipsis_y_pos = box_y2
-                - pad_v_px * y_per_px
-                - entry_height * 0.5
-                - ellipsis_row as f64 * entry_height;
+            let base_y = box_y2 - borderpad_px * y_per_px - title_height_px * y_per_px;
+            let ellipsis_y_pos = base_y - ellipsis_row as f64 * entry_height - entry_height * 0.5;
             let ellipsis_x =
-                box_x1 + pad_h_px * x_per_px + handle_px * x_per_px + gap_px * x_per_px;
+                box_x1 + borderpad_px * x_per_px + handle_px * x_per_px + gap_px * x_per_px;
             let ellipsis_text = "...";
             mathtext::draw_math_chart(
                 chart,
@@ -802,7 +1166,7 @@ where
                 ellipsis_y_pos,
                 ellipsis_text,
                 label_fs,
-                BLACK,
+                lbl_color_rgb,
                 None,
                 HAlign::Left,
                 VAlign::Top,
