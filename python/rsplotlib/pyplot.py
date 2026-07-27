@@ -2007,16 +2007,50 @@ def legend(loc='best', **kwargs):
               'lower right', 'upper center', 'lower center',
               'center left', 'center right', 'center')，也支持整数 0-10
         facecolor: 图例框背景色 (颜色名或 '#RRGGBB')，默认沿用半透明白底
-        framealpha: 图例框背景不透明度 (0-1)，默认 0.85
+        framealpha: 图例框背景不透明度 (0-1)，默认 0.8
         edgecolor: 图例框边框色，默认浅灰
         fontsize: 图例文字字号 (point)，默认 11.0
         ncol: 图例列数，默认根据位置和空间自动判定（上部/下部居中位置自动启用多列）
+        frameon: 是否绘制图例框（背景 + 边框），默认 True
+        shadow: 是否绘制图例阴影，默认 False
+        title: 图例标题文本，默认 None
+        title_fontsize: 图例标题字号 (point)
+        labelcolor: 图例标签文字颜色（如 'white'、'#RRGGBB'），默认黑色
+        borderpad: 图例框内边距（字号单位），默认 0.4
+        labelspacing: 标签行间距（字号单位），默认 0.5
+        handlelength: 句柄长度（字号单位），默认 2.0
+        handletextpad: 句柄与文本间距（字号单位），默认 0.8
+        columnspacing: 列间距（字号单位），默认 2.0
+
+    中文用法示例：
+        >>> plt.plot([1, 2, 3], label="线条A")
+        >>> plt.plot([3, 2, 1], label="线条B")
+        >>> plt.legend()  # 默认 best 位置
+        >>> plt.legend(loc='upper right')  # 右上角
+        >>> plt.legend(loc='upper right', frameon=False)  # 无边框
+        >>> plt.legend(shadow=True)  # 带阴影
+        >>> plt.legend(title="图例标题", title_fontsize=13)  # 带标题
+        >>> plt.legend(labelcolor='white', facecolor='black')  # 暗色主题
+        >>> plt.legend(ncol=2, columnspacing=1.5)  # 两列，缩小列间距
     """
     if isinstance(loc, int):
         loc = _LOC_MAP.get(loc, 'best')
     facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
     ncol = kwargs.get('ncol')
-    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize, ncol)
+    frameon = kwargs.get('frameon')
+    shadow = kwargs.get('shadow')
+    title = kwargs.get('title')
+    title_fontsize = kwargs.get('title_fontsize')
+    labelcolor = kwargs.get('labelcolor')
+    borderpad = kwargs.get('borderpad')
+    labelspacing = kwargs.get('labelspacing')
+    handlelength = kwargs.get('handlelength')
+    handletextpad = kwargs.get('handletextpad')
+    columnspacing = kwargs.get('columnspacing')
+    return _rsplotlib.legend(loc, facecolor, framealpha, edgecolor, fontsize, ncol,
+                             frameon, shadow, title, title_fontsize, labelcolor,
+                             borderpad, labelspacing, handlelength, handletextpad,
+                             columnspacing)
 
 
 def _legend_frame_kwargs(kwargs):
@@ -3379,6 +3413,18 @@ def _patch_axes():
         handles = kwargs.pop('handles', None)
         labels = kwargs.pop('labels', None)
         facecolor, framealpha, edgecolor, fontsize = _legend_frame_kwargs(kwargs)
+        # 新增图例参数
+        ncol = kwargs.pop('ncol', None)
+        frameon = kwargs.pop('frameon', None)
+        shadow = kwargs.pop('shadow', None)
+        title = kwargs.pop('title', None)
+        title_fontsize = kwargs.pop('title_fontsize', None)
+        labelcolor = kwargs.pop('labelcolor', None)
+        borderpad = kwargs.pop('borderpad', None)
+        labelspacing = kwargs.pop('labelspacing', None)
+        handlelength = kwargs.pop('handlelength', None)
+        handletextpad = kwargs.pop('handletextpad', None)
+        columnspacing = kwargs.pop('columnspacing', None)
         if len(args) == 2:
             handles, labels = args[0], args[1]
         elif len(args) == 1:
@@ -3406,8 +3452,13 @@ def _patch_axes():
                     marker = None
                 entries.append((_render_mathtext(str(lbl)), color, ls, marker, lw, 1.0))
             return self.set_legend_entries(
-                entries, loc, facecolor, framealpha, edgecolor, fontsize)
-        return _orig_legend(self, loc, facecolor, framealpha, edgecolor, fontsize)
+                entries, loc, facecolor, framealpha, edgecolor, fontsize,
+                ncol, frameon, shadow, title, title_fontsize, labelcolor,
+                borderpad, labelspacing, handlelength, handletextpad, columnspacing)
+        return _orig_legend(self, loc, facecolor, framealpha, edgecolor, fontsize, ncol,
+                           frameon, shadow, title, title_fontsize, labelcolor,
+                           borderpad, labelspacing, handlelength, handletextpad,
+                           columnspacing)
 
     _rs.Axes.legend = _legend
 

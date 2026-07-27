@@ -194,7 +194,8 @@ pub fn grid(
 }
 
 #[pyfunction]
-#[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None, ncol=None))]
+#[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None, ncol=None, frameon=None, shadow=None, title=None, title_fontsize=None, labelcolor=None, borderpad=None, labelspacing=None, handlelength=None, handletextpad=None, columnspacing=None))]
+#[allow(clippy::too_many_arguments)]
 pub fn legend(
     py: Python,
     loc: &str,
@@ -203,10 +204,35 @@ pub fn legend(
     edgecolor: Option<String>,
     fontsize: Option<f64>,
     ncol: Option<usize>,
+    frameon: Option<bool>,
+    shadow: Option<bool>,
+    title: Option<String>,
+    title_fontsize: Option<f64>,
+    labelcolor: Option<String>,
+    borderpad: Option<f64>,
+    labelspacing: Option<f64>,
+    handlelength: Option<f64>,
+    handletextpad: Option<f64>,
+    columnspacing: Option<f64>,
 ) -> PyResult<()> {
-    get_current_axes(py)?
-        .borrow_mut(py)
-        .legend(loc, facecolor, framealpha, edgecolor, fontsize, ncol);
+    get_current_axes(py)?.borrow_mut(py).legend(
+        loc,
+        facecolor,
+        framealpha,
+        edgecolor,
+        fontsize,
+        ncol,
+        frameon,
+        shadow,
+        title,
+        title_fontsize,
+        labelcolor,
+        borderpad,
+        labelspacing,
+        handlelength,
+        handletextpad,
+        columnspacing,
+    );
     Ok(())
 }
 

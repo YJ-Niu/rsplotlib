@@ -806,6 +806,16 @@ pub struct Axes {
     pub legend_edgecolor: Option<String>,
     pub legend_fontsize: Option<f64>,
     pub legend_ncol: Option<usize>,
+    pub legend_frameon: Option<bool>,
+    pub legend_shadow: Option<bool>,
+    pub legend_title: Option<String>,
+    pub legend_title_fontsize: Option<f64>,
+    pub legend_labelcolor: Option<String>,
+    pub legend_borderpad: Option<f64>,
+    pub legend_labelspacing: Option<f64>,
+    pub legend_handlelength: Option<f64>,
+    pub legend_handletextpad: Option<f64>,
+    pub legend_columnspacing: Option<f64>,
     pub xscale: String,
     pub yscale: String,
     pub xticks_val: Option<Vec<f64>>,
@@ -921,6 +931,16 @@ impl Clone for Axes {
             legend_edgecolor: self.legend_edgecolor.clone(),
             legend_fontsize: self.legend_fontsize,
             legend_ncol: self.legend_ncol,
+            legend_frameon: self.legend_frameon,
+            legend_shadow: self.legend_shadow,
+            legend_title: self.legend_title.clone(),
+            legend_title_fontsize: self.legend_title_fontsize,
+            legend_labelcolor: self.legend_labelcolor.clone(),
+            legend_borderpad: self.legend_borderpad,
+            legend_labelspacing: self.legend_labelspacing,
+            legend_handlelength: self.legend_handlelength,
+            legend_handletextpad: self.legend_handletextpad,
+            legend_columnspacing: self.legend_columnspacing,
             xscale: self.xscale.clone(),
             yscale: self.yscale.clone(),
             xticks_val: self.xticks_val.clone(),
@@ -1101,6 +1121,16 @@ impl Axes {
             legend_edgecolor: None,
             legend_fontsize: None,
             legend_ncol: None,
+            legend_frameon: None,
+            legend_shadow: None,
+            legend_title: None,
+            legend_title_fontsize: None,
+            legend_labelcolor: None,
+            legend_borderpad: None,
+            legend_labelspacing: None,
+            legend_handlelength: None,
+            legend_handletextpad: None,
+            legend_columnspacing: None,
             xscale: "linear".to_string(),
             yscale: "linear".to_string(),
             xticks_val: None,
@@ -2066,7 +2096,8 @@ impl Axes {
         &self.title
     }
 
-    #[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None, ncol=None))]
+    #[pyo3(signature = (loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None, ncol=None, frameon=None, shadow=None, title=None, title_fontsize=None, labelcolor=None, borderpad=None, labelspacing=None, handlelength=None, handletextpad=None, columnspacing=None))]
+    #[allow(clippy::too_many_arguments)]
     pub fn legend(
         &mut self,
         loc: &str,
@@ -2075,6 +2106,16 @@ impl Axes {
         edgecolor: Option<String>,
         fontsize: Option<f64>,
         ncol: Option<usize>,
+        frameon: Option<bool>,
+        shadow: Option<bool>,
+        title: Option<String>,
+        title_fontsize: Option<f64>,
+        labelcolor: Option<String>,
+        borderpad: Option<f64>,
+        labelspacing: Option<f64>,
+        handlelength: Option<f64>,
+        handletextpad: Option<f64>,
+        columnspacing: Option<f64>,
     ) {
         self.legend_loc = Some(loc.to_string());
         if facecolor.is_some() {
@@ -2091,6 +2132,36 @@ impl Axes {
         }
         if ncol.is_some() {
             self.legend_ncol = ncol;
+        }
+        if frameon.is_some() {
+            self.legend_frameon = frameon;
+        }
+        if shadow.is_some() {
+            self.legend_shadow = shadow;
+        }
+        if title.is_some() {
+            self.legend_title = title;
+        }
+        if title_fontsize.is_some() {
+            self.legend_title_fontsize = title_fontsize;
+        }
+        if labelcolor.is_some() {
+            self.legend_labelcolor = labelcolor;
+        }
+        if borderpad.is_some() {
+            self.legend_borderpad = borderpad;
+        }
+        if labelspacing.is_some() {
+            self.legend_labelspacing = labelspacing;
+        }
+        if handlelength.is_some() {
+            self.legend_handlelength = handlelength;
+        }
+        if handletextpad.is_some() {
+            self.legend_handletextpad = handletextpad;
+        }
+        if columnspacing.is_some() {
+            self.legend_columnspacing = columnspacing;
         }
     }
 
@@ -2118,7 +2189,8 @@ impl Axes {
 
     /// 用显式的 (label, color, linestyle, marker, linewidth) 条目替换图例内容并显示。
     /// 供 Python 端 `ax.legend(handles, labels)` 使用：从 handles 取样式、labels 取文本。
-    #[pyo3(signature = (entries, loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None))]
+    #[pyo3(signature = (entries, loc="best", facecolor=None, framealpha=None, edgecolor=None, fontsize=None, frameon=None, shadow=None, title=None, title_fontsize=None, labelcolor=None, borderpad=None, labelspacing=None, handlelength=None, handletextpad=None, columnspacing=None))]
+    #[allow(clippy::too_many_arguments)]
     pub fn set_legend_entries(
         &mut self,
         entries: Vec<(String, String, String, Option<String>, f64, f64)>,
@@ -2127,6 +2199,16 @@ impl Axes {
         framealpha: Option<f64>,
         edgecolor: Option<String>,
         fontsize: Option<f64>,
+        frameon: Option<bool>,
+        shadow: Option<bool>,
+        title: Option<String>,
+        title_fontsize: Option<f64>,
+        labelcolor: Option<String>,
+        borderpad: Option<f64>,
+        labelspacing: Option<f64>,
+        handlelength: Option<f64>,
+        handletextpad: Option<f64>,
+        columnspacing: Option<f64>,
     ) {
         self.legend_labels = entries
             .into_iter()
@@ -2147,6 +2229,36 @@ impl Axes {
         }
         if fontsize.is_some() {
             self.legend_fontsize = fontsize;
+        }
+        if frameon.is_some() {
+            self.legend_frameon = frameon;
+        }
+        if shadow.is_some() {
+            self.legend_shadow = shadow;
+        }
+        if title.is_some() {
+            self.legend_title = title;
+        }
+        if title_fontsize.is_some() {
+            self.legend_title_fontsize = title_fontsize;
+        }
+        if labelcolor.is_some() {
+            self.legend_labelcolor = labelcolor;
+        }
+        if borderpad.is_some() {
+            self.legend_borderpad = borderpad;
+        }
+        if labelspacing.is_some() {
+            self.legend_labelspacing = labelspacing;
+        }
+        if handlelength.is_some() {
+            self.legend_handlelength = handlelength;
+        }
+        if handletextpad.is_some() {
+            self.legend_handletextpad = handletextpad;
+        }
+        if columnspacing.is_some() {
+            self.legend_columnspacing = columnspacing;
         }
     }
 
@@ -3146,6 +3258,17 @@ impl Axes {
         self.legend_framealpha = None;
         self.legend_edgecolor = None;
         self.legend_fontsize = None;
+        self.legend_ncol = None;
+        self.legend_frameon = None;
+        self.legend_shadow = None;
+        self.legend_title = None;
+        self.legend_title_fontsize = None;
+        self.legend_labelcolor = None;
+        self.legend_borderpad = None;
+        self.legend_labelspacing = None;
+        self.legend_handlelength = None;
+        self.legend_handletextpad = None;
+        self.legend_columnspacing = None;
         self.element_count = 0;
     }
 
@@ -3775,6 +3898,16 @@ impl Axes {
                 legend_edgecolor,
                 self.legend_fontsize,
                 self.legend_ncol,
+                self.legend_frameon,
+                self.legend_shadow,
+                self.legend_title.as_deref(),
+                self.legend_title_fontsize,
+                self.legend_labelcolor.as_deref(),
+                self.legend_borderpad,
+                self.legend_labelspacing,
+                self.legend_handlelength,
+                self.legend_handletextpad,
+                self.legend_columnspacing,
             )?;
         }
 
@@ -4490,6 +4623,16 @@ impl Axes {
                 legend_edgecolor,
                 self.legend_fontsize,
                 self.legend_ncol,
+                self.legend_frameon,
+                self.legend_shadow,
+                self.legend_title.as_deref(),
+                self.legend_title_fontsize,
+                self.legend_labelcolor.as_deref(),
+                self.legend_borderpad,
+                self.legend_labelspacing,
+                self.legend_handlelength,
+                self.legend_handletextpad,
+                self.legend_columnspacing,
             )?;
         }
 

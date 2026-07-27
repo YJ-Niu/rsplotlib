@@ -59,28 +59,28 @@ TL100.plot_s_deg(0, 1)
 TL200.plot_s_deg(0, 1)
 ssaver('./test/test_rf/test_data/test2.png')
 
-# # deembedding using IEEEP370 impedance corrected 2xthru method
-# dm = IEEEP370_SE_NZC_2xThru(dummy_2xthru=TL100, name='2xthru')
-# fix1 = dm.s_side1
-# fix1.name = 'FIX-1'
-# fix2 = dm.s_side2
-# fix2.name = 'FIX-2'
-# d_dut = dm.deembed(TL200)
-# d_dut.name = 'd_DUT'
+# deembedding using IEEEP370 impedance corrected 2xthru method
+dm = IEEEP370_SE_NZC_2xThru(dummy_2xthru=TL100, name='2xthru')
+fix1 = dm.s_side1
+fix1.name = 'FIX-1'
+fix2 = dm.s_side2
+fix2.name = 'FIX-2'
+d_dut = dm.deembed(TL200)
+d_dut.name = 'd_DUT'
 
-# # plot them all
-# plt.figure(figsize=(10, 10))
-# plt.suptitle('Connectors models')
-# plt.subplot(2, 2, 1)
-# fix1.plot_s_db(0, 0)
-# fix2.plot_s_db(0, 0)
-# plt.subplot(2, 2, 2)
-# fix1.plot_s_deg(0, 0)
-# fix2.plot_s_deg(0, 0)
-# plt.subplot(2, 2, 3)
-# fix1.plot_s_db(1, 0)
-# fix2.plot_s_db(1, 0)
-# plt.subplot(2, 2, 4)
-# fix1.plot_s_deg(1, 0)
-# fix2.plot_s_deg(1, 0)
-# ssaver('./test/test_rf/test_data/test3.png')
+# plot them all
+plt.figure(figsize=(10, 10))
+plt.suptitle('Connectors models')
+plt.subplot(2, 2, 1)
+fix1.plot_s_db(0, 0)
+fix2.plot_s_db(0, 0)
+plt.subplot(2, 2, 2)
+fix1.plot_s_deg(0, 0)
+fix2.plot_s_deg(0, 0)
+plt.subplot(2, 2, 3)
+fix1.plot_s_db(1, 0)
+fix2.plot_s_db(1, 0)
+plt.subplot(2, 2, 4)
+fix1.plot_s_deg(1, 0)
+fix2.plot_s_deg(1, 0)
+ssaver('./test/test_rf/test_data/test3.png')

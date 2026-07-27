@@ -9,7 +9,7 @@ use plotters::style::text_anchor::{HPos, VPos};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
-use crate::core::colors::{RgbColor, to_plotters_color};
+use crate::core::colors::{RgbColor, parse_color, to_plotters_color};
 use crate::core::elements::PlotElement;
 use crate::core::marker::draw_marker;
 use crate::figure::axes::{DEFAULT_FONT_SCALE, scale_font};
@@ -476,7 +476,18 @@ fn rounded_rect_points(x1: f64, y1: f64, x2: f64, y2: f64, rx: f64, ry: f64) -> 
 /// - `edgecolor`: 图例框边框色，`None` 时用默认浅灰
 /// - `fontsize`: 图例文字基础字号（point），`None` 时用默认 11.0
 /// - `ncol`: 图例列数，`None` 时根据位置和空间自动判定
+/// - `frameon`: 是否绘制图例框，`None` 时默认绘制
+/// - `shadow`: 是否绘制图例阴影，`None` 时默认不绘制
+/// - `title`: 图例标题文本
+/// - `title_fontsize`: 图例标题字号
+/// - `labelcolor`: 图例标签颜色
+/// - `borderpad`: 图例框内边距
+/// - `labelspacing`: 标签间距
+/// - `handlelength`: 图例句柄长度
+/// - `handletextpad`: 句柄与文本间距
+/// - `columnspacing`: 列间距
 #[allow(clippy::too_many_arguments)]
+#[allow(unused_variables)]
 pub fn draw_legend<DB: DrawingBackend>(
     chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     legend_loc: Option<&String>,
@@ -494,6 +505,16 @@ pub fn draw_legend<DB: DrawingBackend>(
     edgecolor: Option<RgbColor>,
     fontsize: Option<f64>,
     ncol: Option<usize>,
+    frameon: Option<bool>,
+    shadow: Option<bool>,
+    title: Option<&str>,
+    title_fontsize: Option<f64>,
+    labelcolor: Option<&str>,
+    borderpad: Option<f64>,
+    labelspacing: Option<f64>,
+    handlelength: Option<f64>,
+    handletextpad: Option<f64>,
+    columnspacing: Option<f64>,
 ) -> PyResult<()>
 where
     DB::ErrorType: 'static,
@@ -526,22 +547,32 @@ where
         let base_fs = fontsize.unwrap_or(11.0);
         let label_fs = scale_font(base_fs * DEFAULT_FONT_SCALE, font_scale);
 
-        let pad_h_px = 5.0 * font_scale;
-        let handle_px = label_fs * 1.4;
-        let gap_px = 3.0 * font_scale;
-        let col_gap_px = 7.0 * font_scale;
+        // 间距/尺寸参数：matplotlib 以 fontsize 为单位，乘以 label_fs 得到像素值。
+        // borderpad: 图例框内边距（默认 0.4 字号单位）
+        // labelspacing: 标签行间距（默认 0.5 字号单位）
+        // handlelength: 句柄长度（默认 2.0 字号单位）
+        // handletextpad: 句柄与文本间距（默认 0.8 字号单位）
+        // columnspacing: 列间距（默认 2.0 字号单位）
+        // 注意：matplotlib 默认值更紧凑，这里使用略小的默认值以匹配其视觉效果
+        let borderpad_px = borderpad.unwrap_or(0.4) * label_fs;
+        let labelspacing_px = labelspacing.unwrap_or(0.4) * label_fs; // 减小：0.5 -> 0.4
+        let handle_px = handlelength.unwrap_or(2.0) * label_fs;
+        let gap_px = handletextpad.unwrap_or(0.8) * label_fs;
+        let col_gap_px = columnspacing.unwrap_or(2.0) * label_fs;
+
         let max_text_px = legend_labels
             .iter()
             .map(|(label, ..)| mathtext::measure_plain(label.as_str(), None, label_fs).0)
             .fold(0.0_f64, f64::max);
-        // 每列内容宽度（含左侧 padding，不含右 padding）。
-        // 总图例宽度 = N * entry_width_px + (N-1) * col_gap_px + pad_h_px（最右列右 padding）
-        // 这样列与列之间间距 = col_gap_px（而非 col_gap_px + 2*pad_h_px），避免多列时图例右侧出现大片空白。
-        let entry_width_px = pad_h_px + handle_px + gap_px + max_text_px;
 
-        let row_px = label_fs * 1.35;
-        let pad_v_px = label_fs * 0.35;
-        let entry_height = row_px * y_per_px;
+        // 每列内容宽度（不含左右 borderpad）= handlelength + handletextpad + 最大文本宽度
+        let entry_width_px = handle_px + gap_px + max_text_px;
+
+        // 行高：以字体高度为基准
+        // matplotlib 的行高约为 fontsize（不包含额外的 leading）
+        // labelspacing 是行与行之间的额外间距（默认 0.4 fontsize）
+        let row_px = label_fs; // 使用 fontsize 而非 1.2 * fontsize
+        let entry_height = (row_px + labelspacing_px) * y_per_px;
 
         let ncol = if let Some(n) = ncol {
             n.max(1).min(entry_count)
@@ -572,11 +603,14 @@ where
 
                 for try_ncol in 1..=max_possible_ncol.min(entry_count) {
                     let rows_per_col_try = entry_count.div_ceil(try_ncol);
-                    let legend_height_try_px = row_px * rows_per_col_try as f64 + 2.0 * pad_v_px;
+                    let content_height_try_px =
+                        (row_px + labelspacing_px) * rows_per_col_try as f64;
+                    let legend_height_try_px = content_height_try_px + 2.0 * borderpad_px;
                     let legend_height_try = legend_height_try_px * y_per_px;
-                    let legend_width_try_px = entry_width_px * try_ncol as f64
+                    let legend_width_try_px = borderpad_px
+                        + entry_width_px * try_ncol as f64
                         + col_gap_px * (try_ncol - 1) as f64
-                        + pad_h_px;
+                        + borderpad_px;
                     let legend_width_try = legend_width_try_px * x_per_px;
 
                     let mut current_density: f64 = 1.0;
@@ -639,7 +673,8 @@ where
         };
 
         let rows_per_col = entry_count.div_ceil(ncol);
-        let legend_height_px = row_px * rows_per_col as f64 + 2.0 * pad_v_px;
+        let content_height_px = (row_px + labelspacing_px) * rows_per_col as f64;
+        let legend_height_px = content_height_px + 2.0 * borderpad_px;
 
         let legend_height = legend_height_px * y_per_px;
 
@@ -652,8 +687,8 @@ where
         let mut needs_ellipsis = false;
 
         if legend_height > max_legend_height {
-            let max_entries =
-                ((max_legend_height - 2.0 * pad_v_px * y_per_px) / entry_height).floor() as usize;
+            let max_entries = ((max_legend_height - 2.0 * borderpad_px * y_per_px) / entry_height)
+                .floor() as usize;
             if max_entries < entry_count {
                 display_entries = &legend_labels[..max_entries.max(1)];
                 needs_ellipsis = true;
@@ -664,17 +699,37 @@ where
         let display_rows = display_count.div_ceil(ncol);
         // 行主序布局：实际使用的列数就是 ncol（每行都用 ncol 列，最后一行可能不满）
         let actual_ncol = ncol;
-        // 总图例宽度 = N 列内容（每列含左 pad_h） + (N-1) 列间距 + 最右列右 pad_h
-        let legend_width_px =
-            entry_width_px * actual_ncol as f64 + col_gap_px * (actual_ncol - 1) as f64 + pad_h_px;
+        // 总图例宽度 = 左 borderpad + N 列内容 + (N-1) 列间距 + 右 borderpad
+        let legend_width_px = borderpad_px
+            + entry_width_px * actual_ncol as f64
+            + col_gap_px * (actual_ncol - 1) as f64
+            + borderpad_px;
         let legend_width = legend_width_px * x_per_px;
         let rows_with_ellipsis = if needs_ellipsis {
             display_rows + 1
         } else {
             display_rows
         };
-        let display_legend_height_px = row_px * rows_with_ellipsis as f64 + 2.0 * pad_v_px;
+        // 内容高度 = 行数 * 行高（含 labelspacing）
+        let content_height_px = (row_px + labelspacing_px) * rows_with_ellipsis as f64;
+        let display_legend_height_px = content_height_px + 2.0 * borderpad_px;
         let display_legend_height = display_legend_height_px * y_per_px;
+
+        // 图例标题高度预计算（用于框位置计算）
+        let title_text = title;
+        let title_fs = if let Some(tfs) = title_fontsize {
+            scale_font(tfs * DEFAULT_FONT_SCALE, font_scale)
+        } else {
+            label_fs * 1.1
+        };
+        // 标题高度 = fontsize + 底部间距
+        let title_height_px = if title_text.is_some() {
+            title_fs + label_fs * 0.3 // 标题到底部内容的间距
+        } else {
+            0.0
+        };
+        let total_legend_height_px = display_legend_height_px + title_height_px;
+        let total_legend_height = total_legend_height_px * y_per_px;
 
         // 收集数据点，用于空白区域检测
         let mut data_pts = collect_data_points(elements);
@@ -707,7 +762,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Right,
                 VPos::Top,
             ),
@@ -718,7 +773,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Left,
                 VPos::Top,
             ),
@@ -729,7 +784,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Right,
                 VPos::Bottom,
             ),
@@ -740,7 +795,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Left,
                 VPos::Bottom,
             ),
@@ -751,7 +806,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Center,
                 VPos::Center,
             ),
@@ -762,7 +817,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Right,
                 VPos::Center,
             ),
@@ -773,7 +828,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Left,
                 VPos::Center,
             ),
@@ -784,7 +839,7 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Center,
                 VPos::Bottom,
             ),
@@ -795,14 +850,15 @@ where
                 y_min,
                 y_max,
                 legend_width,
-                display_legend_height,
+                total_legend_height,
                 HPos::Center,
                 VPos::Top,
             ),
             _ => {
                 let vertical_width = entry_width_px * x_per_px;
                 let vertical_rows = display_count;
-                let vertical_height_px = row_px * vertical_rows as f64 + 2.0 * pad_v_px;
+                let vertical_height_px =
+                    (row_px + labelspacing_px) * vertical_rows as f64 + 2.0 * borderpad_px;
                 let vertical_height = vertical_height_px * y_per_px;
                 best_box(
                     &data_pts,
@@ -811,7 +867,7 @@ where
                     y_min,
                     y_max,
                     legend_width,
-                    display_legend_height,
+                    total_legend_height,
                     Some(vertical_width),
                     Some(vertical_height),
                 )
@@ -822,7 +878,7 @@ where
         // 调用方（如 stylely 捕获的样式）可覆盖为任意颜色与不透明度。
         // 当背景色接近白色且未指定边框色时，自动使用稍深的灰色以确保可见性。
         let fc = facecolor.unwrap_or(RgbColor(255, 255, 255));
-        let alpha = framealpha.unwrap_or(0.85).clamp(0.0, 1.0);
+        let alpha = framealpha.unwrap_or(0.8).clamp(0.0, 1.0);
         let ec = if let Some(c) = edgecolor {
             c
         } else {
@@ -834,8 +890,17 @@ where
                 RgbColor(180, 180, 180)
             }
         };
-        let _bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
+        let bg_fill: ShapeStyle = to_plotters_color(fc).mix(alpha).filled();
         let bg_border: ShapeStyle = to_plotters_color(ec).stroke_width(1);
+        // frameon：是否绘制图例框（背景 + 边框）。默认绘制。
+        let draw_frame = frameon.unwrap_or(true);
+
+        // 阴影偏移（像素），换算到数据坐标
+        let draw_shadow = shadow.unwrap_or(false);
+        // matplotlib 默认阴影偏移较小，约 2px
+        let shadow_offset_px = 2.0 * font_scale;
+        let shadow_dx = shadow_offset_px * x_per_px;
+        let shadow_dy = -shadow_offset_px * y_per_px;
 
         // 圆角半径：以像素为基准，再按数据/像素比例换算到数据坐标，
         // 使 x、y 两个方向的圆角在视觉上一致（圆弧而非椭圆弧）。
@@ -852,18 +917,80 @@ where
         };
         let corner_pts = rounded_rect_points(box_x1, box_y1, box_x2, box_y2, rx, ry);
 
-        // 半透明白色圆角填充
-        chart
-            .draw_series(std::iter::once(Polygon::new(corner_pts.clone(), _bg_fill)))
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend bg: {}", e)))?;
-        // 圆角边框（闭合路径）
-        let mut border_pts = corner_pts;
-        if let Some(&first) = border_pts.first() {
-            border_pts.push(first);
+        // 阴影：在图例框右下方偏移处绘制一个灰黑色半透明圆角矩形
+        if draw_shadow && draw_frame {
+            let shadow_pts = rounded_rect_points(
+                box_x1 + shadow_dx,
+                box_y1 + shadow_dy,
+                box_x2 + shadow_dx,
+                box_y2 + shadow_dy,
+                rx,
+                ry,
+            );
+            // matplotlib 阴影较淡，使用浅灰色和较低不透明度
+            let shadow_fill: ShapeStyle = RGBColor(150, 150, 150).mix(0.2).filled();
+            chart
+                .draw_series(std::iter::once(Polygon::new(shadow_pts, shadow_fill)))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw legend shadow: {}", e))
+                })?;
         }
-        chart
-            .draw_series(std::iter::once(PathElement::new(border_pts, bg_border)))
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend border: {}", e)))?;
+
+        // 图例框背景 + 边框（frameon=True 时绘制）
+        if draw_frame {
+            // 半透明白色圆角填充
+            chart
+                .draw_series(std::iter::once(Polygon::new(corner_pts.clone(), bg_fill)))
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to draw legend bg: {}", e)))?;
+            // 圆角边框（闭合路径）
+            let mut border_pts = corner_pts;
+            if let Some(&first) = border_pts.first() {
+                border_pts.push(first);
+            }
+            chart
+                .draw_series(std::iter::once(PathElement::new(border_pts, bg_border)))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to draw legend border: {}", e))
+                })?;
+        }
+
+        // 图例标题：在图例框内部顶部居中绘制
+        if let Some(title_str) = title_text {
+            let title_x = (box_x1 + box_x2) / 2.0;
+            // 标题 y 位置：框顶部向下 borderpad + 标题基线位置
+            let title_y = box_y2 - borderpad_px * y_per_px - title_fs * 0.8 * y_per_px;
+            let text_nudge = if mathtext::contains_ir(title_str) {
+                -0.45 * title_fs
+            } else {
+                -0.2 * title_fs
+            };
+            mathtext::draw_math_chart(
+                chart,
+                title_x,
+                title_y,
+                title_str,
+                title_fs,
+                BLACK,
+                None,
+                HAlign::Center,
+                VAlign::Top,
+                0.0,
+                0.0,
+                text_nudge,
+                None,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+            )?;
+        }
+
+        // 标签颜色：用户可统一指定图例标签颜色（如 'white'），
+        // None 时默认黑色。
+        let lbl_color_rgb = labelcolor
+            .and_then(|c| parse_color(c, 0).ok())
+            .map(to_plotters_color)
+            .unwrap_or(BLACK);
 
         // 图例线段的虚线/点线间隔需以像素为基准，再换算到数据坐标，
         // 否则固定的数据单位间隔在不同数据范围下会失效（例如整段被一个"虚线"填满而显示为实线）。
@@ -874,12 +1001,15 @@ where
             let row = i / ncol;
 
             let col_offset_px = col as f64 * (entry_width_px + col_gap_px);
-            let x_col_start = box_x1 + col_offset_px * x_per_px;
+            let x_col_start = box_x1 + borderpad_px * x_per_px + col_offset_px * x_per_px;
 
-            let y_pos =
-                box_y2 - pad_v_px * y_per_px - entry_height * 0.5 - row as f64 * entry_height;
+            // 有标题时，内容行需要向下偏移标题占据的高度
+            // y 位置：从框顶部（box_y2）向下：borderpad + 标题高度 + 第N行的偏移
+            let base_y = box_y2 - borderpad_px * y_per_px - title_height_px * y_per_px;
+            // 每行向下偏移 entry_height（含 labelspacing）
+            let y_pos = base_y - row as f64 * entry_height - entry_height * 0.5;
 
-            let x_line_start = x_col_start + pad_h_px * x_per_px;
+            let x_line_start = x_col_start;
             let x_line_end = x_line_start + handle_px * x_per_px;
             let x_text = x_line_end + gap_px * x_per_px;
 
@@ -1025,12 +1155,10 @@ where
 
         if needs_ellipsis {
             let ellipsis_row = display_rows;
-            let ellipsis_y_pos = box_y2
-                - pad_v_px * y_per_px
-                - entry_height * 0.5
-                - ellipsis_row as f64 * entry_height;
+            let base_y = box_y2 - borderpad_px * y_per_px - title_height_px * y_per_px;
+            let ellipsis_y_pos = base_y - ellipsis_row as f64 * entry_height - entry_height * 0.5;
             let ellipsis_x =
-                box_x1 + pad_h_px * x_per_px + handle_px * x_per_px + gap_px * x_per_px;
+                box_x1 + borderpad_px * x_per_px + handle_px * x_per_px + gap_px * x_per_px;
             let ellipsis_text = "...";
             mathtext::draw_math_chart(
                 chart,
@@ -1038,7 +1166,7 @@ where
                 ellipsis_y_pos,
                 ellipsis_text,
                 label_fs,
-                BLACK,
+                lbl_color_rgb,
                 None,
                 HAlign::Left,
                 VAlign::Top,

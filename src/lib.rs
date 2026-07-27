@@ -289,10 +289,18 @@ fn rsplotlib(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             }
         }
         if !registered {
-            // 退回 Arial
-            let p = "C:/Windows/Fonts/arial.ttf".to_string();
-            if let Ok(font_data) = std::fs::read(&p) {
+            // 退回 matplotlib 自带 DejaVu Sans（可能来自虚拟环境）
+            if let Some(path) =
+                mpl_font_fallback("Lib/site-packages/rsplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf")
+                && let Ok(font_data) = std::fs::read(&path)
+            {
                 install_default_sans(font_data);
+            } else {
+                // 最后退回 Arial
+                let p = "C:/Windows/Fonts/arial.ttf".to_string();
+                if let Ok(font_data) = std::fs::read(&p) {
+                    install_default_sans(font_data);
+                }
             }
         }
         // 数学字母回退：Cambria Math（Windows 自带）覆盖 SMP 数学字母块。

@@ -88,6 +88,12 @@ SI_CONVERSION = {key: 10**((8-i)*3) for i, key in enumerate(SI_PREFIXES_ASCII)}
 # rsplotlib ignores legend.* rcParams and returns no legend handle to restyle
 _STYLE_LEGEND_KW: dict = {}
 
+# Style parameters captured by stylely() and applied to newly created axes
+# This allows stylely() to affect subplots created after the style is set
+_STYLE_AXIS_KW: dict = {}
+_STYLE_GRID_KW: dict = {}
+_STYLE_FIGURE_KW: dict = {}
+
 
 def _legend(target, *args, **kwargs):
     """Call ``target.legend`` applying stylely's recorded frame style as defaults.
@@ -509,6 +515,16 @@ def plot_rectangular(x: NumberLike, y: NumberLike,
     """
     if ax is None:
         ax = plt.gca()
+
+    # Apply style parameters captured by stylely() to the axes
+    if 'facecolor' in _STYLE_AXIS_KW:
+        ax.set_facecolor(_STYLE_AXIS_KW['facecolor'])
+    if 'tick_params' in _STYLE_AXIS_KW:
+        ax.tick_params(**_STYLE_AXIS_KW['tick_params'])
+    if _STYLE_GRID_KW.get('on', False):
+        grid_c = _STYLE_GRID_KW.get('c')
+        grid_ls = _STYLE_GRID_KW.get('ls')
+        ax.grid(True, c=grid_c, ls=grid_ls)
 
     my_plot = ax.plot(x, y, *args, **kwargs)
 
@@ -1440,6 +1456,25 @@ def _apply_style(plt, style: dict, font_scale: float = 1.0,
     if grid_on:
         grid_c = _mplstyle_color(style.get('grid.color'))
         grid_ls = style.get('grid.linestyle')
+
+    # Save style parameters to global variables for later-applied axes
+    _STYLE_AXIS_KW.clear()
+    if ax_fc:
+        _STYLE_AXIS_KW['facecolor'] = ax_fc
+    if tick_kw:
+        _STYLE_AXIS_KW['tick_params'] = tick_kw
+    
+    _STYLE_GRID_KW.clear()
+    if grid_on:
+        _STYLE_GRID_KW['on'] = True
+        if grid_c:
+            _STYLE_GRID_KW['c'] = grid_c
+        if grid_ls:
+            _STYLE_GRID_KW['ls'] = grid_ls
+    
+    _STYLE_FIGURE_KW.clear()
+    if fig_fc:
+        _STYLE_FIGURE_KW['facecolor'] = fig_fc
 
     # Apply style to all axes in the figure
     for ax in fig.axes():

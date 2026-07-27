@@ -25,6 +25,7 @@ rsplotlib 是一个使用 **Rust + PyO3** 开发的高性能 Python 绘图库，
 
 - **可以修改**: `rsplotlib` 项目内的代码 (`src/`, `python/rsplotlib/`, `pyproject.toml`, `Cargo.toml`、"test/test_rf/networkx"、"test/test_rf/scipy"、"test/test_rf/skrf"等)
 - **禁止修改**: 用户测试代码、`.venv` 环境中的任何代码
+- 禁止在项目里添加matplotlib相关的代码
 - 修改后使用 `build_wheel.sh` 构建并安装到 `.venv` 进行测试
 
 ### 3. 修复优先级
