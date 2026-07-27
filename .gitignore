@@ -28,8 +28,8 @@ Thumbs.db
 
 # Data / plots
 *.png
-.trae/
 debug.md
+user_rules.md
 debug_*.py
 out/
 test_plot/
