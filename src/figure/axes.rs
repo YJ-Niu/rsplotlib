@@ -4151,7 +4151,15 @@ impl Axes {
                     && (self.spine_left || self.spine_right)
                     && (self.tick_left || self.tick_right)
                     && !y_ticks_empty;
-                let y_key_points: Vec<f64> = if do_manual_y_ticks {
+                // Y 轴标签手动绘制条件：
+                // 1. 所有 spine 隐藏时（plotters disable_y_axis 移除内置 y 标签）
+                // 2. 设置了 yaxis_major_formatter 时（需用 formatter 替代默认 format_linear_tick）
+                let do_manual_y_labels = !self.is_twin_x
+                    && !self.is_twin_y
+                    && y_labels_visible
+                    && !y_ticks_empty
+                    && (!y_axis_on || self.yaxis_major_formatter.is_some());
+                let y_key_points: Vec<f64> = if do_manual_y_ticks || do_manual_y_labels {
                     let n_y = ticks_info.yticks.len().max(2);
                     chart
                         .plotting_area()
@@ -4263,7 +4271,8 @@ impl Axes {
                     mesh_builder.x_label_formatter(&|_: &f64| String::new());
                 }
                 // labelleft=False：隐藏左侧 y 标签（y 标签由 plotters 直接绘制，置空即可）。
-                if !y_labels_visible {
+                // do_manual_y_labels 时也置空，改由手动绘制标签（支持 yaxis_major_formatter）。
+                if !y_labels_visible || do_manual_y_labels {
                     mesh_builder.y_label_formatter(&|_: &f64| String::new());
                 }
 
@@ -4400,11 +4409,6 @@ impl Axes {
                 // 手动补画。锚点 (x_min, t) 映射到绘图区左边，右对齐 + 垂直居中，向左偏移
                 // label_dist=2*tick_px，使标签落在预留的左边距内。
                 // 支持 rotation（旋转角度）和 labelpad（标签与轴的距离）。
-                let do_manual_y_labels = !self.is_twin_x
-                    && !self.is_twin_y
-                    && !y_axis_on
-                    && y_labels_visible
-                    && !y_ticks_empty;
                 if do_manual_y_labels {
                     let (y_lo, y_hi) = (y_min.min(y_max), y_min.max(y_max));
                     let base_offset_x = tick_px * 2;
@@ -4418,17 +4422,40 @@ impl Axes {
                         .into_font()
                         .color(&y_label_rgb)
                         .pos(Pos::new(HPos::Right, VPos::Center));
-                    for &t in &ticks_info.yticks {
+                    // 若设置了主刻度 formatter，一次性对落在数据区内的刻度点调用 format_ticks
+                    // 生成标签（与 X 轴 do_manual_x 路径一致），否则回退到默认格式化。
+                    let vis_points: Vec<f64> = y_key_points
+                        .iter()
+                        .cloned()
+                        .filter(|t| *t >= y_lo && *t <= y_hi)
+                        .collect();
+                    let fmt_labels: Option<Vec<String>> =
+                        self.yaxis_major_formatter.as_ref().and_then(|fmt| {
+                            let pts = PyList::new(py, vis_points.iter().copied()).ok()?;
+                            fmt.bind(py)
+                                .call_method1("format_ticks", (pts,))
+                                .ok()?
+                                .extract::<Vec<String>>()
+                                .ok()
+                        });
+                    let mut vis_i = 0usize;
+                    for &t in &y_key_points {
                         if t < y_lo || t > y_hi {
                             continue;
                         }
-                        let text = if has_ycat {
+                        let text = if let Some(labels) = &fmt_labels {
+                            labels
+                                .get(vis_i)
+                                .cloned()
+                                .unwrap_or_else(|| crate::figure::axes_mesh::format_linear_tick(t))
+                        } else if has_ycat {
                             y_cat_fmt(&t)
                         } else if ylog {
                             format!("{:.1e}", 10.0f64.powf(t))
                         } else {
                             crate::figure::axes_mesh::format_linear_tick(t)
                         };
+                        vis_i += 1;
                         crate::utils::glyph_cache::set_current_rotation(rotation);
                         chart
                             .draw_series(std::iter::once(

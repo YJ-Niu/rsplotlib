@@ -361,9 +361,13 @@ pub fn compute_grid_style(
     }
 }
 
-/// 格式化线性刻度标签：整数显示为不带 ".0"，小数保留最多两位有效数字
+/// 格式化线性刻度标签：整数显示为不带 ".0"，小数保留最多两位有效数字。
+/// 大数字 (>= 1e5) 和极小数字 (< 1e-3) 使用科学计数法，避免标签过长挤压网格线。
 pub fn format_linear_tick(val: f64) -> String {
-    if (val - val.round()).abs() < 1e-9 {
+    let abs_val = val.abs();
+    if abs_val >= 1e5 || (abs_val < 1e-3 && abs_val > 0.0) {
+        format!("{:.1e}", val)
+    } else if (val - val.round()).abs() < 1e-9 {
         format!("{}", val.round() as i64)
     } else {
         let s = format!("{:.2}", val);

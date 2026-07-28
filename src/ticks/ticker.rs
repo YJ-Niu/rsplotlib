@@ -349,8 +349,8 @@ impl ScalarFormatter {
 
     fn __call__(&self, value: f64) -> String {
         let abs_val = value.abs();
-        if abs_val >= 1e4 || (abs_val < 1e-3 && abs_val > 0.0) {
-            format!("{:.2e}", value)
+        if abs_val >= 1e5 || (abs_val < 1e-3 && abs_val > 0.0) {
+            format!("{:.1e}", value)
         } else {
             format_g_value(value)
         }
